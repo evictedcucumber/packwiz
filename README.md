@@ -14,6 +14,7 @@ packwiz is not so great for...
 Join my Discord server if you need help [here](https://discord.gg/Csh8zbbhCt)!
 
 ## Features
+
 - Git-friendly TOML-based metadata format
 - MultiMC pack installer/updater, with support for optional mods and fast automatic updates - perfect for servers!
 - Pack distribution with HTTP servers, with a built in local server for testing
@@ -33,7 +34,8 @@ To run the executable, first extract it, then add the folder where you extracted
 In future I will have a lot more installation options, but you can also compile from source:
 
 1. Install Go (1.24 or newer) from https://golang.org/dl/
-2. Run `go install github.com/packwiz/packwiz@latest`. Be patient, it has to download and compile dependencies as well!
+2. Run `go install github.com/evictedcucumber/packwiz@latest`. Be patient, it has to download and compile dependencies as well!
 
 ## Documentation
+
 See https://packwiz.infra.link/ for the full packwiz documentation!

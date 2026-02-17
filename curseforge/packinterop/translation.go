@@ -8,7 +8,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/packwiz/packwiz/core"
+	"github.com/evictedcucumber/packwiz/core"
 )
 
 func ReadMetadata(s ImportPackSource) ImportPackMetadata {

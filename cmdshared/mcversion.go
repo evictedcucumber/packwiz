@@ -3,7 +3,7 @@ package cmdshared
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/packwiz/packwiz/core"
+	"github.com/evictedcucumber/packwiz/core"
 	"os"
 	"sort"
 	"time"

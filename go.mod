@@ -1,4 +1,4 @@
-module github.com/packwiz/packwiz
+module github.com/evictedcucumber/packwiz
 
 require (
 	github.com/BurntSushi/toml v1.5.0
