@@ -4,8 +4,9 @@ import "strings"
 
 type cursePackMeta struct {
 	Minecraft struct {
-		Version    string         `json:"version"`
-		ModLoaders []modLoaderDef `json:"modLoaders"`
+		Version        string         `json:"version"`
+		ModLoaders     []modLoaderDef `json:"modLoaders"`
+		RecommendedRAM uint32         `json:"recommendedRam,omitempty"`
 	} `json:"minecraft"`
 	ManifestType    string `json:"manifestType"`
 	ManifestVersion uint32 `json:"manifestVersion"`

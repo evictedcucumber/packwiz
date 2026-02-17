@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 
 	"github.com/packwiz/packwiz/core"
 )
@@ -106,13 +107,20 @@ func WriteManifestFromPack(pack core.Pack, fileRefs []AddonFileReference, projec
 		})
 	}
 
+	recommendedRAM, rErr := strconv.ParseUint(pack.RecommendedRAM, 10, 64)
+	if rErr != nil {
+		recommendedRAM = 0
+	}
+
 	manifest := cursePackMeta{
 		Minecraft: struct {
-			Version    string         `json:"version"`
-			ModLoaders []modLoaderDef `json:"modLoaders"`
+			Version        string         `json:"version"`
+			ModLoaders     []modLoaderDef `json:"modLoaders"`
+			RecommendedRAM uint32         `json:"recommendedRam,omitempty"`
 		}{
-			Version:    pack.Versions["minecraft"],
-			ModLoaders: modLoaders,
+			Version:        pack.Versions["minecraft"],
+			ModLoaders:     modLoaders,
+			RecommendedRAM: uint32(recommendedRAM),
 		},
 		ManifestType:    "minecraftModpack",
 		ManifestVersion: 1,

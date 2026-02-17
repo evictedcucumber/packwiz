@@ -24,3 +24,7 @@ result
 dist/
 /.direnv
 /.go/pkg/mod
+/.packwizignore
+/Create Adventured-1.0.0.zip
+/index.toml
+/pack.toml
