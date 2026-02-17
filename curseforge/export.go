@@ -32,8 +32,6 @@ var exportCmd = &cobra.Command{
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		fmt.Println(pack)
-
 		index, err := pack.LoadIndex()
 		if err != nil {
 			fmt.Println(err)
