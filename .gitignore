@@ -22,3 +22,5 @@
 result
 
 dist/
+/.direnv
+/.go/pkg/mod
