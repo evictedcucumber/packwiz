@@ -5,6 +5,7 @@ import (
 	"github.com/evictedcucumber/packwiz/cmd"
 	_ "github.com/evictedcucumber/packwiz/curseforge"
 	_ "github.com/evictedcucumber/packwiz/migrate"
+	_ "github.com/evictedcucumber/packwiz/modrinth"
 	_ "github.com/evictedcucumber/packwiz/settings"
 	_ "github.com/evictedcucumber/packwiz/utils"
 )
