@@ -1,8 +1,8 @@
 package modrinth
 
 type Pack struct {
-	FormatVersion uint32            `json:"formatVersion"`
 	Game          string            `json:"game"`
+	FormatVersion uint32            `json:"formatVersion"`
 	VersionID     string            `json:"versionId"`
 	Name          string            `json:"name"`
 	Summary       string            `json:"summary,omitempty"`

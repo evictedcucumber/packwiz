@@ -21,14 +21,17 @@ func GetRawForgeVersion(version string) string {
 	return wantedVersion
 }
 
-func ResolveExportOutput(loader string, fileName string) string {
+func ResolveExportOutput(_ string, fileName string) string {
 	if fileName == "" {
 		return fileName
 	}
 	if filepath.IsAbs(fileName) || strings.ContainsAny(fileName, "/\\") {
 		return fileName
 	}
-	baseFolder := core.GetMetaFolderBaseForLoader(loader)
+	baseFolder := viper.GetString("meta-folder-base")
+	if baseFolder == "" {
+		baseFolder = "."
+	}
 	return filepath.Join(baseFolder, fileName)
 }
 
@@ -93,6 +96,116 @@ func FilterModsByIgnorePrefixes(mods []*core.Mod, index *core.Index, ignorePrefi
 		}
 	}
 	return filtered
+}
+
+func FilterModsByAllowedPrefixes(mods []*core.Mod, index *core.Index, allowedPrefixes []string) []*core.Mod {
+	if len(allowedPrefixes) == 0 {
+		return mods
+	}
+
+	filtered := mods[:0]
+	for _, mod := range mods {
+		modPath, err := index.RelIndexPath(mod.GetFilePath())
+		if err != nil {
+			filtered = append(filtered, mod)
+			continue
+		}
+		if PathHasAnyPrefix(modPath, allowedPrefixes) {
+			filtered = append(filtered, mod)
+		}
+	}
+	return filtered
+}
+
+func LoaderRootPrefix(loader string, index *core.Index) string {
+	root := core.GetRootFolderForLoader(loader)
+	if root == "" || root == "." {
+		return ""
+	}
+
+	base := viper.GetString("meta-folder-base")
+	if base == "" {
+		base = "."
+	}
+
+	basePath := base
+	if !filepath.IsAbs(basePath) {
+		basePath = filepath.Join(index.PackRoot(), basePath)
+	}
+
+	rootPath := filepath.Join(basePath, root)
+	relPath, err := index.RelIndexPath(rootPath)
+	if err != nil {
+		return ""
+	}
+
+	relPath = filepath.ToSlash(filepath.Clean(relPath))
+	if relPath == "." {
+		return ""
+	}
+	return relPath
+}
+
+func LoaderRootPrefixes(index *core.Index) []string {
+	rootFolders := configuredRootFolders()
+	if len(rootFolders) == 0 {
+		return nil
+	}
+
+	base := viper.GetString("meta-folder-base")
+	if base == "" {
+		base = "."
+	}
+
+	basePath := base
+	if !filepath.IsAbs(basePath) {
+		basePath = filepath.Join(index.PackRoot(), basePath)
+	}
+
+	prefixes := make([]string, 0, len(rootFolders))
+	for _, root := range rootFolders {
+		if root == "" || root == "." {
+			continue
+		}
+
+		rootPath := filepath.Join(basePath, root)
+		relPath, err := index.RelIndexPath(rootPath)
+		if err != nil {
+			continue
+		}
+
+		relPath = filepath.ToSlash(filepath.Clean(relPath))
+		if relPath == "." {
+			continue
+		}
+		prefixes = append(prefixes, relPath)
+	}
+
+	if len(prefixes) == 0 {
+		return nil
+	}
+	return prefixes
+}
+
+func ExportPathForLoader(relPath string, loader string, index *core.Index) string {
+	prefix := LoaderRootPrefix(loader, index)
+	if prefix == "" {
+		return filepath.ToSlash(filepath.Clean(relPath))
+	}
+
+	cleanPath := filepath.ToSlash(filepath.Clean(relPath))
+	cleanPrefix := filepath.ToSlash(filepath.Clean(prefix))
+	cleanPrefix = strings.TrimSuffix(cleanPrefix, "/")
+	if cleanPrefix == "" || cleanPrefix == "." {
+		return cleanPath
+	}
+	if cleanPath == cleanPrefix {
+		return cleanPath
+	}
+	if strings.HasPrefix(cleanPath, cleanPrefix+"/") {
+		return strings.TrimPrefix(cleanPath, cleanPrefix+"/")
+	}
+	return cleanPath
 }
 
 func PathHasAnyPrefix(relPath string, prefixes []string) bool {

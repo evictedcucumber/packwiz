@@ -1,4 +1,4 @@
-package cmd
+package curseforge
 
 import (
 	"fmt"
@@ -15,10 +15,9 @@ import (
 // listCmd represents the list command
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all the mods in the modpack",
+	Short: "List CurseForge mods in the modpack",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-
 		// Load pack
 		pack, err := core.LoadPack()
 		if err != nil {
@@ -40,8 +39,13 @@ var listCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		loaderPrefixes := cmdshared.LoaderRootPrefixes(&index)
-		mods = cmdshared.FilterModsByAllowedPrefixes(mods, &index, loaderPrefixes)
+		loaderPrefix := cmdshared.LoaderRootPrefix("curseforge", &index)
+		if loaderPrefix != "" {
+			mods = cmdshared.FilterModsByAllowedPrefixes(mods, &index, []string{loaderPrefix})
+		} else {
+			ignorePrefixes := cmdshared.OtherLoaderIgnorePrefixes("curseforge", &index)
+			mods = cmdshared.FilterModsByIgnorePrefixes(mods, &index, ignorePrefixes)
+		}
 
 		// Filter mods by side
 		if viper.IsSet("list.side") {
@@ -79,11 +83,10 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(listCmd)
+	curseforgeCmd.AddCommand(listCmd)
 
 	listCmd.Flags().BoolP("version", "v", false, "Print name and version")
 	_ = viper.BindPFlag("list.version", listCmd.Flags().Lookup("version"))
 	listCmd.Flags().StringP("side", "s", "", "Filter mods by side (e.g., client or server)")
 	_ = viper.BindPFlag("list.side", listCmd.Flags().Lookup("side"))
-
 }

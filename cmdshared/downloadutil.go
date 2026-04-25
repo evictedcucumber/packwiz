@@ -64,6 +64,45 @@ func AddToZip(dl core.CompletedDownload, exp *zip.Writer, dir string, index *cor
 	return true
 }
 
+func AddToZipForLoader(dl core.CompletedDownload, exp *zip.Writer, dir string, index *core.Index, loader string) bool {
+	if dl.Error != nil {
+		fmt.Printf("Download of %s (%s) failed: %v\n", dl.Mod.Name, dl.Mod.FileName, dl.Error)
+		return false
+	}
+	for _, warning := range dl.Warnings {
+		fmt.Printf("Warning for %s (%s): %v\n", dl.Mod.Name, dl.Mod.FileName, warning)
+	}
+
+	p, err := index.RelIndexPath(dl.Mod.GetDestFilePath())
+	if err != nil {
+		fmt.Printf("Error resolving external file: %v\n", err)
+		return false
+	}
+	p = ExportPathForLoader(p, loader, index)
+	if p == "" {
+		fmt.Printf("Error resolving external file: empty path\n")
+		return false
+	}
+	modFile, err := exp.Create(path.Join(dir, p))
+	if err != nil {
+		fmt.Printf("Error creating metadata file %s: %v\n", p, err)
+		return false
+	}
+	_, err = io.Copy(modFile, dl.File)
+	if err != nil {
+		fmt.Printf("Error copying file %s: %v\n", p, err)
+		return false
+	}
+	err = dl.File.Close()
+	if err != nil {
+		fmt.Printf("Error closing file %s: %v\n", p, err)
+		return false
+	}
+
+	fmt.Printf("%s (%s) added to zip\n", dl.Mod.Name, dl.Mod.FileName)
+	return true
+}
+
 // AddNonMetafileOverrides saves all non-metadata files into an overrides folder in the zip
 func AddNonMetafileOverrides(index *core.Index, exp *zip.Writer) {
 	AddNonMetafileOverridesWithIgnore(index, exp, nil)
@@ -78,6 +117,44 @@ func AddNonMetafileOverridesWithIgnore(index *core.Index, exp *zip.Writer, ignor
 			continue
 		}
 		file, err := exp.Create(path.Join("overrides", p))
+		if err != nil {
+			fmt.Printf("Error creating file: %s\n", err.Error())
+			// TODO: exit(1)?
+			continue
+		}
+		// Attempt to read the file from disk, without checking hashes (assumed to have no errors)
+		src, err := os.Open(index.ResolveIndexPath(p))
+		if err != nil {
+			_ = src.Close()
+			fmt.Printf("Error reading file: %s\n", err.Error())
+			// TODO: exit(1)?
+			continue
+		}
+		_, err = io.Copy(file, src)
+		if err != nil {
+			_ = src.Close()
+			fmt.Printf("Error copying file: %s\n", err.Error())
+			// TODO: exit(1)?
+			continue
+		}
+
+		_ = src.Close()
+	}
+}
+
+func AddNonMetafileOverridesWithIgnoreForLoader(index *core.Index, exp *zip.Writer, ignorePrefixes []string, loader string) {
+	for p, v := range index.Files {
+		if v.IsMetaFile() {
+			continue
+		}
+		if PathHasAnyPrefix(p, ignorePrefixes) {
+			continue
+		}
+		exportPath := ExportPathForLoader(p, loader, index)
+		if exportPath == "" {
+			continue
+		}
+		file, err := exp.Create(path.Join("overrides", exportPath))
 		if err != nil {
 			fmt.Printf("Error creating file: %s\n", err.Error())
 			// TODO: exit(1)?

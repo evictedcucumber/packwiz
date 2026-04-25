@@ -139,7 +139,7 @@ var exportCmd = &cobra.Command{
 			cmdshared.ListManualDownloads(session)
 
 			for dl := range session.StartDownloads() {
-				_ = cmdshared.AddToZip(dl, exp, "overrides", &index)
+				_ = cmdshared.AddToZipForLoader(dl, exp, "overrides", &index, "curseforge")
 			}
 
 			err = session.SaveIndex()
@@ -173,7 +173,7 @@ var exportCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		cmdshared.AddNonMetafileOverridesWithIgnore(&index, exp, ignorePrefixes)
+		cmdshared.AddNonMetafileOverridesWithIgnoreForLoader(&index, exp, ignorePrefixes, "curseforge")
 
 		err = exp.Close()
 		if err != nil {

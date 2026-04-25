@@ -120,6 +120,7 @@ var exportCmd = &cobra.Command{
 					// TODO: exit(1)?
 					continue
 				}
+				path = cmdshared.ExportPathForLoader(path, "modrinth", &index)
 
 				hashes := make(map[string]string)
 				hashes["sha1"] = dl.Hashes["sha1"]
@@ -169,11 +170,11 @@ var exportCmd = &cobra.Command{
 				fmt.Printf("%s (%s) added to manifest\n", dl.Mod.Name, dl.Mod.FileName)
 			} else {
 				if dl.Mod.Side == core.ClientSide {
-					_ = cmdshared.AddToZip(dl, exp, "client-overrides", &index)
+					_ = cmdshared.AddToZipForLoader(dl, exp, "client-overrides", &index, "modrinth")
 				} else if dl.Mod.Side == core.ServerSide {
-					_ = cmdshared.AddToZip(dl, exp, "server-overrides", &index)
+					_ = cmdshared.AddToZipForLoader(dl, exp, "server-overrides", &index, "modrinth")
 				} else {
-					_ = cmdshared.AddToZip(dl, exp, "overrides", &index)
+					_ = cmdshared.AddToZipForLoader(dl, exp, "overrides", &index, "modrinth")
 				}
 			}
 		}
@@ -238,7 +239,7 @@ var exportCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		cmdshared.AddNonMetafileOverridesWithIgnore(&index, exp, ignorePrefixes)
+		cmdshared.AddNonMetafileOverridesWithIgnoreForLoader(&index, exp, ignorePrefixes, "modrinth")
 
 		err = exp.Close()
 		if err != nil {
