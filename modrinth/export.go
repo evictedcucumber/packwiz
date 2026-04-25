@@ -62,11 +62,14 @@ var exportCmd = &cobra.Command{
 			fmt.Printf("Error reading file: %v\n", err)
 			os.Exit(1)
 		}
+		ignorePrefixes := cmdshared.OtherLoaderIgnorePrefixes("modrinth", &index)
+		mods = cmdshared.FilterModsByIgnorePrefixes(mods, &index, ignorePrefixes)
 
 		fileName := viper.GetString("modrinth.export.output")
 		if fileName == "" {
 			fileName = pack.GetPackName() + ".mrpack"
 		}
+		fileName = cmdshared.ResolveExportOutput("modrinth", fileName)
 		expFile, err := os.Create(fileName)
 		if err != nil {
 			fmt.Printf("Failed to create zip: %s\n", err.Error())
@@ -235,7 +238,7 @@ var exportCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		cmdshared.AddNonMetafileOverrides(&index, exp)
+		cmdshared.AddNonMetafileOverridesWithIgnore(&index, exp, ignorePrefixes)
 
 		err = exp.Close()
 		if err != nil {

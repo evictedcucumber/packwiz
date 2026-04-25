@@ -162,18 +162,19 @@ var defaultFolders = map[uint32]map[uint32]string{
 }
 
 func getPathForFile(gameID uint32, classID uint32, categoryID uint32, slug string) string {
+	baseFolder := core.GetMetaFolderBaseForLoader("curseforge")
 	metaFolder := viper.GetString("meta-folder")
 	if metaFolder == "" {
 		if m, ok := defaultFolders[gameID]; ok {
 			if folder, ok := m[classID]; ok {
-				return filepath.Join(viper.GetString("meta-folder-base"), folder, slug+core.MetaExtension)
+				return filepath.Join(baseFolder, folder, slug+core.MetaExtension)
 			} else if folder, ok := m[categoryID]; ok {
-				return filepath.Join(viper.GetString("meta-folder-base"), folder, slug+core.MetaExtension)
+				return filepath.Join(baseFolder, folder, slug+core.MetaExtension)
 			}
 		}
 		metaFolder = "."
 	}
-	return filepath.Join(viper.GetString("meta-folder-base"), metaFolder, slug+core.MetaExtension)
+	return filepath.Join(baseFolder, metaFolder, slug+core.MetaExtension)
 }
 
 func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, optionalDisabled bool) error {

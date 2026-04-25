@@ -128,6 +128,10 @@ func (in Index) RelIndexPath(p string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
+func (in Index) PackRoot() string {
+	return in.packRoot
+}
+
 var ignoreDefaults = []string{
 	// Defaults (can be overridden with a negating pattern preceded with !)
 

@@ -3,6 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/evictedcucumber/packwiz/core"
@@ -12,13 +15,12 @@ import (
 
 // UpdateCmd represents the update command
 var UpdateCmd = &cobra.Command{
-	Use:     "update [name]",
-	Short:   "Update an external file (or all external files) in the modpack",
+	Use:     "update [name...]",
+	Short:   "Update one or more external files (or all external files) in the modpack",
 	Aliases: []string{"upgrade"},
-	Args:    cobra.MaximumNArgs(1),
+	Args:    cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		// TODO: --check flag?
-		// TODO: specify multiple files to update at once?
 
 		fmt.Println("Loading modpack...")
 		pack, err := core.LoadPack()
@@ -33,7 +35,12 @@ var UpdateCmd = &cobra.Command{
 		}
 
 		var singleUpdatedName string
+		anyUpdated := false
 		if viper.GetBool("update.all") {
+			if len(args) > 0 {
+				fmt.Println("Do not specify file names when using --all")
+				os.Exit(1)
+			}
 			filesWithUpdater := make(map[string][]*core.Mod)
 			fmt.Println("Reading metadata files...")
 			mods, err := index.LoadAllMods()
@@ -125,73 +132,44 @@ var UpdateCmd = &cobra.Command{
 				}
 			}
 		} else {
-			if len(args) < 1 || len(args[0]) == 0 {
-				fmt.Println("Must specify a valid file, or use the --all flag!")
+			if len(args) == 0 {
+				fmt.Println("Must specify at least one file, or use the --all flag!")
 				os.Exit(1)
 			}
-			modPath, ok := index.FindMod(args[0])
-			if !ok {
-				fmt.Println("Can't find this file; please ensure you have run packwiz refresh and use the name of the .pw.toml file (defaults to the project slug)")
-				os.Exit(1)
-			}
-			modData, err := core.LoadMod(modPath)
+
+			modPaths, err := resolveModArgs(args, &index)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			if modData.Pin {
-				fmt.Println("Version is pinned; run the unpin command to allow updating")
-				os.Exit(1)
-			}
-			singleUpdatedName = modData.Name
-			updaterFound := false
-			for k := range modData.Update {
-				updater, ok := core.Updaters[k]
-				if !ok {
-					continue
-				}
-				updaterFound = true
 
-				check, err := updater.CheckUpdate([]*core.Mod{&modData}, pack)
+			updatedNames := make([]string, 0)
+			hadFailure := false
+			for _, modPath := range modPaths {
+				updated, name, err := updateModAtPath(pack, &index, modPath)
 				if err != nil {
 					fmt.Println(err)
-					os.Exit(1)
+					hadFailure = true
+					continue
 				}
-				if len(check) != 1 {
-					fmt.Println("Invalid update check response")
-					os.Exit(1)
+				if updated {
+					updatedNames = append(updatedNames, name)
+					anyUpdated = true
+					if singleUpdatedName == "" {
+						singleUpdatedName = name
+					}
 				}
-
-				if check[0].UpdateAvailable {
-					fmt.Printf("Update available: %s\n", check[0].UpdateString)
-
-					err = updater.DoUpdate([]*core.Mod{&modData}, []interface{}{check[0].CachedState})
-					if err != nil {
-						fmt.Println(err)
-						os.Exit(1)
-					}
-
-					format, hash, err := modData.Write()
-					if err != nil {
-						fmt.Println(err)
-						os.Exit(1)
-					}
-					err = index.RefreshFileWithHash(modPath, format, hash, true)
-					if err != nil {
-						fmt.Println(err)
-						os.Exit(1)
-					}
-				} else {
-					fmt.Printf("\"%s\" is already up to date!\n", modData.Name)
-					return
-				}
-
-				break
 			}
-			if !updaterFound {
-				// TODO: use file name instead of Name when len(Name) == 0 in all places?
-				fmt.Println("A supported update system for \"" + modData.Name + "\" cannot be found.")
-				os.Exit(1)
+
+			if hadFailure {
+				fmt.Println("Some files failed to update.")
+			}
+			if len(modPaths) > 1 {
+				if len(updatedNames) > 0 {
+					fmt.Printf("Updated %d file(s).\n", len(updatedNames))
+				} else {
+					fmt.Println("All selected files are up to date!")
+				}
 			}
 		}
 
@@ -212,7 +190,7 @@ var UpdateCmd = &cobra.Command{
 		}
 		if viper.GetBool("update.all") {
 			fmt.Println("Files updated!")
-		} else {
+		} else if anyUpdated && singleUpdatedName != "" && len(args) == 1 {
 			fmt.Printf("\"%s\" updated!\n", singleUpdatedName)
 		}
 	},
@@ -223,4 +201,179 @@ func init() {
 
 	UpdateCmd.Flags().BoolP("all", "a", false, "Update all external files")
 	_ = viper.BindPFlag("update.all", UpdateCmd.Flags().Lookup("all"))
+}
+
+func resolveModArgs(args []string, index *core.Index) ([]string, error) {
+	modPaths := make([]string, 0, len(args))
+	seen := make(map[string]bool)
+	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			return nil, fmt.Errorf("empty file name provided")
+		}
+
+		paths, err := resolveSingleModArg(arg, index)
+		if err != nil {
+			return nil, err
+		}
+		for _, modPath := range paths {
+			if seen[modPath] {
+				continue
+			}
+			seen[modPath] = true
+			modPaths = append(modPaths, modPath)
+		}
+	}
+	return modPaths, nil
+}
+
+func resolveSingleModArg(arg string, index *core.Index) ([]string, error) {
+	hasSeparator := strings.ContainsAny(arg, "/\\")
+	hasExtension := strings.HasSuffix(arg, core.MetaExtension) || strings.HasSuffix(arg, core.MetaExtensionOld)
+
+	if filepath.IsAbs(arg) || hasSeparator {
+		modPath, ok, err := resolveModPathCandidate(arg, index)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("can't find file %s; ensure it exists and is listed in the index", arg)
+		}
+		return []string{modPath}, nil
+	}
+
+	if hasExtension {
+		modPath, ok, err := resolveModPathCandidate(arg, index)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return []string{modPath}, nil
+		}
+		trimmed := trimMetaExtension(arg)
+		return findModsByName(trimmed, index)
+	}
+
+	return findModsByName(arg, index)
+}
+
+func resolveModPathCandidate(arg string, index *core.Index) (string, bool, error) {
+	argPath := arg
+	if !filepath.IsAbs(argPath) {
+		argPath = filepath.Join(index.PackRoot(), filepath.FromSlash(argPath))
+	}
+	if modPath, ok, err := validateModPath(argPath, index); err != nil || ok {
+		return modPath, ok, err
+	}
+
+	base := viper.GetString("meta-folder-base")
+	if base == "" {
+		return "", false, nil
+	}
+	basePath := base
+	if !filepath.IsAbs(basePath) {
+		basePath = filepath.Join(index.PackRoot(), basePath)
+	}
+	return validateModPath(filepath.Join(basePath, filepath.FromSlash(arg)), index)
+}
+
+func validateModPath(candidate string, index *core.Index) (string, bool, error) {
+	cleanPath := filepath.Clean(candidate)
+	relPath, err := index.RelIndexPath(cleanPath)
+	if err != nil {
+		return "", false, err
+	}
+	relPath = filepath.ToSlash(filepath.Clean(relPath))
+	if relPath == ".." || strings.HasPrefix(relPath, "../") {
+		return "", false, nil
+	}
+	entry, ok := index.Files[relPath]
+	if !ok || !entry.IsMetaFile() {
+		return "", false, nil
+	}
+	return index.ResolveIndexPath(relPath), true, nil
+}
+
+func findModsByName(name string, index *core.Index) ([]string, error) {
+	modPaths := make([]string, 0)
+	for p, v := range index.Files {
+		if !v.IsMetaFile() {
+			continue
+		}
+		baseName := path.Base(p)
+		trimmed := trimMetaExtension(baseName)
+		if trimmed == name {
+			modPaths = append(modPaths, index.ResolveIndexPath(p))
+		}
+	}
+	if len(modPaths) == 0 {
+		return nil, fmt.Errorf("can't find a metadata file named %s; ensure you have run packwiz refresh", name)
+	}
+	if len(modPaths) > 1 {
+		return nil, fmt.Errorf("multiple files named %s found; specify the full path (for example modrinth/%s%s)", name, name, core.MetaExtension)
+	}
+	return modPaths, nil
+}
+
+func trimMetaExtension(fileName string) string {
+	trimmed := strings.TrimSuffix(fileName, core.MetaExtension)
+	if trimmed != fileName {
+		return trimmed
+	}
+	return strings.TrimSuffix(fileName, core.MetaExtensionOld)
+}
+
+func updateModAtPath(pack core.Pack, index *core.Index, modPath string) (bool, string, error) {
+	modData, err := core.LoadMod(modPath)
+	if err != nil {
+		return false, "", err
+	}
+	if modData.Pin {
+		fmt.Printf("Update skipped for pinned mod %s\n", modData.Name)
+		return false, modData.Name, nil
+	}
+
+	updaterFound := false
+	for k := range modData.Update {
+		updater, ok := core.Updaters[k]
+		if !ok {
+			continue
+		}
+		updaterFound = true
+
+		check, err := updater.CheckUpdate([]*core.Mod{&modData}, pack)
+		if err != nil {
+			return false, modData.Name, err
+		}
+		if len(check) != 1 {
+			return false, modData.Name, fmt.Errorf("invalid update check response for %s", modData.Name)
+		}
+
+		if check[0].UpdateAvailable {
+			fmt.Printf("Update available for %s: %s\n", modData.Name, check[0].UpdateString)
+
+			err = updater.DoUpdate([]*core.Mod{&modData}, []interface{}{check[0].CachedState})
+			if err != nil {
+				return false, modData.Name, err
+			}
+
+			format, hash, err := modData.Write()
+			if err != nil {
+				return false, modData.Name, err
+			}
+			err = index.RefreshFileWithHash(modPath, format, hash, true)
+			if err != nil {
+				return false, modData.Name, err
+			}
+			return true, modData.Name, nil
+		}
+
+		fmt.Printf("\"%s\" is already up to date!\n", modData.Name)
+		return false, modData.Name, nil
+	}
+
+	if !updaterFound {
+		return false, modData.Name, fmt.Errorf("a supported update system for \"%s\" cannot be found", modData.Name)
+	}
+	return false, modData.Name, nil
 }

@@ -187,7 +187,7 @@ func getProjectTypeFolder(projectType string, fileLoaders []string, packLoaders 
 
 var urlRegexes = [...]*regexp.Regexp{
 	// Slug/version number regex from https://github.com/modrinth/labrinth/blob/1679a3f844497d756d0cf272c5374a5236eabd42/src/util/validate.rs#L8
-	regexp.MustCompile("^https?://(www.)?modrinth\\.com/(?P<urlCategory>[^/]+)/(?P<slug>[a-zA-Z0-9!@$()`.+,_\"-]{3,64})(?:/version/(?P<version>[a-zA-Z0-9!@$()`.+,_\"-]{1,32}))?"),
+	regexp.MustCompile("^(?:https?://)?(?:www\\.)?modrinth\\.com/(?P<urlCategory>[^/]+)/(?P<slug>[a-zA-Z0-9!@$()`.+,_\"-]{3,64})(?:/version/(?P<version>[a-zA-Z0-9!@$()`.+,_\"-]{1,32}))?"),
 	// Version/project IDs are more restrictive: [a-zA-Z0-9]+ (base62)
 	regexp.MustCompile("^https?://cdn\\.modrinth\\.com/data/(?P<slug>[a-zA-Z0-9]+)/versions/(?P<versionID>[a-zA-Z0-9]+)/(?P<filename>[^/]+)$"),
 	regexp.MustCompile("^(?P<slug>[a-zA-Z0-9!@$()`.+,_\"-]{3,64})$"),
@@ -196,7 +196,7 @@ var urlRegexes = [...]*regexp.Regexp{
 const slugRegexIdx = 2
 
 var urlCategories = []string{
-	"mod", "plugin", "datapack", "shader", "resourcepack", "modpack",
+	"mod", "plugin", "datapack", "shader", "shaderpack", "resourcepack", "modpack",
 }
 
 func parseSlugOrUrl(input string, slug *string, version *string, versionID *string, filename *string) (parsedSlug bool, err error) {

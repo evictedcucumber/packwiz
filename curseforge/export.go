@@ -65,6 +65,8 @@ var exportCmd = &cobra.Command{
 			fmt.Printf("Error reading file: %v\n", err)
 			os.Exit(1)
 		}
+		ignorePrefixes := cmdshared.OtherLoaderIgnorePrefixes("curseforge", &index)
+		mods = cmdshared.FilterModsByIgnorePrefixes(mods, &index, ignorePrefixes)
 		i := 0
 		// Filter mods by side
 		// TODO: opt-in optional disabled filtering?
@@ -90,6 +92,7 @@ var exportCmd = &cobra.Command{
 		if fileName == "" {
 			fileName = pack.GetPackName() + ".zip"
 		}
+		fileName = cmdshared.ResolveExportOutput("curseforge", fileName)
 
 		expFile, err := os.Create(fileName)
 		if err != nil {
@@ -170,7 +173,7 @@ var exportCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		cmdshared.AddNonMetafileOverrides(&index, exp)
+		cmdshared.AddNonMetafileOverridesWithIgnore(&index, exp, ignorePrefixes)
 
 		err = exp.Close()
 		if err != nil {

@@ -432,6 +432,7 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		Update: updateMap,
 	}
 	var path string
+	baseFolder := core.GetMetaFolderBaseForLoader("modrinth")
 	folder := viper.GetString("meta-folder")
 	if folder == "" {
 		folder, err = getProjectTypeFolder(*project.ProjectType, version.Loaders, pack.GetCompatibleLoaders())
@@ -440,9 +441,9 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		}
 	}
 	if project.Slug != nil {
-		path = modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, *project.Slug+core.MetaExtension))
+		path = modMeta.SetMetaPath(filepath.Join(baseFolder, folder, *project.Slug+core.MetaExtension))
 	} else {
-		path = modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, core.SlugifyName(*project.Title)+core.MetaExtension))
+		path = modMeta.SetMetaPath(filepath.Join(baseFolder, folder, core.SlugifyName(*project.Title)+core.MetaExtension))
 	}
 
 	// If the file already exists, this will overwrite it!!!

@@ -66,32 +66,40 @@ func AddToZip(dl core.CompletedDownload, exp *zip.Writer, dir string, index *cor
 
 // AddNonMetafileOverrides saves all non-metadata files into an overrides folder in the zip
 func AddNonMetafileOverrides(index *core.Index, exp *zip.Writer) {
-	for p, v := range index.Files {
-		if !v.IsMetaFile() {
-			file, err := exp.Create(path.Join("overrides", p))
-			if err != nil {
-				fmt.Printf("Error creating file: %s\n", err.Error())
-				// TODO: exit(1)?
-				continue
-			}
-			// Attempt to read the file from disk, without checking hashes (assumed to have no errors)
-			src, err := os.Open(index.ResolveIndexPath(p))
-			if err != nil {
-				_ = src.Close()
-				fmt.Printf("Error reading file: %s\n", err.Error())
-				// TODO: exit(1)?
-				continue
-			}
-			_, err = io.Copy(file, src)
-			if err != nil {
-				_ = src.Close()
-				fmt.Printf("Error copying file: %s\n", err.Error())
-				// TODO: exit(1)?
-				continue
-			}
+	AddNonMetafileOverridesWithIgnore(index, exp, nil)
+}
 
-			_ = src.Close()
+func AddNonMetafileOverridesWithIgnore(index *core.Index, exp *zip.Writer, ignorePrefixes []string) {
+	for p, v := range index.Files {
+		if v.IsMetaFile() {
+			continue
 		}
+		if PathHasAnyPrefix(p, ignorePrefixes) {
+			continue
+		}
+		file, err := exp.Create(path.Join("overrides", p))
+		if err != nil {
+			fmt.Printf("Error creating file: %s\n", err.Error())
+			// TODO: exit(1)?
+			continue
+		}
+		// Attempt to read the file from disk, without checking hashes (assumed to have no errors)
+		src, err := os.Open(index.ResolveIndexPath(p))
+		if err != nil {
+			_ = src.Close()
+			fmt.Printf("Error reading file: %s\n", err.Error())
+			// TODO: exit(1)?
+			continue
+		}
+		_, err = io.Copy(file, src)
+		if err != nil {
+			_ = src.Close()
+			fmt.Printf("Error copying file: %s\n", err.Error())
+			// TODO: exit(1)?
+			continue
+		}
+
+		_ = src.Close()
 	}
 }
 
