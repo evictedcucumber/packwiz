@@ -86,6 +86,15 @@ var initCmd = &cobra.Command{
 			modLoaderName = strings.ToLower(initReadValue("Mod loader [quilt]: ", "quilt"))
 		}
 
+		packLoader := strings.ToLower(viper.GetString("init.loader"))
+		if len(packLoader) == 0 {
+			packLoader = strings.ToLower(initReadValue("Pack loader [modrinth]: ", core.LoaderModrinth))
+		}
+		if packLoader != core.LoaderModrinth && packLoader != core.LoaderCurseforge {
+			fmt.Printf("Given pack loader is not supported! The following loaders are supported: %s, %s\n", core.LoaderModrinth, core.LoaderCurseforge)
+			os.Exit(1)
+		}
+
 		loader, ok := core.ModLoaders[modLoaderName]
 		modLoaderVersions := make(map[string]string)
 		if modLoaderName != "none" {
@@ -144,6 +153,7 @@ var initCmd = &cobra.Command{
 			Author:     author,
 			Version:    version,
 			PackFormat: core.CurrentPackFormat,
+			Loader:     packLoader,
 			Index: struct {
 				File       string `toml:"file"`
 				HashFormat string `toml:"hash-format"`
@@ -209,6 +219,8 @@ func init() {
 	_ = viper.BindPFlag("init.reinit", initCmd.Flags().Lookup("reinit"))
 	initCmd.Flags().String("modloader", "", "The mod loader to use (omit to define interactively)")
 	_ = viper.BindPFlag("init.modloader", initCmd.Flags().Lookup("modloader"))
+	initCmd.Flags().String("loader", "", "The pack loader to use: modrinth or curseforge (omit to define interactively)")
+	_ = viper.BindPFlag("init.loader", initCmd.Flags().Lookup("loader"))
 
 	// ok this is epic
 	for _, loader := range core.ModLoaders {

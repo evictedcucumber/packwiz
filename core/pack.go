@@ -21,6 +21,7 @@ type Pack struct {
 	Version     string `toml:"version,omitempty"`
 	Description string `toml:"description,omitempty"`
 	PackFormat  string `toml:"pack-format"`
+	Loader      string `toml:"loader"`
 	Index       struct {
 		// Path is stored in forward slash format relative to pack.toml
 		File       string `toml:"file"`
@@ -33,6 +34,11 @@ type Pack struct {
 }
 
 const CurrentPackFormat = "packwiz:1.1.0"
+
+const (
+	LoaderModrinth   = "modrinth"
+	LoaderCurseforge = "curseforge"
+)
 
 var PackFormatConstraintAccepted = mustParseConstraint("~1")
 var PackFormatConstraintSuggestUpgrade = mustParseConstraint("~1.1")
@@ -76,6 +82,14 @@ func LoadPack() (Pack, error) {
 		fmt.Println("Modpack has a newer feature number than is supported by this version of packwiz. Update to the latest version of packwiz for new features and bugfixes!")
 	}
 	// TODO: suggest migration if necessary (primarily for 2.0.0)
+
+	if len(modpack.Loader) == 0 {
+		fmt.Println("Modpack manifest has no loader field; assuming modrinth")
+		modpack.Loader = LoaderModrinth
+	}
+	if modpack.Loader != LoaderModrinth && modpack.Loader != LoaderCurseforge {
+		return Pack{}, fmt.Errorf("loader field must be either %q or %q", LoaderModrinth, LoaderCurseforge)
+	}
 
 	// Read options into viper
 	if modpack.Options != nil {
