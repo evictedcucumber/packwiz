@@ -183,9 +183,9 @@ var importCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		modsList := packImport.Mods()
-		modIDs := make([]uint32, len(modsList))
-		for i, v := range modsList {
+		modList := packImport.Mods()
+		modIDs := make([]uint32, len(modList))
+		for i, v := range modList {
 			modIDs[i] = v.ProjectID
 		}
 
@@ -205,12 +205,12 @@ var importCmd = &cobra.Command{
 		// TODO: multithreading????
 
 		modFileInfosMap := make(map[uint32]modFileInfo)
-		referencedModPaths := make([]string, 0, len(modsList))
+		referencedModPaths := make([]string, 0, len(modList))
 		successes := 0
-		remainingFileIDs := make([]uint32, 0, len(modsList))
+		remainingFileIDs := make([]uint32, 0, len(modList))
 
 		// 1st pass: query mod metadata for every CurseForge file
-		for _, v := range modsList {
+		for _, v := range modList {
 			modInfoValue, ok := modInfosMap[v.ProjectID]
 			if !ok {
 				fmt.Printf("Failed to obtain information for project/file IDs %d/%d\n", v.ProjectID, v.FileID)
@@ -246,7 +246,7 @@ var importCmd = &cobra.Command{
 		}
 
 		// 3rd pass: create mod files for every file
-		for _, v := range modsList {
+		for _, v := range modList {
 			modInfoValue, ok := modInfosMap[v.ProjectID]
 			if !ok {
 				fmt.Printf("Failed to obtain project information for project/file IDs %d/%d\n", v.ProjectID, v.FileID)
@@ -275,7 +275,7 @@ var importCmd = &cobra.Command{
 			successes++
 		}
 
-		fmt.Printf("Successfully imported %d/%d dependencies!\n", successes, len(modsList))
+		fmt.Printf("Successfully imported %d/%d dependencies!\n", successes, len(modList))
 
 		fmt.Println("Reading override files...")
 		filesList, err := packImport.GetFiles()

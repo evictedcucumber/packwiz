@@ -19,8 +19,8 @@ import (
 
 // installCmd represents the install command
 var installCmd = &cobra.Command{
-	Use:     "add [URL|slug|search]",
-	Short:   "Add a project from a Modrinth URL, slug/project ID or search",
+	Use:     "add [URL]",
+	Short:   "Add a project from a Modrinth URL",
 	Aliases: []string{"install", "get"},
 	Args:    cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -41,14 +41,14 @@ var installCmd = &cobra.Command{
 		if projectIDFlag != "" {
 			projectID = projectIDFlag
 			if len(args) != 0 {
-				fmt.Println("--project-id cannot be used with a separately specified URL/slug/search term")
+				fmt.Println("--project-id cannot be used with a separately specified URL")
 				os.Exit(1)
 			}
 		}
 		if versionIDFlag != "" {
 			versionID = versionIDFlag
 			if len(args) != 0 {
-				fmt.Println("--version-id cannot be used with a separately specified URL/slug/search term")
+				fmt.Println("--version-id cannot be used with a separately specified URL")
 				os.Exit(1)
 			}
 		}
@@ -57,17 +57,30 @@ var installCmd = &cobra.Command{
 		}
 
 		if (len(args) == 0 || len(args[0]) == 0) && projectID == "" {
-			fmt.Println("You must specify a project; with the ID flags, or by passing a URL, slug or search term directly.")
+			fmt.Println("You must specify a project; with the ID flags, or by passing a Modrinth URL directly.")
 			os.Exit(1)
 		}
 
 		var version string
 		var parsedSlug bool
 		if projectID == "" && versionID == "" && len(args) == 1 {
-			// Try interpreting the argument as a slug/project ID, or project/version/CDN URL
+			if !strings.HasPrefix(args[0], "https://") && !strings.HasPrefix(args[0], "http://") {
+				fmt.Println("Only Modrinth links are accepted for add; search terms and slugs are not supported.")
+				os.Exit(1)
+			}
+
+			// Parse project/version/CDN URL
 			parsedSlug, err = parseSlugOrUrl(args[0], &projectID, &version, &versionID, &versionFilename)
 			if err != nil {
 				fmt.Printf("Failed to parse URL: %v\n", err)
+				os.Exit(1)
+			}
+			if parsedSlug {
+				fmt.Println("Only Modrinth links are accepted for add; search terms and slugs are not supported.")
+				os.Exit(1)
+			}
+			if projectID == "" && versionID == "" {
+				fmt.Println("Only valid Modrinth links are accepted for add.")
 				os.Exit(1)
 			}
 		}
@@ -114,17 +127,8 @@ var installCmd = &cobra.Command{
 			}
 		}
 
-		// Arguments weren't a valid slug/project ID, try to search for it instead (if it was not parsed as a URL)
-		if projectID == "" || parsedSlug {
-			err = installViaSearch(strings.Join(args, " "), versionFilename, !parsedSlug, pack, &index)
-			if err != nil {
-				fmt.Printf("Failed to add project: %s\n", err)
-				os.Exit(1)
-			}
-		} else {
-			fmt.Printf("Failed to add project: %s\n", err)
-			os.Exit(1)
-		}
+		fmt.Printf("Failed to add project: %s\n", err)
+		os.Exit(1)
 	},
 }
 
@@ -379,6 +383,12 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	if err != nil {
 		return err
 	}
+	if pack.ModList {
+		err = index.WriteModList()
+		if err != nil {
+			return err
+		}
+	}
 
 	err = index.Write()
 	if err != nil {
@@ -419,10 +429,21 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 	if algorithm == "" {
 		return errors.New("file doesn't have a hash")
 	}
+	var folder string
+	folder = viper.GetString("meta-folder")
+	if folder == "" {
+		folder, err = getProjectTypeFolder(*project.ProjectType, version.Loaders, pack.GetCompatibleLoaders())
+		if err != nil {
+			return err
+		}
+	}
 
 	modMeta := core.Mod{
 		Name:     *project.Title,
 		FileName: *file.Filename,
+		Version:  getModrinthVersionLabel(version),
+		PageURL:  getProjectPageURL(project),
+		Category: folder,
 		Side:     side,
 		Download: core.ModDownload{
 			URL:        *file.URL,
@@ -432,13 +453,6 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		Update: updateMap,
 	}
 	var path string
-	folder := viper.GetString("meta-folder")
-	if folder == "" {
-		folder, err = getProjectTypeFolder(*project.ProjectType, version.Loaders, pack.GetCompatibleLoaders())
-		if err != nil {
-			return err
-		}
-	}
 	if project.Slug != nil {
 		path = modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, *project.Slug+core.MetaExtension))
 	} else {
@@ -455,6 +469,26 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		return err
 	}
 	return index.RefreshFileWithHash(path, format, hash, true)
+}
+
+func getProjectPageURL(project *modrinthApi.Project) string {
+	if project == nil || project.ProjectType == nil || project.Slug == nil {
+		return ""
+	}
+	return fmt.Sprintf("https://modrinth.com/%s/%s", *project.ProjectType, *project.Slug)
+}
+
+func getModrinthVersionLabel(version *modrinthApi.Version) string {
+	if version == nil {
+		return ""
+	}
+	if version.VersionNumber != nil && *version.VersionNumber != "" {
+		return *version.VersionNumber
+	}
+	if version.ID != nil {
+		return *version.ID
+	}
+	return ""
 }
 
 var projectIDFlag string

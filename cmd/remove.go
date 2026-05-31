@@ -26,9 +26,10 @@ var removeCmd = &cobra.Command{
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		resolvedMod, ok := index.FindMod(args[0])
-		if !ok {
-			fmt.Println("Can't find this file; please ensure you have run packwiz refresh and use the name of the .pw.toml file (defaults to the project slug)")
+		resolvedMod, err := resolveModTargetPath(index, args[0])
+		if err != nil {
+			fmt.Printf("Can't find this file: %s\n", err)
+			fmt.Println("Use the project slug or a path to a tracked .pw.toml file (you may need to run packwiz refresh).")
 			os.Exit(1)
 		}
 		err = os.Remove(resolvedMod)
@@ -41,6 +42,13 @@ var removeCmd = &cobra.Command{
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
+		}
+		if pack.ModList {
+			err = index.WriteModList()
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
 		}
 		err = index.Write()
 		if err != nil {

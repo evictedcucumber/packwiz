@@ -22,6 +22,7 @@ type Pack struct {
 	Description string `toml:"description,omitempty"`
 	PackFormat  string `toml:"pack-format"`
 	Loader      string `toml:"loader"`
+	ModList     bool   `toml:"modlist"`
 	Index       struct {
 		// Path is stored in forward slash format relative to pack.toml
 		File       string `toml:"file"`

@@ -95,6 +95,11 @@ var initCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		modListEnabled := viper.GetBool("init.modlist")
+		if !cmd.Flags().Changed("modlist") && !viper.IsSet("init.modlist") {
+			modListEnabled = cmdshared.PromptYesNo("Create and maintain a modlist.md file? [y/N] ")
+		}
+
 		loader, ok := core.ModLoaders[modLoaderName]
 		modLoaderVersions := make(map[string]string)
 		if modLoaderName != "none" {
@@ -154,6 +159,7 @@ var initCmd = &cobra.Command{
 			Version:    version,
 			PackFormat: core.CurrentPackFormat,
 			Loader:     packLoader,
+			ModList:    modListEnabled,
 			Index: struct {
 				File       string `toml:"file"`
 				HashFormat string `toml:"hash-format"`
@@ -181,6 +187,13 @@ var initCmd = &cobra.Command{
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
+		}
+		if pack.ModList {
+			err = index.WriteModList()
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
 		}
 		err = index.Write()
 		if err != nil {
@@ -221,6 +234,8 @@ func init() {
 	_ = viper.BindPFlag("init.modloader", initCmd.Flags().Lookup("modloader"))
 	initCmd.Flags().String("loader", "", "The pack loader to use: modrinth or curseforge (omit to define interactively)")
 	_ = viper.BindPFlag("init.loader", initCmd.Flags().Lookup("loader"))
+	initCmd.Flags().Bool("modlist", false, "Create and maintain a modlist.md file in the pack root")
+	_ = viper.BindPFlag("init.modlist", initCmd.Flags().Lookup("modlist"))
 
 	// ok this is epic
 	for _, loader := range core.ModLoaders {

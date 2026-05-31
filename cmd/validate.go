@@ -71,6 +71,25 @@ var validateCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		modPageIssues, err := validateModPageURLs(index)
+		if err != nil {
+			fmt.Printf("Validation failed! Error validating mod page URLs: %s\n", err)
+			os.Exit(1)
+		}
+		if len(modPageIssues) > 0 {
+			fmt.Println("Validation failed! Missing mod metadata needed for modlist.md:")
+			for _, issue := range modPageIssues {
+				fmt.Printf("- %s: %s\n", issue.Key, issue.Message)
+				if issue.Expected != "" {
+					fmt.Printf("  Expected: %s\n", issue.Expected)
+				}
+				if issue.Example != "" {
+					fmt.Printf("  Example: %s\n", issue.Example)
+				}
+			}
+			os.Exit(1)
+		}
+
 		fmt.Println("Validation successful! Pack and config look correct.")
 	},
 }
@@ -114,6 +133,23 @@ func validatePackConfig(packFile string) ([]validationIssue, error) {
 			Message:  "must be either \"modrinth\" or \"curseforge\"",
 			Expected: "one of: \"modrinth\", \"curseforge\"",
 			Example:  "loader = \"modrinth\"",
+		})
+	}
+
+	modListVal, hasModList := raw["modlist"]
+	if !hasModList {
+		issues = append(issues, validationIssue{
+			Key:      "modlist",
+			Message:  "required key is missing",
+			Expected: "boolean",
+			Example:  "modlist = false",
+		})
+	} else if _, ok := modListVal.(bool); !ok {
+		issues = append(issues, validationIssue{
+			Key:      "modlist",
+			Message:  "must be a boolean",
+			Expected: "boolean",
+			Example:  "modlist = false",
 		})
 	}
 
@@ -195,6 +231,35 @@ func validatePackConfig(packFile string) ([]validationIssue, error) {
 					Example:  "[versions]\\nminecraft = \"1.21.0\"",
 				})
 			}
+		}
+	}
+
+	return issues, nil
+}
+
+func validateModPageURLs(index core.Index) ([]validationIssue, error) {
+	mods, err := index.LoadAllMods()
+	if err != nil {
+		return nil, err
+	}
+
+	issues := make([]validationIssue, 0)
+	for _, mod := range mods {
+		if mod.PageURL == "" {
+			issues = append(issues, validationIssue{
+				Key:      mod.GetFilePath(),
+				Message:  "missing page-url in mod metadata",
+				Expected: "a project page URL for the mod source",
+				Example:  "page-url = \"https://modrinth.com/mod/example\"",
+			})
+		}
+		if mod.Version == "" {
+			issues = append(issues, validationIssue{
+				Key:      mod.GetFilePath(),
+				Message:  "missing version in mod metadata",
+				Expected: "a human-readable version string from the source project",
+				Example:  "version = \"1.2.3\"",
+			})
 		}
 	}
 

@@ -143,7 +143,7 @@ func getProjectTypeFolder(projectType string, fileLoaders []string, packLoaders 
 		return "", errors.New("this command should not be used to add Modrinth modpacks, and importing of Modrinth modpacks is not yet supported")
 	} else if projectType == "resourcepack" {
 		return "resourcepacks", nil
-	} else if projectType == "shader" {
+	} else if projectType == "shader" || projectType == "shaderpack" {
 		bestLoaderIdx := math.MaxInt
 		for _, v := range fileLoaders {
 			idx := slices.Index(loaderPreferenceList, v)
@@ -196,7 +196,7 @@ var urlRegexes = [...]*regexp.Regexp{
 const slugRegexIdx = 2
 
 var urlCategories = []string{
-	"mod", "plugin", "datapack", "shader", "resourcepack", "modpack",
+	"mod", "plugin", "datapack", "shader", "shaderpack", "resourcepack", "modpack",
 }
 
 func parseSlugOrUrl(input string, slug *string, version *string, versionID *string, filename *string) (parsedSlug bool, err error) {

@@ -129,9 +129,10 @@ var UpdateCmd = &cobra.Command{
 				fmt.Println("Must specify a valid file, or use the --all flag!")
 				os.Exit(1)
 			}
-			modPath, ok := index.FindMod(args[0])
-			if !ok {
-				fmt.Println("Can't find this file; please ensure you have run packwiz refresh and use the name of the .pw.toml file (defaults to the project slug)")
+			modPath, err := resolveModTargetPath(index, args[0])
+			if err != nil {
+				fmt.Printf("Can't find this file: %s\n", err)
+				fmt.Println("Use the project slug or a path to a tracked .pw.toml file (you may need to run packwiz refresh).")
 				os.Exit(1)
 			}
 			modData, err := core.LoadMod(modPath)
@@ -217,7 +218,6 @@ var UpdateCmd = &cobra.Command{
 		}
 	},
 }
-
 func init() {
 	rootCmd.AddCommand(UpdateCmd)
 

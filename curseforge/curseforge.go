@@ -198,9 +198,13 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, opt
 		}
 	}
 
+	folder := getCategoryForFile(modInfo.GameID, modInfo.ClassID, modInfo.PrimaryCategoryID)
 	modMeta := core.Mod{
 		Name:     modInfo.Name,
 		FileName: fileInfo.FileName,
+		Version:  fileInfo.FriendlyName,
+		PageURL:  getModPageURL(modInfo),
+		Category: folder,
 		Side:     core.UniversalSide,
 		Download: core.ModDownload{
 			HashFormat: hashFormat,
@@ -210,7 +214,7 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, opt
 		Option: optional,
 		Update: updateMap,
 	}
-	path := modMeta.SetMetaPath(getPathForFile(modInfo.GameID, modInfo.ClassID, modInfo.PrimaryCategoryID, modInfo.Slug))
+	path := modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, modInfo.Slug+core.MetaExtension))
 
 	// If the file already exists, this will overwrite it!!!
 	// TODO: Should this be improved?
@@ -223,6 +227,31 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, opt
 	}
 
 	return index.RefreshFileWithHash(path, format, hash, true)
+}
+
+func getCategoryForFile(gameID uint32, classID uint32, categoryID uint32) string {
+	metaFolder := viper.GetString("meta-folder")
+	if metaFolder == "" {
+		if m, ok := defaultFolders[gameID]; ok {
+			if folder, ok := m[classID]; ok {
+				return folder
+			} else if folder, ok := m[categoryID]; ok {
+				return folder
+			}
+		}
+		return "."
+	}
+	return metaFolder
+}
+
+func getModPageURL(modInfo modInfo) string {
+	if modInfo.Links.WebsiteURL != "" {
+		return modInfo.Links.WebsiteURL
+	}
+	if modInfo.ID == 0 {
+		return ""
+	}
+	return fmt.Sprintf("https://www.curseforge.com/projects/%d", modInfo.ID)
 }
 
 func getSearchLoaderType(pack core.Pack) modloaderType {

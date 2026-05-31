@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -313,6 +314,7 @@ func (in Index) getAllMods() []string {
 			list = append(list, in.ResolveIndexPath(p))
 		}
 	}
+	slices.Sort(list)
 	return list
 }
 

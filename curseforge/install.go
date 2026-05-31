@@ -25,8 +25,8 @@ type installableDep struct {
 
 // installCmd represents the install command
 var installCmd = &cobra.Command{
-	Use:     "add [URL|slug|search]",
-	Short:   "Add a project from a CurseForge URL, slug, ID or search",
+	Use:     "add [URL]",
+	Short:   "Add a project from a CurseForge URL or ID",
 	Aliases: []string{"install", "get"},
 	Args:    cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -65,10 +65,15 @@ var installCmd = &cobra.Command{
 		}
 
 		if (len(args) == 0 || len(args[0]) == 0) && modID == 0 {
-			fmt.Println("You must specify a project; with the ID flags, or by passing a URL, slug or search term directly.")
+			fmt.Println("You must specify a project; with the ID flags, or by passing a CurseForge URL directly.")
 			os.Exit(1)
 		}
 		if modID == 0 && len(args) == 1 {
+			if !strings.HasPrefix(args[0], "https://") && !strings.HasPrefix(args[0], "http://") {
+				fmt.Println("Only CurseForge links are accepted for add; search terms and slugs are not supported.")
+				os.Exit(1)
+			}
+
 			parsedGame, parsedCategory, parsedSlug, parsedFileID, err := parseSlugOrUrl(args[0])
 			if err != nil {
 				fmt.Printf("Failed to parse URL: %v\n", err)
@@ -83,10 +88,16 @@ var installCmd = &cobra.Command{
 			}
 			if parsedSlug != "" {
 				slug = parsedSlug
+			} else {
+				fmt.Println("Only valid CurseForge links are accepted for add.")
+				os.Exit(1)
 			}
 			if parsedFileID != 0 {
 				fileID = parsedFileID
 			}
+		} else if modID == 0 {
+			fmt.Println("Only a single CurseForge link is accepted for add.")
+			os.Exit(1)
 		}
 
 		modInfoObtained := false
@@ -94,12 +105,7 @@ var installCmd = &cobra.Command{
 
 		if modID == 0 {
 			var cancelled bool
-			if slug == "" {
-				searchTerm := strings.Join(args, " ")
-				cancelled, modInfoData = searchCurseforgeInternal(searchTerm, false, game, category, mcVersions, getSearchLoaderType(pack))
-			} else {
-				cancelled, modInfoData = searchCurseforgeInternal(slug, true, game, category, mcVersions, getSearchLoaderType(pack))
-			}
+			cancelled, modInfoData = searchCurseforgeInternal(slug, true, game, category, mcVersions, getSearchLoaderType(pack))
 			if cancelled {
 				return
 			}
@@ -242,6 +248,13 @@ var installCmd = &cobra.Command{
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
+		}
+		if pack.ModList {
+			err = index.WriteModList()
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
 		}
 
 		err = index.Write()

@@ -16,6 +16,9 @@ type Mod struct {
 	metaFile string      // The file for the metadata file, used as an ID
 	Name     string      `toml:"name"`
 	FileName string      `toml:"filename"`
+	Version  string      `toml:"version,omitempty"`
+	PageURL  string      `toml:"page-url,omitempty"`
+	Category string      `toml:"category,omitempty"`
 	Side     string      `toml:"side,omitempty"`
 	Pin      bool        `toml:"pin,omitempty"`
 	Download ModDownload `toml:"download"`
