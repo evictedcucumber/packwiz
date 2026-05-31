@@ -14,8 +14,8 @@ import (
 	"github.com/unascribed/FlexVer/go/flexver"
 
 	"github.com/mitchellh/mapstructure"
-	"github.com/packwiz/packwiz/cmd"
-	"github.com/packwiz/packwiz/core"
+	"github.com/evictedcucumber/packwiz/cmd"
+	"github.com/evictedcucumber/packwiz/core"
 	"github.com/spf13/cobra"
 )
 

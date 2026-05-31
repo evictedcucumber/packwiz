@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/mitchellh/mapstructure"
-	"github.com/packwiz/packwiz/core"
+	"github.com/evictedcucumber/packwiz/core"
 )
 
 type mrUpdateData struct {

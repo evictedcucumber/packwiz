@@ -42,6 +42,14 @@
         default = packwiz;
       });
 
+      devShells = forAllSystems (system: let
+        pkgs = nixpkgsFor.${system};
+      in {
+        default = pkgs.mkShell {
+          packages = with pkgs; [go gopls];
+        };
+      });
+
       # This flake's nix code formatter
       formatter = forAllSystems (system: nixpkgsFor.${system}.alejandra);
     };

@@ -13,7 +13,7 @@ import (
 	"slices"
 )
 
-const UserAgent = "packwiz/packwiz"
+const UserAgent = "evictedcucumber/packwiz"
 
 func GetWithUA(url string, contentType string) (resp *http.Response, err error) {
 	req, err := http.NewRequest("GET", url, nil)
