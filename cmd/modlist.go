@@ -27,11 +27,11 @@ func loadPackAndIndex() (core.Pack, core.Index) {
 	return pack, index
 }
 
-func writeModList(pack *core.Pack, index *core.Index, successMessage string) {
+func writeModList(pack *core.Pack, index *core.Index, successMessage string, side string) {
 	if !ensureModPageURLs(*index) {
 		os.Exit(1)
 	}
-	err := index.WriteModList()
+	err := index.WriteModListWithSide(side)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -63,7 +63,16 @@ var modlistGenerateCmd = &cobra.Command{
 		if !ensureModPageURLs(index) {
 			os.Exit(1)
 		}
-		writeModList(&pack, &index, "Generated modlist.md successfully!")
+		side, err := cmd.Flags().GetString("side")
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		if side != core.UniversalSide && side != core.ServerSide && side != core.ClientSide {
+			fmt.Printf("Invalid side %q, must be one of client, server, or both (default)\n", side)
+			os.Exit(1)
+		}
+		writeModList(&pack, &index, "Generated modlist.md successfully!", side)
 	},
 }
 
@@ -76,7 +85,16 @@ var modlistValidateCmd = &cobra.Command{
 		if !ensureModPageURLs(index) {
 			os.Exit(1)
 		}
-		err := index.ValidateModList()
+		side, err := cmd.Flags().GetString("side")
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		if side != core.UniversalSide && side != core.ServerSide && side != core.ClientSide {
+			fmt.Printf("Invalid side %q, must be one of client, server, or both (default)\n", side)
+			os.Exit(1)
+		}
+		err = index.ValidateModListWithSide(side)
 		if err != nil {
 			if os.IsNotExist(err) {
 				fmt.Println("modlist.md is missing; run 'packwiz modlist generate' or 'packwiz modlist fix'.")
@@ -99,7 +117,16 @@ var modlistFixCmd = &cobra.Command{
 		if !ensureModPageURLs(index) {
 			os.Exit(1)
 		}
-		writeModList(&pack, &index, "Fixed modlist.md successfully!")
+		side, err := cmd.Flags().GetString("side")
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		if side != core.UniversalSide && side != core.ServerSide && side != core.ClientSide {
+			fmt.Printf("Invalid side %q, must be one of client, server, or both (default)\n", side)
+			os.Exit(1)
+		}
+		writeModList(&pack, &index, "Fixed modlist.md successfully!", side)
 	},
 }
 
@@ -132,4 +159,7 @@ func init() {
 	modlistCmd.AddCommand(modlistGenerateCmd)
 	modlistCmd.AddCommand(modlistValidateCmd)
 	modlistCmd.AddCommand(modlistFixCmd)
+	modlistGenerateCmd.Flags().StringP("side", "s", "both", "The side to include in modlist (client, server, or both)")
+	modlistValidateCmd.Flags().StringP("side", "s", "both", "The side to include in modlist (client, server, or both)")
+	modlistFixCmd.Flags().StringP("side", "s", "both", "The side to include in modlist (client, server, or both)")
 }

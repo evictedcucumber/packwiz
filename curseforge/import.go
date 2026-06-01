@@ -6,12 +6,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/evictedcucumber/packwiz/curseforge/packinterop"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/evictedcucumber/packwiz/curseforge/packinterop"
 
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/spf13/cobra"
@@ -259,7 +260,7 @@ var importCmd = &cobra.Command{
 				continue
 			}
 
-			err = createModFile(modInfoValue, modFileInfoValue, &index, v.OptionalDisabled)
+			err = createModFile(modInfoValue, modFileInfoValue, &index, v.OptionalDisabled, false)
 			if err != nil {
 				fmt.Printf("Failed to save project \"%s\": %s\n", modInfoValue.Name, err)
 				os.Exit(1)

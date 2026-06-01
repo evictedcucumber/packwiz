@@ -230,7 +230,7 @@ var installCmd = &cobra.Command{
 
 					if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
 						for _, v := range depsInstallable {
-							err = createModFile(v.modInfo, v.fileInfo, &index, false)
+							err = createModFile(v.modInfo, v.fileInfo, &index, false, true)
 							if err != nil {
 								fmt.Println(err)
 								os.Exit(1)
@@ -244,7 +244,7 @@ var installCmd = &cobra.Command{
 			}
 		}
 
-		err = createModFile(modInfoData, fileInfoData, &index, false)
+		err = createModFile(modInfoData, fileInfoData, &index, false, false)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)

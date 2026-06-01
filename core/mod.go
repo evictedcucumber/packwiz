@@ -46,6 +46,7 @@ type ModDownload struct {
 // ModOption specifies optional metadata for this mod file
 type ModOption struct {
 	Optional    bool   `toml:"optional"`
+	Dependency  bool   `toml:"dependency,omitempty"`
 	Description string `toml:"description,omitempty"`
 	Default     bool   `toml:"default,omitempty"`
 }

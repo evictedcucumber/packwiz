@@ -134,7 +134,7 @@ var exportCmd = &cobra.Command{
 					envInstalled = "required"
 				}
 				var clientEnv, serverEnv string
-				if dl.Mod.Side == core.UniversalSide || dl.Mod.Side == core.EmptySide {
+				if dl.Mod.Side == core.UniversalSide {
 					clientEnv = envInstalled
 					serverEnv = envInstalled
 				} else if dl.Mod.Side == core.ClientSide {

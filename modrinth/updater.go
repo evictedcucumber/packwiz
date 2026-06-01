@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/mitchellh/mapstructure"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/mitchellh/mapstructure"
 )
 
 type mrUpdateData struct {

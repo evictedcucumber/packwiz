@@ -356,7 +356,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 
 				if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
 					for _, v := range depMetadata {
-						err := createFileMeta(v.projectInfo, v.versionInfo, v.fileInfo, pack, index)
+						err := createFileMeta(v.projectInfo, v.versionInfo, v.fileInfo, pack, index, true)
 						if err != nil {
 							return err
 						}
@@ -379,7 +379,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	// TODO: handle optional/required resource pack files
 
 	// Create the metadata file
-	err := createFileMeta(project, version, file, pack, index)
+	err := createFileMeta(project, version, file, pack, index, false)
 	if err != nil {
 		return err
 	}
@@ -407,7 +407,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	return nil
 }
 
-func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index) error {
+func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, dependency bool) error {
 	updateMap := make(map[string]map[string]interface{})
 
 	var err error
@@ -445,6 +445,7 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		PageURL:  getProjectPageURL(project),
 		Category: folder,
 		Side:     side,
+		Option:   &core.ModOption{Dependency: dependency},
 		Download: core.ModDownload{
 			URL:        *file.URL,
 			HashFormat: algorithm,

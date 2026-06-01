@@ -13,9 +13,9 @@ import (
 	"github.com/spf13/viper"
 	"github.com/unascribed/FlexVer/go/flexver"
 
-	"github.com/mitchellh/mapstructure"
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/cobra"
 )
 
@@ -176,7 +176,7 @@ func getPathForFile(gameID uint32, classID uint32, categoryID uint32, slug strin
 	return filepath.Join(viper.GetString("meta-folder-base"), metaFolder, slug+core.MetaExtension)
 }
 
-func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, optionalDisabled bool) error {
+func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, optionalDisabled bool, dependency bool) error {
 	updateMap := make(map[string]map[string]interface{})
 	var err error
 
@@ -190,12 +190,14 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, opt
 
 	hash, hashFormat := fileInfo.getBestHash()
 
-	var optional *core.ModOption
-	if optionalDisabled {
-		optional = &core.ModOption{
-			Optional: true,
-			Default:  false,
+	var option *core.ModOption
+	if optionalDisabled || dependency {
+		option = &core.ModOption{}
+		if optionalDisabled {
+			option.Optional = true
+			option.Default = false
 		}
+		option.Dependency = dependency
 	}
 
 	folder := getCategoryForFile(modInfo.GameID, modInfo.ClassID, modInfo.PrimaryCategoryID)
@@ -206,12 +208,12 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, opt
 		PageURL:  getModPageURL(modInfo),
 		Category: folder,
 		Side:     core.UniversalSide,
+		Option:   option,
 		Download: core.ModDownload{
 			HashFormat: hashFormat,
 			Hash:       hash,
 			Mode:       core.ModeCF,
 		},
-		Option: optional,
 		Update: updateMap,
 	}
 	path := modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, modInfo.Slug+core.MetaExtension))
