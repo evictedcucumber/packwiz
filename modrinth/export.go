@@ -126,14 +126,8 @@ var exportCmd = &cobra.Command{
 					panic(err)
 				}
 
-				// Create env options based on configured optional/side
-				var envInstalled string
-				if dl.Mod.Option != nil && dl.Mod.Option.Optional {
-					envInstalled = "optional"
-				} else {
-					envInstalled = "required"
-				}
 				var clientEnv, serverEnv string
+				envInstalled := "required"
 				if dl.Mod.Side == core.UniversalSide {
 					clientEnv = envInstalled
 					serverEnv = envInstalled

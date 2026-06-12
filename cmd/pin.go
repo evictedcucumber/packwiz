@@ -20,10 +20,10 @@ func pinMod(args []string, pinned bool) {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	modPath, err := resolveModTargetPath(index, args[0])
+	modPath, err := resolveTrackedModMetaPath(index, args[0])
 	if err != nil {
 		fmt.Printf("Can't find this file: %s\n", err)
-		fmt.Println("Use the project slug or a path to a tracked .pw.toml file (you may need to run packwiz refresh).")
+		fmt.Println("Use a path to a tracked .pw.toml file (you may need to run packwiz refresh).")
 		os.Exit(1)
 	}
 	modData, err := core.LoadMod(modPath)

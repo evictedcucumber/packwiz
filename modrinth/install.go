@@ -222,6 +222,18 @@ type depMetadataStore struct {
 	projectInfo *modrinthApi.Project
 	versionInfo *modrinthApi.Version
 	fileInfo    *modrinthApi.File
+	deps        []string
+	metaPath    string
+}
+
+type modrinthProjectQueueItem struct {
+	projectID string
+	parentID  string
+}
+
+type modrinthVersionQueueItem struct {
+	versionID string
+	parentID  string
 }
 
 func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index) error {
@@ -229,143 +241,191 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		return errors.New("version doesn't have any files attached")
 	}
 
-	if len(version.Dependencies) > 0 {
-		// TODO: could get installed version IDs, and compare to install the newest - i.e. preferring pinned versions over getting absolute latest?
-		installedProjects := getInstalledProjectIDs(index)
-		isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
-		mcVersion, err := pack.GetMCVersion()
+	installedProjects := getInstalledProjectIDs(index)
+	installedProjectPaths := getInstalledProjectPaths(index)
+	isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
+	mcVersion, err := pack.GetMCVersion()
+	if err != nil {
+		return err
+	}
+
+	resolvedDependencies := make(map[string]*depMetadataStore)
+	dependencyChildren := make(map[string]map[string]struct{})
+	queuedProjects := map[string]struct{}{}
+	queuedVersions := map[string]struct{}{}
+	projectQueue := make([]modrinthProjectQueueItem, 0)
+	versionQueue := make([]modrinthVersionQueueItem, 0)
+
+	currentProjectID := ""
+	if project.ID != nil {
+		currentProjectID = *project.ID
+	}
+
+	addEdge := func(parentID, childID string) {
+		if parentID == "" || childID == "" {
+			return
+		}
+		if _, ok := dependencyChildren[parentID]; !ok {
+			dependencyChildren[parentID] = make(map[string]struct{})
+		}
+		dependencyChildren[parentID][childID] = struct{}{}
+	}
+
+	enqueueProject := func(projectID, parentID string) {
+		if projectID == "" {
+			return
+		}
+		if slices.Contains(installedProjects, projectID) {
+			addEdge(parentID, projectID)
+			return
+		}
+		if _, ok := resolvedDependencies[projectID]; ok {
+			addEdge(parentID, projectID)
+			return
+		}
+		if _, ok := queuedProjects[projectID]; ok {
+			addEdge(parentID, projectID)
+			return
+		}
+		queuedProjects[projectID] = struct{}{}
+		projectQueue = append(projectQueue, modrinthProjectQueueItem{projectID: projectID, parentID: parentID})
+		addEdge(parentID, projectID)
+	}
+
+	enqueueVersion := func(versionID, parentID string) {
+		if versionID == "" {
+			return
+		}
+		if _, ok := queuedVersions[versionID]; ok {
+			return
+		}
+		queuedVersions[versionID] = struct{}{}
+		versionQueue = append(versionQueue, modrinthVersionQueueItem{versionID: versionID, parentID: parentID})
+	}
+
+	resolveDirectDependencies := func(nodeID string, deps []*modrinthApi.Dependency) {
+		for _, dep := range deps {
+			if dep == nil {
+				continue
+			}
+			if dep.DependencyType == nil || *dep.DependencyType != "required" {
+				continue
+			}
+			if dep.VersionID != nil {
+				enqueueVersion(*dep.VersionID, nodeID)
+				continue
+			}
+			if dep.ProjectID != nil {
+				enqueueProject(mapDepOverride(*dep.ProjectID, isQuilt, mcVersion), nodeID)
+			}
+		}
+	}
+
+	// Resolve the dependency graph first so each mod file can record direct references.
+	resolveDirectDependencies(currentProjectID, version.Dependencies)
+
+	cycles := 0
+	for len(projectQueue)+len(versionQueue) > 0 && cycles < maxCycles {
+		for len(versionQueue) > 0 {
+			item := versionQueue[0]
+			versionQueue = versionQueue[1:]
+
+			depVersion, err := mrDefaultClient.Versions.Get(item.versionID)
+			if err != nil {
+				fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
+				continue
+			}
+			if depVersion.ProjectID == nil {
+				continue
+			}
+			depProjectID := mapDepOverride(*depVersion.ProjectID, isQuilt, mcVersion)
+			enqueueProject(depProjectID, item.parentID)
+		}
+
+		if len(projectQueue) == 0 {
+			break
+		}
+
+		projectIDs := make([]string, 0, len(projectQueue))
+		for _, item := range projectQueue {
+			projectIDs = append(projectIDs, item.projectID)
+		}
+		projectQueue = projectQueue[:0]
+		slices.Sort(projectIDs)
+		projectIDs = slices.Compact(projectIDs)
+
+		depProjects, err := mrDefaultClient.Projects.GetMultiple(projectIDs)
 		if err != nil {
-			return err
+			fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
 		}
 
-		var depMetadata []depMetadataStore
-		var depProjectIDPendingQueue []string
-		var depVersionIDPendingQueue []string
+		for _, depProject := range depProjects {
+			if depProject.ID == nil {
+				return errors.New("failed to get dependency data: invalid response")
+			}
+			depProjectID := *depProject.ID
+			latestVersion, err := getLatestVersion(depProjectID, *depProject.Title, pack)
+			if err != nil {
+				fmt.Printf("Failed to get latest version of dependency %v: %v\n", *depProject.Title, err)
+				continue
+			}
 
-		for _, dep := range version.Dependencies {
-			// TODO: recommend optional dependencies?
-			if dep.DependencyType != nil && *dep.DependencyType == "required" {
-				if dep.VersionID != nil {
-					depVersionIDPendingQueue = append(depVersionIDPendingQueue, *dep.VersionID)
-				} else {
-					if dep.ProjectID != nil {
-						depProjectIDPendingQueue = append(depProjectIDPendingQueue, mapDepOverride(*dep.ProjectID, isQuilt, mcVersion))
-					}
+			var file = latestVersion.Files[0]
+			for _, v := range latestVersion.Files {
+				if *v.Primary {
+					file = v
 				}
+			}
+
+			metaPath, err := getModrinthMetaPath(depProject, latestVersion, pack)
+			if err != nil {
+				return err
+			}
+
+			resolvedDependencies[depProjectID] = &depMetadataStore{
+				projectInfo: depProject,
+				versionInfo: latestVersion,
+				fileInfo:    file,
+				metaPath:    metaPath,
+			}
+
+			resolveDirectDependencies(depProjectID, latestVersion.Dependencies)
+		}
+
+		cycles++
+	}
+	if cycles >= maxCycles {
+		return errors.New("dependencies recurse too deeply, try increasing maxCycles")
+	}
+
+	if len(resolvedDependencies) > 0 {
+		deps := make([]*depMetadataStore, 0, len(resolvedDependencies))
+		for id, dep := range resolvedDependencies {
+			if _, ok := dependencyChildren[currentProjectID][id]; ok {
+				deps = append(deps, dep)
 			}
 		}
 
-		if len(depProjectIDPendingQueue)+len(depVersionIDPendingQueue) > 0 {
-			fmt.Println("Finding dependencies...")
+		if len(deps) > 0 {
+			fmt.Println("Dependencies found:")
+			for _, dep := range deps {
+				fmt.Println(*dep.projectInfo.Title)
+			}
 
-			cycles := 0
-			for len(depProjectIDPendingQueue)+len(depVersionIDPendingQueue) > 0 && cycles < maxCycles {
-				// Look up version IDs
-				if len(depVersionIDPendingQueue) > 0 {
-					depVersions, err := mrDefaultClient.Versions.GetMultiple(depVersionIDPendingQueue)
-					if err == nil {
-						for _, v := range depVersions {
-							// Add project ID to queue
-							depProjectIDPendingQueue = append(depProjectIDPendingQueue, mapDepOverride(*v.ProjectID, isQuilt, mcVersion))
-						}
-					} else {
-						fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
-					}
-					depVersionIDPendingQueue = depVersionIDPendingQueue[:0]
-				}
-
-				// Remove installed project IDs from dep queue
-				i := 0
-				for _, id := range depProjectIDPendingQueue {
-					contains := slices.Contains(installedProjects, id)
-					for _, dep := range depMetadata {
-						if *dep.projectInfo.ID == id {
-							contains = true
-							break
-						}
-					}
-					if !contains {
-						depProjectIDPendingQueue[i] = id
-						i++
-					}
-				}
-				depProjectIDPendingQueue = depProjectIDPendingQueue[:i]
-
-				// Clean up duplicates from dep queue (from deps on both QFAPI + FAPI)
-				slices.Sort(depProjectIDPendingQueue)
-				depProjectIDPendingQueue = slices.Compact(depProjectIDPendingQueue)
-
-				if len(depProjectIDPendingQueue) == 0 {
-					break
-				}
-				depProjects, err := mrDefaultClient.Projects.GetMultiple(depProjectIDPendingQueue)
-				if err != nil {
-					fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
-				}
-				depProjectIDPendingQueue = depProjectIDPendingQueue[:0]
-
-				for _, project := range depProjects {
-					if project.ID == nil {
-						return errors.New("failed to get dependency data: invalid response")
-					}
-					// Get latest version - could reuse version lookup data but it's not as easy (particularly since the version won't necessarily be the latest)
-					latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack)
+			if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
+				for _, dep := range deps {
+					depRefs := getModrinthDependencyRefs(*dep.projectInfo.ID, dependencyChildren, resolvedDependencies, installedProjectPaths, index)
+					err := createFileMeta(dep.projectInfo, dep.versionInfo, dep.fileInfo, pack, index, true, depRefs)
 					if err != nil {
-						fmt.Printf("Failed to get latest version of dependency %v: %v\n", *project.Title, err)
-						continue
+						return err
 					}
-
-					for _, dep := range version.Dependencies {
-						// TODO: recommend optional dependencies?
-						if dep.DependencyType != nil && *dep.DependencyType == "required" {
-							if dep.ProjectID != nil {
-								depProjectIDPendingQueue = append(depProjectIDPendingQueue, mapDepOverride(*dep.ProjectID, isQuilt, mcVersion))
-							}
-							if dep.VersionID != nil {
-								depVersionIDPendingQueue = append(depVersionIDPendingQueue, *dep.VersionID)
-							}
-						}
-					}
-
-					var file = latestVersion.Files[0]
-					// Prefer the primary file
-					for _, v := range latestVersion.Files {
-						if *v.Primary {
-							file = v
-						}
-					}
-
-					depMetadata = append(depMetadata, depMetadataStore{
-						projectInfo: project,
-						versionInfo: latestVersion,
-						fileInfo:    file,
-					})
-				}
-
-				cycles++
-			}
-			if cycles >= maxCycles {
-				return errors.New("dependencies recurse too deeply, try increasing maxCycles")
-			}
-
-			if len(depMetadata) > 0 {
-				fmt.Println("Dependencies found:")
-				for _, v := range depMetadata {
-					fmt.Println(*v.projectInfo.Title)
-				}
-
-				if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
-					for _, v := range depMetadata {
-						err := createFileMeta(v.projectInfo, v.versionInfo, v.fileInfo, pack, index, true)
-						if err != nil {
-							return err
-						}
-						fmt.Printf("Dependency \"%s\" successfully added! (%s)\n", *v.projectInfo.Title, *v.fileInfo.Filename)
-					}
+					fmt.Printf("Dependency \"%s\" successfully added! (%s)\n", *dep.projectInfo.Title, *dep.fileInfo.Filename)
 				}
 			} else {
-				fmt.Println("All dependencies are already added!")
+				fmt.Println("Dependency installation skipped.")
 			}
+		} else {
+			fmt.Println("All dependencies are already added!")
 		}
 	}
 
@@ -379,7 +439,8 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	// TODO: handle optional/required resource pack files
 
 	// Create the metadata file
-	err := createFileMeta(project, version, file, pack, index, false)
+	rootDeps := getModrinthDependencyRefs(currentProjectID, dependencyChildren, resolvedDependencies, installedProjectPaths, index)
+	err = createFileMeta(project, version, file, pack, index, false, rootDeps)
 	if err != nil {
 		return err
 	}
@@ -390,6 +451,10 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		}
 	}
 
+	err = index.SyncDependencyMetadata(pack, core.SyncDepsOpts{NormalizeAll: true})
+	if err != nil {
+		return err
+	}
 	err = index.Write()
 	if err != nil {
 		return err
@@ -407,7 +472,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	return nil
 }
 
-func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, dependency bool) error {
+func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, dependency bool, dependencies []string) error {
 	updateMap := make(map[string]map[string]interface{})
 
 	var err error
@@ -438,14 +503,20 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		}
 	}
 
+	path, err := getModrinthMetaPath(project, version, pack)
+	if err != nil {
+		return err
+	}
+
 	modMeta := core.Mod{
-		Name:     *project.Title,
-		FileName: *file.Filename,
-		Version:  getModrinthVersionLabel(version),
-		PageURL:  getProjectPageURL(project),
-		Category: folder,
-		Side:     side,
-		Option:   &core.ModOption{Dependency: dependency},
+		Name:         *project.Title,
+		FileName:     *file.Filename,
+		Version:      getModrinthVersionLabel(version),
+		PageURL:      getProjectPageURL(project),
+		Category:     folder,
+		Side:         side,
+		Dependencies: dependencies,
+		Option:       &core.ModOption{Dependency: dependency},
 		Download: core.ModDownload{
 			URL:        *file.URL,
 			HashFormat: algorithm,
@@ -453,12 +524,7 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		},
 		Update: updateMap,
 	}
-	var path string
-	if project.Slug != nil {
-		path = modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, *project.Slug+core.MetaExtension))
-	} else {
-		path = modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, core.SlugifyName(*project.Title)+core.MetaExtension))
-	}
+	path = modMeta.SetMetaPath(path)
 
 	// If the file already exists, this will overwrite it!!!
 	// TODO: Should this be improved?
@@ -470,6 +536,73 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		return err
 	}
 	return index.RefreshFileWithHash(path, format, hash, true)
+}
+
+func getModrinthMetaPath(project *modrinthApi.Project, version *modrinthApi.Version, pack core.Pack) (string, error) {
+	var folder string
+	folder = viper.GetString("meta-folder")
+	if folder == "" {
+		var err error
+		folder, err = getProjectTypeFolder(*project.ProjectType, version.Loaders, pack.GetCompatibleLoaders())
+		if err != nil {
+			return "", err
+		}
+	}
+
+	if project.Slug != nil {
+		return filepath.Join(viper.GetString("meta-folder-base"), folder, *project.Slug+core.MetaExtension), nil
+	}
+	return filepath.Join(viper.GetString("meta-folder-base"), folder, core.SlugifyName(*project.Title)+core.MetaExtension), nil
+}
+
+func getInstalledProjectPaths(index *core.Index) map[string]string {
+	installedProjects := make(map[string]string)
+	mods, err := index.LoadAllMods()
+	if err != nil {
+		fmt.Printf("Failed to determine existing projects: %v\n", err)
+		return installedProjects
+	}
+
+	for _, mod := range mods {
+		data, ok := mod.GetParsedUpdateData("modrinth")
+		if !ok {
+			continue
+		}
+		updateData, ok := data.(mrUpdateData)
+		if !ok || len(updateData.ProjectID) == 0 {
+			continue
+		}
+		installedProjects[updateData.ProjectID] = mod.GetFilePath()
+	}
+
+	return installedProjects
+}
+
+func getModrinthDependencyRefs(projectID string, dependencyChildren map[string]map[string]struct{}, resolvedDependencies map[string]*depMetadataStore, installedProjectPaths map[string]string, index *core.Index) []string {
+	childIDs := dependencyChildren[projectID]
+	if len(childIDs) == 0 {
+		return nil
+	}
+
+	dependencies := make([]string, 0, len(childIDs))
+	for childID := range childIDs {
+		var path string
+		if dep, ok := resolvedDependencies[childID]; ok {
+			path = dep.metaPath
+		} else if installedPath, ok := installedProjectPaths[childID]; ok {
+			path = installedPath
+		} else {
+			continue
+		}
+		relPath, err := index.ToIndexRelativePath(path)
+		if err != nil {
+			relPath = filepath.ToSlash(filepath.Clean(path))
+		}
+		dependencies = append(dependencies, relPath)
+	}
+	slices.Sort(dependencies)
+	dependencies = slices.Compact(dependencies)
+	return dependencies
 }
 
 func getProjectPageURL(project *modrinthApi.Project) string {

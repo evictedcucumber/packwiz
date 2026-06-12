@@ -4,6 +4,7 @@ import (
 	modrinthApi "codeberg.org/jmansfield/go-modrinth/modrinth"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/mitchellh/mapstructure"
@@ -109,4 +110,80 @@ func (u mrUpdater) DoUpdate(mods []*core.Mod, cachedState []interface{}) error {
 	}
 
 	return nil
+}
+
+type mrResolver struct{}
+
+func (r mrResolver) ResolveDependencies(mod *core.Mod, allMods []*core.Mod, index core.Index, pack core.Pack) ([]string, error) {
+	rawData, ok := mod.GetParsedUpdateData("modrinth")
+	if !ok {
+		return nil, errors.New("failed to parse update metadata")
+	}
+
+	data := rawData.(mrUpdateData)
+	if data.InstalledVersion == "" {
+		return nil, nil
+	}
+
+	depVersion, err := mrDefaultClient.Versions.Get(data.InstalledVersion)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get version metadata from Modrinth: %w", err)
+	}
+
+	var depPaths []string
+	isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
+	mcVersion, err := pack.GetMCVersion()
+	if err != nil {
+		return nil, err
+	}
+
+	// Helper map to quickly find installed mods by Modrinth Project ID or Version ID
+	installedByProjectID := make(map[string]*core.Mod)
+	installedByVersionID := make(map[string]*core.Mod)
+	for _, m := range allMods {
+		mRaw, ok := m.GetParsedUpdateData("modrinth")
+		if !ok {
+			continue
+		}
+		mData := mRaw.(mrUpdateData)
+		if mData.ProjectID != "" {
+			installedByProjectID[mData.ProjectID] = m
+		}
+		if mData.InstalledVersion != "" {
+			installedByVersionID[mData.InstalledVersion] = m
+		}
+	}
+
+	for _, dep := range depVersion.Dependencies {
+		if dep == nil {
+			continue
+		}
+		if dep.DependencyType == nil || *dep.DependencyType != "required" {
+			continue
+		}
+
+		var foundMod *core.Mod
+		if dep.VersionID != nil {
+			if m, found := installedByVersionID[*dep.VersionID]; found {
+				foundMod = m
+			}
+		}
+		if foundMod == nil && dep.ProjectID != nil {
+			projectIDClean := mapDepOverride(*dep.ProjectID, isQuilt, mcVersion)
+			if m, found := installedByProjectID[projectIDClean]; found {
+				foundMod = m
+			}
+		}
+
+		if foundMod != nil {
+			relPath, err := index.RelIndexPath(foundMod.GetFilePath())
+			if err == nil {
+				depPaths = append(depPaths, relPath)
+			}
+		}
+	}
+
+	slices.Sort(depPaths)
+	depPaths = slices.Compact(depPaths)
+	return depPaths, nil
 }

@@ -113,9 +113,8 @@ var exportCmd = &cobra.Command{
 			if ok {
 				p := projectRaw.(cfUpdateData)
 				cfFileRefs = append(cfFileRefs, packinterop.AddonFileReference{
-					ProjectID:        p.ProjectID,
-					FileID:           p.FileID,
-					OptionalDisabled: mod.Option != nil && mod.Option.Optional && !mod.Option.Default,
+					ProjectID: p.ProjectID,
+					FileID:    p.FileID,
 				})
 			} else {
 				nonCfMods = append(nonCfMods, mod)

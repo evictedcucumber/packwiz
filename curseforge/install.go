@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -21,6 +22,12 @@ const maxCycles = 20
 type installableDep struct {
 	modInfo
 	fileInfo modFileInfo
+	metaPath string
+}
+
+type cfProjectQueueItem struct {
+	modID    uint32
+	parentID uint32
 }
 
 // installCmd represents the install command
@@ -133,14 +140,45 @@ var installCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		installedProjectPaths := getInstalledCurseForgeProjectPaths(&index)
+		resolvedDependencies := make(map[uint32]*installableDep)
+		dependencyChildren := make(map[uint32]map[uint32]struct{})
+
 		if len(fileInfoData.Dependencies) > 0 {
 			isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
+			queuedProjects := make(map[uint32]struct{})
+			depIDPendingQueue := make([]cfProjectQueueItem, 0)
 
-			var depsInstallable []installableDep
-			var depIDPendingQueue []uint32
+			addEdge := func(parentID, childID uint32) {
+				if parentID == 0 || childID == 0 {
+					return
+				}
+				if _, ok := dependencyChildren[parentID]; !ok {
+					dependencyChildren[parentID] = make(map[uint32]struct{})
+				}
+				dependencyChildren[parentID][childID] = struct{}{}
+			}
+
+			enqueueProject := func(modID uint32, parentID uint32) {
+				if modID == 0 {
+					return
+				}
+				if _, ok := resolvedDependencies[modID]; ok {
+					addEdge(parentID, modID)
+					return
+				}
+				if _, ok := queuedProjects[modID]; ok {
+					addEdge(parentID, modID)
+					return
+				}
+				queuedProjects[modID] = struct{}{}
+				depIDPendingQueue = append(depIDPendingQueue, cfProjectQueueItem{modID: modID, parentID: parentID})
+				addEdge(parentID, modID)
+			}
+
 			for _, dep := range fileInfoData.Dependencies {
 				if dep.Type == dependencyTypeRequired {
-					depIDPendingQueue = append(depIDPendingQueue, mapDepOverride(dep.ModID, isQuilt, primaryMCVersion))
+					enqueueProject(mapDepOverride(dep.ModID, isQuilt, primaryMCVersion), modInfoData.ID)
 				}
 			}
 
@@ -148,54 +186,34 @@ var installCmd = &cobra.Command{
 				fmt.Println("Finding dependencies...")
 
 				cycles := 0
-				var installedIDList []uint32
 				for len(depIDPendingQueue) > 0 && cycles < maxCycles {
-					if installedIDList == nil {
-						// Get modids of all mods
-						mods, err := index.LoadAllMods()
-						if err != nil {
-							fmt.Printf("Failed to determine existing projects: %v\n", err)
-						} else {
-							for _, mod := range mods {
-								data, ok := mod.GetParsedUpdateData("curseforge")
-								if ok {
-									updateData, ok := data.(cfUpdateData)
-									if ok {
-										if updateData.ProjectID > 0 {
-											installedIDList = append(installedIDList, updateData.ProjectID)
-										}
-									}
-								}
-							}
+					projectIDs := make([]uint32, 0, len(depIDPendingQueue))
+					for _, item := range depIDPendingQueue {
+						projectIDs = append(projectIDs, item.modID)
+					}
+					depIDPendingQueue = depIDPendingQueue[:0]
+					slices.Sort(projectIDs)
+					projectIDs = slices.Compact(projectIDs)
+
+					filteredIDs := make([]uint32, 0, len(projectIDs))
+					for _, id := range projectIDs {
+						if _, ok := installedProjectPaths[id]; ok {
+							continue
 						}
+						if _, ok := resolvedDependencies[id]; ok {
+							continue
+						}
+						filteredIDs = append(filteredIDs, id)
 					}
 
-					// Remove installed IDs from dep queue
-					i := 0
-					for _, id := range depIDPendingQueue {
-						contains := slices.Contains(installedIDList, id)
-						for _, data := range depsInstallable {
-							if id == data.ID {
-								contains = true
-								break
-							}
-						}
-						if !contains {
-							depIDPendingQueue[i] = id
-							i++
-						}
-					}
-					depIDPendingQueue = depIDPendingQueue[:i]
-
-					if len(depIDPendingQueue) == 0 {
+					if len(filteredIDs) == 0 {
 						break
 					}
 
-					depInfoData, err := cfDefaultClient.getModInfoMultiple(depIDPendingQueue)
+					depInfoData, err := cfDefaultClient.getModInfoMultiple(filteredIDs)
 					if err != nil {
 						fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
 					}
-					depIDPendingQueue = depIDPendingQueue[:0]
 
 					for _, currData := range depInfoData {
 						depFileInfo, err := getLatestFile(currData, mcVersions, 0, pack.GetCompatibleLoaders())
@@ -204,15 +222,18 @@ var installCmd = &cobra.Command{
 							continue
 						}
 
-						for _, dep := range depFileInfo.Dependencies {
-							if dep.Type == dependencyTypeRequired {
-								depIDPendingQueue = append(depIDPendingQueue, mapDepOverride(dep.ModID, isQuilt, primaryMCVersion))
-							}
+						metaPath := getCurseForgeMetaPath(currData)
+						resolvedDependencies[currData.ID] = &installableDep{
+							modInfo:  currData,
+							fileInfo: depFileInfo,
+							metaPath: metaPath,
 						}
 
-						depsInstallable = append(depsInstallable, installableDep{
-							currData, depFileInfo,
-						})
+						for _, dep := range depFileInfo.Dependencies {
+							if dep.Type == dependencyTypeRequired {
+								enqueueProject(mapDepOverride(dep.ModID, isQuilt, primaryMCVersion), currData.ID)
+							}
+						}
 					}
 
 					cycles++
@@ -222,15 +243,16 @@ var installCmd = &cobra.Command{
 					os.Exit(1)
 				}
 
-				if len(depsInstallable) > 0 {
+				if len(resolvedDependencies) > 0 {
 					fmt.Println("Dependencies found:")
-					for _, v := range depsInstallable {
+					for _, v := range resolvedDependencies {
 						fmt.Println(v.Name)
 					}
 
 					if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
-						for _, v := range depsInstallable {
-							err = createModFile(v.modInfo, v.fileInfo, &index, false, true)
+						for _, v := range resolvedDependencies {
+							depRefs := getCurseForgeDependencyRefs(v.ID, dependencyChildren, resolvedDependencies, installedProjectPaths, &index)
+							err = createModFile(v.modInfo, v.fileInfo, &index, true, depRefs)
 							if err != nil {
 								fmt.Println(err)
 								os.Exit(1)
@@ -244,7 +266,8 @@ var installCmd = &cobra.Command{
 			}
 		}
 
-		err = createModFile(modInfoData, fileInfoData, &index, false, false)
+		rootDeps := getCurseForgeDependencyRefs(modInfoData.ID, dependencyChildren, resolvedDependencies, installedProjectPaths, &index)
+		err = createModFile(modInfoData, fileInfoData, &index, false, rootDeps)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -257,6 +280,11 @@ var installCmd = &cobra.Command{
 			}
 		}
 
+		err = index.SyncDependencyMetadata(pack, core.SyncDepsOpts{NormalizeAll: true})
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 		err = index.Write()
 		if err != nil {
 			fmt.Println(err)
@@ -275,6 +303,56 @@ var installCmd = &cobra.Command{
 
 		fmt.Printf("Project \"%s\" successfully added! (%s)\n", modInfoData.Name, fileInfoData.FileName)
 	},
+}
+
+func getInstalledCurseForgeProjectPaths(index *core.Index) map[uint32]string {
+	installedProjects := make(map[uint32]string)
+	mods, err := index.LoadAllMods()
+	if err != nil {
+		fmt.Printf("Failed to determine existing projects: %v\n", err)
+		return installedProjects
+	}
+
+	for _, mod := range mods {
+		data, ok := mod.GetParsedUpdateData("curseforge")
+		if !ok {
+			continue
+		}
+		updateData, ok := data.(cfUpdateData)
+		if !ok || updateData.ProjectID == 0 {
+			continue
+		}
+		installedProjects[updateData.ProjectID] = mod.GetFilePath()
+	}
+
+	return installedProjects
+}
+
+func getCurseForgeDependencyRefs(projectID uint32, dependencyChildren map[uint32]map[uint32]struct{}, resolvedDependencies map[uint32]*installableDep, installedProjectPaths map[uint32]string, index *core.Index) []string {
+	childIDs := dependencyChildren[projectID]
+	if len(childIDs) == 0 {
+		return nil
+	}
+
+	dependencies := make([]string, 0, len(childIDs))
+	for childID := range childIDs {
+		var path string
+		if dep, ok := resolvedDependencies[childID]; ok {
+			path = dep.metaPath
+		} else if installedPath, ok := installedProjectPaths[childID]; ok {
+			path = installedPath
+		} else {
+			continue
+		}
+		relPath, err := index.ToIndexRelativePath(path)
+		if err != nil {
+			relPath = filepath.ToSlash(filepath.Clean(path))
+		}
+		dependencies = append(dependencies, relPath)
+	}
+	slices.Sort(dependencies)
+	dependencies = slices.Compact(dependencies)
+	return dependencies
 }
 
 // Used to implement interface for fuzzy matching

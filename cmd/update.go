@@ -33,6 +33,7 @@ var UpdateCmd = &cobra.Command{
 		}
 
 		var singleUpdatedName string
+		updatedMods := make([]*core.Mod, 0)
 		if viper.GetBool("update.all") {
 			filesWithUpdater := make(map[string][]*core.Mod)
 			fmt.Println("Reading metadata files...")
@@ -122,6 +123,7 @@ var UpdateCmd = &cobra.Command{
 						fmt.Println(err.Error())
 						continue
 					}
+					updatedMods = append(updatedMods, modData)
 				}
 			}
 		} else {
@@ -182,6 +184,7 @@ var UpdateCmd = &cobra.Command{
 						fmt.Println(err)
 						os.Exit(1)
 					}
+					updatedMods = append(updatedMods, &modData)
 				} else {
 					fmt.Printf("\"%s\" is already up to date!\n", modData.Name)
 					return
@@ -196,17 +199,7 @@ var UpdateCmd = &cobra.Command{
 			}
 		}
 
-		err = index.Write()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		err = pack.UpdateIndexHash()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		err = pack.Write()
+		err = finalizePackWithDependencies(&pack, &index, core.SyncDepsOpts{RefreshMods: updatedMods})
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)

@@ -26,6 +26,9 @@ type Mod struct {
 	Update     map[string]map[string]interface{} `toml:"update"`
 	updateData map[string]interface{}
 
+	// Dependencies stores references to other mod metadata files this mod depends on.
+	Dependencies []string `toml:"dependencies,omitempty"`
+
 	Option *ModOption `toml:"option,omitempty"`
 }
 
@@ -45,10 +48,15 @@ type ModDownload struct {
 
 // ModOption specifies optional metadata for this mod file
 type ModOption struct {
-	Optional    bool   `toml:"optional"`
-	Dependency  bool   `toml:"dependency,omitempty"`
+	Dependency  bool   `toml:"dependency"`
 	Description string `toml:"description,omitempty"`
-	Default     bool   `toml:"default,omitempty"`
+}
+
+// EnsureOptionDefaults ensures every mod has an explicit option table with dependency set.
+func (m *Mod) EnsureOptionDefaults() {
+	if m.Option == nil {
+		m.Option = &ModOption{Dependency: false}
+	}
 }
 
 // The four possible values of Side (the side that the mod is on) are "server", "client", "both", and "" (equivalent to "both")

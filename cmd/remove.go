@@ -50,17 +50,7 @@ var removeCmd = &cobra.Command{
 				os.Exit(1)
 			}
 		}
-		err = index.Write()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		err = pack.UpdateIndexHash()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		err = pack.Write()
+		err = finalizePackWithDependencies(&pack, &index, core.SyncDepsOpts{RemovedModPath: resolvedMod})
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)

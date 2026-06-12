@@ -150,7 +150,7 @@ func ensureModPageURLs(index core.Index) bool {
 			fmt.Printf("  Example: %s\n", issue.Example)
 		}
 	}
-	fmt.Println("Run 'packwiz validate' to find and fix the missing mod page URLs in your mod manifests.")
+	fmt.Println("Run 'packwiz fix' to fill missing mod page URLs and version fields where possible.")
 	return false
 }
 

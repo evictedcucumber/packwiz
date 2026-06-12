@@ -29,6 +29,8 @@ func init() {
 	cmd.Add(curseforgeCmd)
 	core.Updaters["curseforge"] = cfUpdater{}
 	core.MetaDownloaders["curseforge"] = cfDownloader{}
+	core.DependencyResolvers["curseforge"] = cfResolver{}
+	core.MetadataFixers["curseforge"] = cfMetadataFixer{}
 }
 
 var snapshotVersionRegex = regexp.MustCompile(`(?:Snapshot )?(\d+)w0?(0|[1-9]\d*)([a-z])`)
@@ -176,7 +178,7 @@ func getPathForFile(gameID uint32, classID uint32, categoryID uint32, slug strin
 	return filepath.Join(viper.GetString("meta-folder-base"), metaFolder, slug+core.MetaExtension)
 }
 
-func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, optionalDisabled bool, dependency bool) error {
+func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, dependency bool, dependencies []string) error {
 	updateMap := make(map[string]map[string]interface{})
 	var err error
 
@@ -190,25 +192,18 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, opt
 
 	hash, hashFormat := fileInfo.getBestHash()
 
-	var option *core.ModOption
-	if optionalDisabled || dependency {
-		option = &core.ModOption{}
-		if optionalDisabled {
-			option.Optional = true
-			option.Default = false
-		}
-		option.Dependency = dependency
-	}
+	option := &core.ModOption{Dependency: dependency}
 
 	folder := getCategoryForFile(modInfo.GameID, modInfo.ClassID, modInfo.PrimaryCategoryID)
 	modMeta := core.Mod{
-		Name:     modInfo.Name,
-		FileName: fileInfo.FileName,
-		Version:  fileInfo.FriendlyName,
-		PageURL:  getModPageURL(modInfo),
-		Category: folder,
-		Side:     core.UniversalSide,
-		Option:   option,
+		Name:         modInfo.Name,
+		FileName:     fileInfo.FileName,
+		Version:      fileInfo.FriendlyName,
+		PageURL:      getModPageURL(modInfo),
+		Category:     folder,
+		Side:         core.UniversalSide,
+		Dependencies: dependencies,
+		Option:       option,
 		Download: core.ModDownload{
 			HashFormat: hashFormat,
 			Hash:       hash,
@@ -216,7 +211,7 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, opt
 		},
 		Update: updateMap,
 	}
-	path := modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, modInfo.Slug+core.MetaExtension))
+	path := modMeta.SetMetaPath(getCurseForgeMetaPath(modInfo))
 
 	// If the file already exists, this will overwrite it!!!
 	// TODO: Should this be improved?
@@ -229,6 +224,11 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, opt
 	}
 
 	return index.RefreshFileWithHash(path, format, hash, true)
+}
+
+func getCurseForgeMetaPath(modInfo modInfo) string {
+	folder := getCategoryForFile(modInfo.GameID, modInfo.ClassID, modInfo.PrimaryCategoryID)
+	return filepath.Join(viper.GetString("meta-folder-base"), folder, modInfo.Slug+core.MetaExtension)
 }
 
 func getCategoryForFile(gameID uint32, classID uint32, categoryID uint32) string {
@@ -642,4 +642,58 @@ func mapDepOverride(depID uint32, isQuilt bool, mcVersion string) uint32 {
 		}
 	}
 	return depID
+}
+
+type cfResolver struct{}
+
+func (r cfResolver) ResolveDependencies(mod *core.Mod, allMods []*core.Mod, index core.Index, pack core.Pack) ([]string, error) {
+	projectRaw, ok := mod.GetParsedUpdateData("curseforge")
+	if !ok {
+		return nil, errors.New("failed to parse update metadata")
+	}
+	project := projectRaw.(cfUpdateData)
+	if project.ProjectID == 0 || project.FileID == 0 {
+		return nil, nil
+	}
+
+	fileInfoData, err := cfDefaultClient.getFileInfo(project.ProjectID, project.FileID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file info from CurseForge: %w", err)
+	}
+
+	var depPaths []string
+	isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
+	mcVersion, err := pack.GetMCVersion()
+	if err != nil {
+		return nil, err
+	}
+
+	// Helper map to quickly find installed mods by CurseForge Project ID
+	installedByProjectID := make(map[uint32]*core.Mod)
+	for _, m := range allMods {
+		mRaw, ok := m.GetParsedUpdateData("curseforge")
+		if !ok {
+			continue
+		}
+		mData := mRaw.(cfUpdateData)
+		if mData.ProjectID != 0 {
+			installedByProjectID[mData.ProjectID] = m
+		}
+	}
+
+	for _, dep := range fileInfoData.Dependencies {
+		if dep.Type == dependencyTypeRequired {
+			projectIDClean := mapDepOverride(dep.ModID, isQuilt, mcVersion)
+			if m, found := installedByProjectID[projectIDClean]; found {
+				relPath, err := index.RelIndexPath(m.GetFilePath())
+				if err == nil {
+					depPaths = append(depPaths, relPath)
+				}
+			}
+		}
+	}
+
+	slices.Sort(depPaths)
+	depPaths = slices.Compact(depPaths)
+	return depPaths, nil
 }

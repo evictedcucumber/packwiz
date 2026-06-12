@@ -53,3 +53,19 @@ type ManualDownload struct {
 	FileName string
 	URL      string
 }
+
+// DependencyResolver can resolve dependencies for a mod using its update metadata.
+type DependencyResolver interface {
+	ResolveDependencies(mod *Mod, allMods []*Mod, index Index, pack Pack) ([]string, error)
+}
+
+// DependencyResolvers stores all dependency resolvers, keyed by update system name (e.g., "modrinth", "curseforge").
+var DependencyResolvers = make(map[string]DependencyResolver)
+
+// MetadataFixer can fill missing mod metadata fields using provider APIs.
+type MetadataFixer interface {
+	FillMissingMetadata(mod *Mod) (bool, error)
+}
+
+// MetadataFixers stores metadata fixers keyed by update system name (e.g., "modrinth", "curseforge").
+var MetadataFixers = make(map[string]MetadataFixer)

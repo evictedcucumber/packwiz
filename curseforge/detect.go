@@ -98,7 +98,7 @@ var detectCmd = &cobra.Command{
 
 		fmt.Println("Creating metadata files...")
 		for _, v := range res.ExactMatches {
-			err = createModFile(modInfosMap[v.ID], v.File, &index, false, false)
+			err = createModFile(modInfosMap[v.ID], v.File, &index, false, nil)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
