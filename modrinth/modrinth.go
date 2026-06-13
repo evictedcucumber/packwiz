@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strings"
 
 	modrinthApi "codeberg.org/jmansfield/go-modrinth/modrinth"
 	"github.com/evictedcucumber/packwiz/cmd"
@@ -309,7 +310,21 @@ func findLatestVersion(versions []*modrinthApi.Version, gameVersions []string, u
 	return latestValidVersion
 }
 
-func getLatestVersion(projectID string, name string, pack core.Pack) (*modrinthApi.Version, error) {
+func isVersionTypeAllowed(versionType string, allowedChannel string) bool {
+	switch strings.ToLower(allowedChannel) {
+	case "release":
+		return strings.ToLower(versionType) == "release"
+	case "beta":
+		vt := strings.ToLower(versionType)
+		return vt == "release" || vt == "beta"
+	case "alpha":
+		fallthrough
+	default:
+		return true
+	}
+}
+
+func getLatestVersion(projectID string, name string, pack core.Pack, allowedChannel string) (*modrinthApi.Version, error) {
 	gameVersions, err := pack.GetSupportedMCVersions()
 	if err != nil {
 		return nil, err
@@ -328,15 +343,27 @@ func getLatestVersion(projectID string, name string, pack core.Pack) (*modrinthA
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest version: %w", err)
 	}
-	if len(result) == 0 {
-		// TODO: retry with datapack specified, to determine what the issue is? or just request all and filter afterwards
-		return nil, errors.New("no valid versions found\n\tUse the 'packwiz settings acceptable-versions' command to accept more game versions\n\tTo use datapacks, add a datapack loader mod and specify the datapack-folder option with the folder this mod loads datapacks from")
+
+	// Filter results by allowedChannel
+	var filteredResult []*modrinthApi.Version
+	for _, v := range result {
+		vt := ""
+		if v.VersionType != nil {
+			vt = *v.VersionType
+		}
+		if isVersionTypeAllowed(vt, allowedChannel) {
+			filteredResult = append(filteredResult, v)
+		}
+	}
+
+	if len(filteredResult) == 0 {
+		return nil, errors.New("no valid versions found matching channel " + allowedChannel + "\n\tUse the 'packwiz settings acceptable-versions' command to accept more game versions\n\tTo use datapacks, add a datapack loader mod and specify the datapack-folder option with the folder this mod loads datapacks from")
 	}
 
 	// TODO: option to always compare using flexver?
 	// TODO: ask user which one to use?
-	flexverLatest := findLatestVersion(result, gameVersions, true)
-	releaseDateLatest := findLatestVersion(result, gameVersions, false)
+	flexverLatest := findLatestVersion(filteredResult, gameVersions, true)
+	releaseDateLatest := findLatestVersion(filteredResult, gameVersions, false)
 	if flexverLatest != releaseDateLatest && releaseDateLatest.VersionNumber != nil && flexverLatest.VersionNumber != nil {
 		fmt.Printf("Warning: Modrinth versions for %s inconsistent between latest version number and newest release date (%s vs %s)\n", name, *flexverLatest.VersionNumber, *releaseDateLatest.VersionNumber)
 	}

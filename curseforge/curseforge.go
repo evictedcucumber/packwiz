@@ -178,7 +178,7 @@ func getPathForFile(gameID uint32, classID uint32, categoryID uint32, slug strin
 	return filepath.Join(viper.GetString("meta-folder-base"), metaFolder, slug+core.MetaExtension)
 }
 
-func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, dependency bool, dependencies []string) error {
+func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, dependency bool, dependencies []string, updateChannel string) error {
 	updateMap := make(map[string]map[string]interface{})
 	var err error
 
@@ -196,14 +196,15 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, dep
 
 	folder := getCategoryForFile(modInfo.GameID, modInfo.ClassID, modInfo.PrimaryCategoryID)
 	modMeta := core.Mod{
-		Name:         modInfo.Name,
-		FileName:     fileInfo.FileName,
-		Version:      fileInfo.FriendlyName,
-		PageURL:      getModPageURL(modInfo),
-		Category:     folder,
-		Side:         core.UniversalSide,
-		Dependencies: dependencies,
-		Option:       option,
+		Name:          modInfo.Name,
+		FileName:      fileInfo.FileName,
+		Version:       fileInfo.FriendlyName,
+		PageURL:       getModPageURL(modInfo),
+		Category:      folder,
+		Side:          core.UniversalSide,
+		Dependencies:  dependencies,
+		Option:        option,
+		UpdateChannel: updateChannel,
 		Download: core.ModDownload{
 			HashFormat: hashFormat,
 			Hash:       hash,
@@ -316,8 +317,21 @@ func filterFileInfoLoaderIndex(packLoaders []string, fileInfoData modFileInfo) (
 	}
 }
 
+func isCFFileTypeAllowed(releaseType fileType, allowedChannel string) bool {
+	switch strings.ToLower(allowedChannel) {
+	case "release":
+		return releaseType == fileTypeRelease
+	case "beta":
+		return releaseType == fileTypeRelease || releaseType == fileTypeBeta
+	case "alpha":
+		fallthrough
+	default:
+		return true
+	}
+}
+
 // findLatestFile looks at mod info, and finds the latest file ID (and potentially the file info for it - may be null)
-func findLatestFile(modInfoData modInfo, mcVersions []string, packLoaders []string) (fileID uint32, fileInfoData *modFileInfo, fileName string) {
+func findLatestFile(modInfoData modInfo, mcVersions []string, packLoaders []string, allowedChannel string) (fileID uint32, fileInfoData *modFileInfo, fileName string) {
 	cfMcVersions := getCurseforgeVersions(mcVersions)
 	bestMcVer := -1
 	bestLoaderType := modloaderTypeAny
@@ -328,6 +342,9 @@ func findLatestFile(modInfoData modInfo, mcVersions []string, packLoaders []stri
 		loaderIdx, loaderValid := filterFileInfoLoaderIndex(packLoaders, v)
 
 		if mcVerIdx < 0 || !loaderValid {
+			continue
+		}
+		if !isCFFileTypeAllowed(v.FileType, allowedChannel) {
 			continue
 		}
 		// Compare first by Minecraft version (prefer higher indexes of mcVersions)
@@ -360,6 +377,9 @@ func findLatestFile(modInfoData modInfo, mcVersions []string, packLoaders []stri
 		loaderIdx, loaderValid := filterLoaderTypeIndex(packLoaders, v.Modloader)
 
 		if mcVerIdx < 0 || !loaderValid {
+			continue
+		}
+		if !isCFFileTypeAllowed(v.FileType, allowedChannel) {
 			continue
 		}
 		// Compare first by Minecraft version (prefer higher indexes of mcVersions)
@@ -456,7 +476,8 @@ func (u cfUpdater) CheckUpdate(mods []*core.Mod, pack core.Pack) ([]core.UpdateC
 		}
 		project := projectRaw.(cfUpdateData)
 
-		fileID, fileInfoData, fileName := findLatestFile(modInfos[i], mcVersions, packLoaders)
+		allowedChannel := pack.GetAllowedChannel(v)
+		fileID, fileInfoData, fileName := findLatestFile(modInfos[i], mcVersions, packLoaders, allowedChannel)
 		if fileID != project.FileID && fileID != 0 {
 			// Update (or downgrade, if changing to an older version) available!
 			results[i] = core.UpdateCheck{

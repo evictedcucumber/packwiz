@@ -69,3 +69,12 @@ type MetadataFixer interface {
 
 // MetadataFixers stores metadata fixers keyed by update system name (e.g., "modrinth", "curseforge").
 var MetadataFixers = make(map[string]MetadataFixer)
+
+// DependencyInstaller can check and install missing dependencies.
+type DependencyInstaller interface {
+	CheckAndInstallDependencies(mods []*Mod, pack Pack, index *Index) error
+}
+
+// DependencyInstallers stores dependency installers keyed by update system name.
+var DependencyInstallers = make(map[string]DependencyInstaller)
+

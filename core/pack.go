@@ -32,6 +32,7 @@ type Pack struct {
 	Versions map[string]string                 `toml:"versions"`
 	Export   map[string]map[string]interface{} `toml:"export"`
 	Options  map[string]interface{}            `toml:"options"`
+	ReleaseChannel string                      `toml:"release-channel,omitempty"`
 }
 
 const CurrentPackFormat = "packwiz:1.1.0"
@@ -237,3 +238,14 @@ func (pack Pack) GetLoaders() (loaders []string) {
 	}
 	return
 }
+
+func (pack Pack) GetAllowedChannel(mod *Mod) string {
+	if mod != nil && mod.UpdateChannel != "" {
+		return mod.UpdateChannel
+	}
+	if pack.ReleaseChannel != "" {
+		return pack.ReleaseChannel
+	}
+	return "alpha"
+}
+

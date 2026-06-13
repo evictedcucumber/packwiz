@@ -87,7 +87,11 @@ var installCmd = &cobra.Command{
 
 		// Got version ID; install using this ID
 		if versionID != "" {
-			err = installVersionById(versionID, versionFilename, pack, &index)
+			allowedChannel := updateChannelFlag
+			if allowedChannel == "" {
+				allowedChannel = pack.GetAllowedChannel(nil)
+			}
+			err = installVersionById(versionID, versionFilename, pack, &index, allowedChannel)
 			if err != nil {
 				fmt.Printf("Failed to add project: %s\n", err)
 				os.Exit(1)
@@ -102,6 +106,10 @@ var installCmd = &cobra.Command{
 			project, err = mrDefaultClient.Projects.Get(projectID)
 			if err == nil {
 				// We found a project with that id/slug
+				allowedChannel := updateChannelFlag
+				if allowedChannel == "" {
+					allowedChannel = pack.GetAllowedChannel(nil)
+				}
 				if version != "" {
 					// Try to look up version number
 					versionData, err := resolveVersion(project, version)
@@ -109,7 +117,7 @@ var installCmd = &cobra.Command{
 						fmt.Printf("Failed to add project: %s\n", err)
 						os.Exit(1)
 					}
-					err = installVersion(project, versionData, versionFilename, pack, &index)
+					err = installVersion(project, versionData, versionFilename, pack, &index, allowedChannel)
 					if err != nil {
 						fmt.Printf("Failed to add project: %s\n", err)
 						os.Exit(1)
@@ -118,7 +126,7 @@ var installCmd = &cobra.Command{
 				}
 
 				// No version specified; find latest
-				err = installProject(project, versionFilename, pack, &index)
+				err = installProject(project, versionFilename, pack, &index, allowedChannel)
 				if err != nil {
 					fmt.Printf("Failed to add project: %s\n", err)
 					os.Exit(1)
@@ -132,7 +140,7 @@ var installCmd = &cobra.Command{
 	},
 }
 
-func installVersionById(versionId string, versionFilename string, pack core.Pack, index *core.Index) error {
+func installVersionById(versionId string, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string) error {
 	version, err := mrDefaultClient.Versions.Get(versionId)
 	if err != nil {
 		return fmt.Errorf("failed to fetch version %s: %v", versionId, err)
@@ -143,10 +151,10 @@ func installVersionById(versionId string, versionFilename string, pack core.Pack
 		return fmt.Errorf("failed to fetch project %s: %v", *version.ProjectID, err)
 	}
 
-	return installVersion(project, version, versionFilename, pack, index)
+	return installVersion(project, version, versionFilename, pack, index, allowedChannel)
 }
 
-func installViaSearch(query string, versionFilename string, autoAcceptFirst bool, pack core.Pack, index *core.Index) error {
+func installViaSearch(query string, versionFilename string, autoAcceptFirst bool, pack core.Pack, index *core.Index, allowedChannel string) error {
 	mcVersions, err := pack.GetSupportedMCVersions()
 	if err != nil {
 		return err
@@ -170,7 +178,7 @@ func installViaSearch(query string, versionFilename string, autoAcceptFirst bool
 			return err
 		}
 
-		return installProject(project, versionFilename, pack, index)
+		return installProject(project, versionFilename, pack, index, allowedChannel)
 	}
 
 	// Create menu for the user to choose the correct project
@@ -198,14 +206,14 @@ func installViaSearch(query string, versionFilename string, autoAcceptFirst bool
 			return err
 		}
 
-		return installProject(project, versionFilename, pack, index)
+		return installProject(project, versionFilename, pack, index, allowedChannel)
 	})
 
 	return menu.Run()
 }
 
-func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index) error {
-	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack)
+func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string) error {
+	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, allowedChannel)
 	if err != nil {
 		return fmt.Errorf("failed to get latest version: %v", err)
 	}
@@ -213,7 +221,7 @@ func installProject(project *modrinthApi.Project, versionFilename string, pack c
 		return errors.New("mod not available for the configured Minecraft version(s) (use the 'packwiz settings acceptable-versions' command to accept more) or loader")
 	}
 
-	return installVersion(project, latestVersion, versionFilename, pack, index)
+	return installVersion(project, latestVersion, versionFilename, pack, index, allowedChannel)
 }
 
 const maxCycles = 20
@@ -236,197 +244,9 @@ type modrinthVersionQueueItem struct {
 	parentID  string
 }
 
-func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index) error {
+func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string) error {
 	if len(version.Files) == 0 {
 		return errors.New("version doesn't have any files attached")
-	}
-
-	installedProjects := getInstalledProjectIDs(index)
-	installedProjectPaths := getInstalledProjectPaths(index)
-	isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
-	mcVersion, err := pack.GetMCVersion()
-	if err != nil {
-		return err
-	}
-
-	resolvedDependencies := make(map[string]*depMetadataStore)
-	dependencyChildren := make(map[string]map[string]struct{})
-	queuedProjects := map[string]struct{}{}
-	queuedVersions := map[string]struct{}{}
-	projectQueue := make([]modrinthProjectQueueItem, 0)
-	versionQueue := make([]modrinthVersionQueueItem, 0)
-
-	currentProjectID := ""
-	if project.ID != nil {
-		currentProjectID = *project.ID
-	}
-
-	addEdge := func(parentID, childID string) {
-		if parentID == "" || childID == "" {
-			return
-		}
-		if _, ok := dependencyChildren[parentID]; !ok {
-			dependencyChildren[parentID] = make(map[string]struct{})
-		}
-		dependencyChildren[parentID][childID] = struct{}{}
-	}
-
-	enqueueProject := func(projectID, parentID string) {
-		if projectID == "" {
-			return
-		}
-		if slices.Contains(installedProjects, projectID) {
-			addEdge(parentID, projectID)
-			return
-		}
-		if _, ok := resolvedDependencies[projectID]; ok {
-			addEdge(parentID, projectID)
-			return
-		}
-		if _, ok := queuedProjects[projectID]; ok {
-			addEdge(parentID, projectID)
-			return
-		}
-		queuedProjects[projectID] = struct{}{}
-		projectQueue = append(projectQueue, modrinthProjectQueueItem{projectID: projectID, parentID: parentID})
-		addEdge(parentID, projectID)
-	}
-
-	enqueueVersion := func(versionID, parentID string) {
-		if versionID == "" {
-			return
-		}
-		if _, ok := queuedVersions[versionID]; ok {
-			return
-		}
-		queuedVersions[versionID] = struct{}{}
-		versionQueue = append(versionQueue, modrinthVersionQueueItem{versionID: versionID, parentID: parentID})
-	}
-
-	resolveDirectDependencies := func(nodeID string, deps []*modrinthApi.Dependency) {
-		for _, dep := range deps {
-			if dep == nil {
-				continue
-			}
-			if dep.DependencyType == nil || *dep.DependencyType != "required" {
-				continue
-			}
-			if dep.VersionID != nil {
-				enqueueVersion(*dep.VersionID, nodeID)
-				continue
-			}
-			if dep.ProjectID != nil {
-				enqueueProject(mapDepOverride(*dep.ProjectID, isQuilt, mcVersion), nodeID)
-			}
-		}
-	}
-
-	// Resolve the dependency graph first so each mod file can record direct references.
-	resolveDirectDependencies(currentProjectID, version.Dependencies)
-
-	cycles := 0
-	for len(projectQueue)+len(versionQueue) > 0 && cycles < maxCycles {
-		for len(versionQueue) > 0 {
-			item := versionQueue[0]
-			versionQueue = versionQueue[1:]
-
-			depVersion, err := mrDefaultClient.Versions.Get(item.versionID)
-			if err != nil {
-				fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
-				continue
-			}
-			if depVersion.ProjectID == nil {
-				continue
-			}
-			depProjectID := mapDepOverride(*depVersion.ProjectID, isQuilt, mcVersion)
-			enqueueProject(depProjectID, item.parentID)
-		}
-
-		if len(projectQueue) == 0 {
-			break
-		}
-
-		projectIDs := make([]string, 0, len(projectQueue))
-		for _, item := range projectQueue {
-			projectIDs = append(projectIDs, item.projectID)
-		}
-		projectQueue = projectQueue[:0]
-		slices.Sort(projectIDs)
-		projectIDs = slices.Compact(projectIDs)
-
-		depProjects, err := mrDefaultClient.Projects.GetMultiple(projectIDs)
-		if err != nil {
-			fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
-		}
-
-		for _, depProject := range depProjects {
-			if depProject.ID == nil {
-				return errors.New("failed to get dependency data: invalid response")
-			}
-			depProjectID := *depProject.ID
-			latestVersion, err := getLatestVersion(depProjectID, *depProject.Title, pack)
-			if err != nil {
-				fmt.Printf("Failed to get latest version of dependency %v: %v\n", *depProject.Title, err)
-				continue
-			}
-
-			var file = latestVersion.Files[0]
-			for _, v := range latestVersion.Files {
-				if *v.Primary {
-					file = v
-				}
-			}
-
-			metaPath, err := getModrinthMetaPath(depProject, latestVersion, pack)
-			if err != nil {
-				return err
-			}
-
-			resolvedDependencies[depProjectID] = &depMetadataStore{
-				projectInfo: depProject,
-				versionInfo: latestVersion,
-				fileInfo:    file,
-				metaPath:    metaPath,
-			}
-
-			resolveDirectDependencies(depProjectID, latestVersion.Dependencies)
-		}
-
-		cycles++
-	}
-	if cycles >= maxCycles {
-		return errors.New("dependencies recurse too deeply, try increasing maxCycles")
-	}
-
-	if len(resolvedDependencies) > 0 {
-		deps := make([]*depMetadataStore, 0, len(resolvedDependencies))
-		for id, dep := range resolvedDependencies {
-			if _, ok := dependencyChildren[currentProjectID][id]; ok {
-				deps = append(deps, dep)
-			}
-		}
-
-		if len(deps) > 0 {
-			fmt.Println("Dependencies found:")
-			for _, dep := range deps {
-				fmt.Println(*dep.projectInfo.Title)
-			}
-
-			if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
-				for _, dep := range deps {
-					depRefs := getModrinthDependencyRefs(*dep.projectInfo.ID, dependencyChildren, resolvedDependencies, installedProjectPaths, index)
-					err := createFileMeta(dep.projectInfo, dep.versionInfo, dep.fileInfo, pack, index, true, depRefs)
-					if err != nil {
-						return err
-					}
-					fmt.Printf("Dependency \"%s\" successfully added! (%s)\n", *dep.projectInfo.Title, *dep.fileInfo.Filename)
-				}
-			} else {
-				fmt.Println("Dependency installation skipped.")
-			}
-		} else {
-			fmt.Println("All dependencies are already added!")
-		}
 	}
 
 	var file = version.Files[0]
@@ -439,11 +259,26 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	// TODO: handle optional/required resource pack files
 
 	// Create the metadata file
-	rootDeps := getModrinthDependencyRefs(currentProjectID, dependencyChildren, resolvedDependencies, installedProjectPaths, index)
-	err = createFileMeta(project, version, file, pack, index, false, rootDeps)
+	err := createFileMeta(project, version, file, pack, index, false, nil, updateChannelFlag)
 	if err != nil {
 		return err
 	}
+
+	// Load the newly created mod file to pass it to CheckAndInstallDependencies
+	newModPath, err := getModrinthMetaPath(project, version, pack)
+	if err != nil {
+		return err
+	}
+	newMod, err := core.LoadMod(newModPath)
+	if err != nil {
+		return err
+	}
+
+	err = CheckAndInstallDependencies([]*core.Mod{&newMod}, pack, index)
+	if err != nil {
+		return err
+	}
+
 	if pack.ModList {
 		err = index.WriteModList()
 		if err != nil {
@@ -451,7 +286,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		}
 	}
 
-	err = index.SyncDependencyMetadata(pack, core.SyncDepsOpts{NormalizeAll: true})
+	err = index.SyncDependencyMetadata(pack, core.SyncDepsOpts{NormalizeAll: true, RefreshAll: true})
 	if err != nil {
 		return err
 	}
@@ -472,7 +307,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	return nil
 }
 
-func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, dependency bool, dependencies []string) error {
+func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, dependency bool, dependencies []string, updateChannel string) error {
 	updateMap := make(map[string]map[string]interface{})
 
 	var err error
@@ -509,14 +344,15 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 	}
 
 	modMeta := core.Mod{
-		Name:         *project.Title,
-		FileName:     *file.Filename,
-		Version:      getModrinthVersionLabel(version),
-		PageURL:      getProjectPageURL(project),
-		Category:     folder,
-		Side:         side,
-		Dependencies: dependencies,
-		Option:       &core.ModOption{Dependency: dependency},
+		Name:          *project.Title,
+		FileName:      *file.Filename,
+		Version:       getModrinthVersionLabel(version),
+		PageURL:       getProjectPageURL(project),
+		Category:      folder,
+		Side:          side,
+		Dependencies:  dependencies,
+		Option:        &core.ModOption{Dependency: dependency},
+		UpdateChannel: updateChannel,
 		Download: core.ModDownload{
 			URL:        *file.URL,
 			HashFormat: algorithm,
@@ -578,33 +414,6 @@ func getInstalledProjectPaths(index *core.Index) map[string]string {
 	return installedProjects
 }
 
-func getModrinthDependencyRefs(projectID string, dependencyChildren map[string]map[string]struct{}, resolvedDependencies map[string]*depMetadataStore, installedProjectPaths map[string]string, index *core.Index) []string {
-	childIDs := dependencyChildren[projectID]
-	if len(childIDs) == 0 {
-		return nil
-	}
-
-	dependencies := make([]string, 0, len(childIDs))
-	for childID := range childIDs {
-		var path string
-		if dep, ok := resolvedDependencies[childID]; ok {
-			path = dep.metaPath
-		} else if installedPath, ok := installedProjectPaths[childID]; ok {
-			path = installedPath
-		} else {
-			continue
-		}
-		relPath, err := index.ToIndexRelativePath(path)
-		if err != nil {
-			relPath = filepath.ToSlash(filepath.Clean(path))
-		}
-		dependencies = append(dependencies, relPath)
-	}
-	slices.Sort(dependencies)
-	dependencies = slices.Compact(dependencies)
-	return dependencies
-}
-
 func getProjectPageURL(project *modrinthApi.Project) string {
 	if project == nil || project.ProjectType == nil || project.Slug == nil {
 		return ""
@@ -625,9 +434,214 @@ func getModrinthVersionLabel(version *modrinthApi.Version) string {
 	return ""
 }
 
+func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.Index) error {
+	installedProjects := getInstalledProjectIDs(index)
+	isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
+	mcVersion, err := pack.GetMCVersion()
+	if err != nil {
+		return err
+	}
+
+	resolvedDependencies := make(map[string]*depMetadataStore)
+	dependencyChildren := make(map[string]map[string]struct{})
+	queuedProjects := map[string]struct{}{}
+	queuedVersions := map[string]struct{}{}
+	projectQueue := make([]modrinthProjectQueueItem, 0)
+	versionQueue := make([]modrinthVersionQueueItem, 0)
+
+	addEdge := func(parentID, childID string) {
+		if parentID == "" || childID == "" {
+			return
+		}
+		if _, ok := dependencyChildren[parentID]; !ok {
+			dependencyChildren[parentID] = make(map[string]struct{})
+		}
+		dependencyChildren[parentID][childID] = struct{}{}
+	}
+
+	enqueueProject := func(projectID, parentID string) {
+		if projectID == "" {
+			return
+		}
+		if slices.Contains(installedProjects, projectID) {
+			addEdge(parentID, projectID)
+			return
+		}
+		if _, ok := resolvedDependencies[projectID]; ok {
+			addEdge(parentID, projectID)
+			return
+		}
+		if _, ok := queuedProjects[projectID]; ok {
+			addEdge(parentID, projectID)
+			return
+		}
+		queuedProjects[projectID] = struct{}{}
+		projectQueue = append(projectQueue, modrinthProjectQueueItem{projectID: projectID, parentID: parentID})
+		addEdge(parentID, projectID)
+	}
+
+	enqueueVersion := func(versionID, parentID string) {
+		if versionID == "" {
+			return
+		}
+		if _, ok := queuedVersions[versionID]; ok {
+			return
+		}
+		queuedVersions[versionID] = struct{}{}
+		versionQueue = append(versionQueue, modrinthVersionQueueItem{versionID: versionID, parentID: parentID})
+	}
+
+	resolveDirectDependencies := func(nodeID string, deps []*modrinthApi.Dependency) {
+		for _, dep := range deps {
+			if dep == nil {
+				continue
+			}
+			if dep.DependencyType == nil || *dep.DependencyType != "required" {
+				continue
+			}
+			if dep.VersionID != nil {
+				enqueueVersion(*dep.VersionID, nodeID)
+				continue
+			}
+			if dep.ProjectID != nil {
+				enqueueProject(mapDepOverride(*dep.ProjectID, isQuilt, mcVersion), nodeID)
+			}
+		}
+	}
+
+	for _, m := range mods {
+		rawData, ok := m.GetParsedUpdateData("modrinth")
+		if !ok {
+			continue
+		}
+		data := rawData.(mrUpdateData)
+		if data.InstalledVersion == "" {
+			continue
+		}
+		depVersion, err := mrDefaultClient.Versions.Get(data.InstalledVersion)
+		if err != nil {
+			fmt.Printf("Warning: failed to get version metadata for %s: %v\n", m.Name, err)
+			continue
+		}
+		resolveDirectDependencies(data.ProjectID, depVersion.Dependencies)
+	}
+
+	cycles := 0
+	for len(projectQueue)+len(versionQueue) > 0 && cycles < maxCycles {
+		for len(versionQueue) > 0 {
+			item := versionQueue[0]
+			versionQueue = versionQueue[1:]
+
+			depVersion, err := mrDefaultClient.Versions.Get(item.versionID)
+			if err != nil {
+				fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
+				continue
+			}
+			if depVersion.ProjectID == nil {
+				continue
+			}
+			depProjectID := mapDepOverride(*depVersion.ProjectID, isQuilt, mcVersion)
+			enqueueProject(depProjectID, item.parentID)
+		}
+
+		if len(projectQueue) == 0 {
+			break
+		}
+
+		projectIDs := make([]string, 0, len(projectQueue))
+		for _, item := range projectQueue {
+			projectIDs = append(projectIDs, item.projectID)
+		}
+		projectQueue = projectQueue[:0]
+		slices.Sort(projectIDs)
+		projectIDs = slices.Compact(projectIDs)
+
+		depProjects, err := mrDefaultClient.Projects.GetMultiple(projectIDs)
+		if err != nil {
+			fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
+		}
+
+		for _, depProject := range depProjects {
+			if depProject.ID == nil {
+				return errors.New("failed to get dependency data: invalid response")
+			}
+			depProjectID := *depProject.ID
+			allowedChannel := pack.GetAllowedChannel(nil)
+			latestVersion, err := getLatestVersion(depProjectID, *depProject.Title, pack, allowedChannel)
+			if err != nil {
+				fmt.Printf("Failed to get latest version of dependency %v: %v\n", *depProject.Title, err)
+				continue
+			}
+
+			var file = latestVersion.Files[0]
+			for _, v := range latestVersion.Files {
+				if *v.Primary {
+					file = v
+				}
+			}
+
+			metaPath, err := getModrinthMetaPath(depProject, latestVersion, pack)
+			if err != nil {
+				return err
+			}
+
+			resolvedDependencies[depProjectID] = &depMetadataStore{
+				projectInfo: depProject,
+				versionInfo: latestVersion,
+				fileInfo:    file,
+				metaPath:    metaPath,
+			}
+
+			resolveDirectDependencies(depProjectID, latestVersion.Dependencies)
+		}
+
+		cycles++
+	}
+	if cycles >= maxCycles {
+		return errors.New("dependencies recurse too deeply, try increasing maxCycles")
+	}
+
+	if len(resolvedDependencies) > 0 {
+		depsToInstall := make([]*depMetadataStore, 0, len(resolvedDependencies))
+		for id, dep := range resolvedDependencies {
+			if !slices.Contains(installedProjects, id) {
+				depsToInstall = append(depsToInstall, dep)
+			}
+		}
+
+		if len(depsToInstall) > 0 {
+			fmt.Println("Dependencies found:")
+			for _, dep := range depsToInstall {
+				fmt.Println(*dep.projectInfo.Title)
+			}
+
+			if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
+				for _, dep := range depsToInstall {
+					err := createFileMeta(dep.projectInfo, dep.versionInfo, dep.fileInfo, pack, index, true, nil, "")
+					if err != nil {
+						return err
+					}
+					fmt.Printf("Dependency \"%s\" successfully added! (%s)\n", *dep.projectInfo.Title, *dep.fileInfo.Filename)
+				}
+			} else {
+				fmt.Println("Dependency installation skipped.")
+			}
+		}
+	}
+
+	return nil
+}
+
+type mrDependencyInstaller struct{}
+
+func (i mrDependencyInstaller) CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.Index) error {
+	return CheckAndInstallDependencies(mods, pack, index)
+}
+
 var projectIDFlag string
 var versionIDFlag string
 var versionFilenameFlag string
+var updateChannelFlag string
 
 func init() {
 	modrinthCmd.AddCommand(installCmd)
@@ -635,4 +649,7 @@ func init() {
 	installCmd.Flags().StringVar(&projectIDFlag, "project-id", "", "The Modrinth project ID to use")
 	installCmd.Flags().StringVar(&versionIDFlag, "version-id", "", "The Modrinth version ID to use")
 	installCmd.Flags().StringVar(&versionFilenameFlag, "version-filename", "", "The Modrinth version filename to use")
+	installCmd.Flags().StringVar(&updateChannelFlag, "update-channel", "", "The update channel to use for this mod (release, beta, alpha)")
+
+	core.DependencyInstallers["modrinth"] = mrDependencyInstaller{}
 }

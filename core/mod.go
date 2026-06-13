@@ -29,6 +29,8 @@ type Mod struct {
 	// Dependencies stores references to other mod metadata files this mod depends on.
 	Dependencies []string `toml:"dependencies,omitempty"`
 
+	UpdateChannel string `toml:"update-channel,omitempty"`
+
 	Option *ModOption `toml:"option,omitempty"`
 }
 

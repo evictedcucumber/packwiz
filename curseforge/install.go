@@ -52,11 +52,6 @@ var installCmd = &cobra.Command{
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		primaryMCVersion, err := pack.GetMCVersion()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
 
 		game := gameFlag
 		category := categoryFlag
@@ -133,145 +128,39 @@ var installCmd = &cobra.Command{
 			}
 		}
 
+		allowedChannel := updateChannelFlag
+		if allowedChannel == "" {
+			allowedChannel = pack.GetAllowedChannel(nil)
+		}
+
 		var fileInfoData modFileInfo
-		fileInfoData, err = getLatestFile(modInfoData, mcVersions, fileID, pack.GetCompatibleLoaders())
+		fileInfoData, err = getLatestFile(modInfoData, mcVersions, fileID, pack.GetCompatibleLoaders(), allowedChannel)
 		if err != nil {
 			fmt.Printf("Failed to get file for project: %v\n", err)
 			os.Exit(1)
 		}
 
-		installedProjectPaths := getInstalledCurseForgeProjectPaths(&index)
-		resolvedDependencies := make(map[uint32]*installableDep)
-		dependencyChildren := make(map[uint32]map[uint32]struct{})
-
-		if len(fileInfoData.Dependencies) > 0 {
-			isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
-			queuedProjects := make(map[uint32]struct{})
-			depIDPendingQueue := make([]cfProjectQueueItem, 0)
-
-			addEdge := func(parentID, childID uint32) {
-				if parentID == 0 || childID == 0 {
-					return
-				}
-				if _, ok := dependencyChildren[parentID]; !ok {
-					dependencyChildren[parentID] = make(map[uint32]struct{})
-				}
-				dependencyChildren[parentID][childID] = struct{}{}
-			}
-
-			enqueueProject := func(modID uint32, parentID uint32) {
-				if modID == 0 {
-					return
-				}
-				if _, ok := resolvedDependencies[modID]; ok {
-					addEdge(parentID, modID)
-					return
-				}
-				if _, ok := queuedProjects[modID]; ok {
-					addEdge(parentID, modID)
-					return
-				}
-				queuedProjects[modID] = struct{}{}
-				depIDPendingQueue = append(depIDPendingQueue, cfProjectQueueItem{modID: modID, parentID: parentID})
-				addEdge(parentID, modID)
-			}
-
-			for _, dep := range fileInfoData.Dependencies {
-				if dep.Type == dependencyTypeRequired {
-					enqueueProject(mapDepOverride(dep.ModID, isQuilt, primaryMCVersion), modInfoData.ID)
-				}
-			}
-
-			if len(depIDPendingQueue) > 0 {
-				fmt.Println("Finding dependencies...")
-
-				cycles := 0
-				for len(depIDPendingQueue) > 0 && cycles < maxCycles {
-					projectIDs := make([]uint32, 0, len(depIDPendingQueue))
-					for _, item := range depIDPendingQueue {
-						projectIDs = append(projectIDs, item.modID)
-					}
-					depIDPendingQueue = depIDPendingQueue[:0]
-					slices.Sort(projectIDs)
-					projectIDs = slices.Compact(projectIDs)
-
-					filteredIDs := make([]uint32, 0, len(projectIDs))
-					for _, id := range projectIDs {
-						if _, ok := installedProjectPaths[id]; ok {
-							continue
-						}
-						if _, ok := resolvedDependencies[id]; ok {
-							continue
-						}
-						filteredIDs = append(filteredIDs, id)
-					}
-
-					if len(filteredIDs) == 0 {
-						break
-					}
-
-					depInfoData, err := cfDefaultClient.getModInfoMultiple(filteredIDs)
-					if err != nil {
-						fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
-					}
-
-					for _, currData := range depInfoData {
-						depFileInfo, err := getLatestFile(currData, mcVersions, 0, pack.GetCompatibleLoaders())
-						if err != nil {
-							fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
-							continue
-						}
-
-						metaPath := getCurseForgeMetaPath(currData)
-						resolvedDependencies[currData.ID] = &installableDep{
-							modInfo:  currData,
-							fileInfo: depFileInfo,
-							metaPath: metaPath,
-						}
-
-						for _, dep := range depFileInfo.Dependencies {
-							if dep.Type == dependencyTypeRequired {
-								enqueueProject(mapDepOverride(dep.ModID, isQuilt, primaryMCVersion), currData.ID)
-							}
-						}
-					}
-
-					cycles++
-				}
-				if cycles >= maxCycles {
-					fmt.Println("Dependencies recurse too deeply! Try increasing maxCycles.")
-					os.Exit(1)
-				}
-
-				if len(resolvedDependencies) > 0 {
-					fmt.Println("Dependencies found:")
-					for _, v := range resolvedDependencies {
-						fmt.Println(v.Name)
-					}
-
-					if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
-						for _, v := range resolvedDependencies {
-							depRefs := getCurseForgeDependencyRefs(v.ID, dependencyChildren, resolvedDependencies, installedProjectPaths, &index)
-							err = createModFile(v.modInfo, v.fileInfo, &index, true, depRefs)
-							if err != nil {
-								fmt.Println(err)
-								os.Exit(1)
-							}
-							fmt.Printf("Dependency \"%s\" successfully added! (%s)\n", v.modInfo.Name, v.fileInfo.FileName)
-						}
-					}
-				} else {
-					fmt.Println("All dependencies are already added!")
-				}
-			}
-		}
-
-		rootDeps := getCurseForgeDependencyRefs(modInfoData.ID, dependencyChildren, resolvedDependencies, installedProjectPaths, &index)
-		err = createModFile(modInfoData, fileInfoData, &index, false, rootDeps)
+		// Create the metadata file first
+		err = createModFile(modInfoData, fileInfoData, &index, false, nil, updateChannelFlag)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
+
+		// Load the newly created mod file to pass it to CheckAndInstallDependencies
+		newModPath := getCurseForgeMetaPath(modInfoData)
+		newMod, err := core.LoadMod(newModPath)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		err = CheckAndInstallDependencies([]*core.Mod{&newMod}, pack, &index)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
 		if pack.ModList {
 			err = index.WriteModList()
 			if err != nil {
@@ -280,7 +169,7 @@ var installCmd = &cobra.Command{
 			}
 		}
 
-		err = index.SyncDependencyMetadata(pack, core.SyncDepsOpts{NormalizeAll: true})
+		err = index.SyncDependencyMetadata(pack, core.SyncDepsOpts{NormalizeAll: true, RefreshAll: true})
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -504,14 +393,14 @@ func searchCurseforgeInternal(searchTerm string, isSlug bool, game string, categ
 	}
 }
 
-func getLatestFile(modInfoData modInfo, mcVersions []string, fileID uint32, packLoaders []string) (modFileInfo, error) {
+func getLatestFile(modInfoData modInfo, mcVersions []string, fileID uint32, packLoaders []string, allowedChannel string) (modFileInfo, error) {
 	if fileID == 0 {
 		if len(modInfoData.LatestFiles) == 0 && len(modInfoData.GameVersionLatestFiles) == 0 {
 			return modFileInfo{}, fmt.Errorf("addon %d has no files", modInfoData.ID)
 		}
 
 		var fileInfoData *modFileInfo
-		fileID, fileInfoData, _ = findLatestFile(modInfoData, mcVersions, packLoaders)
+		fileID, fileInfoData, _ = findLatestFile(modInfoData, mcVersions, packLoaders, allowedChannel)
 		if fileInfoData != nil {
 			return *fileInfoData, nil
 		}
@@ -529,11 +418,173 @@ func getLatestFile(modInfoData modInfo, mcVersions []string, fileID uint32, pack
 	return fileInfoData, nil
 }
 
+func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.Index) error {
+	installedProjectPaths := getInstalledCurseForgeProjectPaths(index)
+	isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
+	mcVersions, err := pack.GetSupportedMCVersions()
+	if err != nil {
+		return err
+	}
+	primaryMCVersion, err := pack.GetMCVersion()
+	if err != nil {
+		return err
+	}
+
+	resolvedDependencies := make(map[uint32]*installableDep)
+	dependencyChildren := make(map[uint32]map[uint32]struct{})
+	queuedProjects := make(map[uint32]struct{})
+	depIDPendingQueue := make([]cfProjectQueueItem, 0)
+
+	addEdge := func(parentID, childID uint32) {
+		if parentID == 0 || childID == 0 {
+			return
+		}
+		if _, ok := dependencyChildren[parentID]; !ok {
+			dependencyChildren[parentID] = make(map[uint32]struct{})
+		}
+		dependencyChildren[parentID][childID] = struct{}{}
+	}
+
+	enqueueProject := func(modID uint32, parentID uint32) {
+		if modID == 0 {
+			return
+		}
+		if _, ok := resolvedDependencies[modID]; ok {
+			addEdge(parentID, modID)
+			return
+		}
+		if _, ok := queuedProjects[modID]; ok {
+			addEdge(parentID, modID)
+			return
+		}
+		queuedProjects[modID] = struct{}{}
+		depIDPendingQueue = append(depIDPendingQueue, cfProjectQueueItem{modID: modID, parentID: parentID})
+		addEdge(parentID, modID)
+	}
+
+	for _, m := range mods {
+		rawData, ok := m.GetParsedUpdateData("curseforge")
+		if !ok {
+			continue
+		}
+		data := rawData.(cfUpdateData)
+		if data.ProjectID == 0 || data.FileID == 0 {
+			continue
+		}
+		fileInfoData, err := cfDefaultClient.getFileInfo(data.ProjectID, data.FileID)
+		if err != nil {
+			fmt.Printf("Warning: failed to get file info for dependency check of %s: %v\n", m.Name, err)
+			continue
+		}
+		for _, dep := range fileInfoData.Dependencies {
+			if dep.Type == dependencyTypeRequired {
+				enqueueProject(mapDepOverride(dep.ModID, isQuilt, primaryMCVersion), data.ProjectID)
+			}
+		}
+	}
+
+	if len(depIDPendingQueue) > 0 {
+		fmt.Println("Finding dependencies...")
+
+		cycles := 0
+		for len(depIDPendingQueue) > 0 && cycles < maxCycles {
+			projectIDs := make([]uint32, 0, len(depIDPendingQueue))
+			for _, item := range depIDPendingQueue {
+				projectIDs = append(projectIDs, item.modID)
+			}
+			depIDPendingQueue = depIDPendingQueue[:0]
+			slices.Sort(projectIDs)
+			projectIDs = slices.Compact(projectIDs)
+
+			filteredIDs := make([]uint32, 0, len(projectIDs))
+			for _, id := range projectIDs {
+				if _, ok := installedProjectPaths[id]; ok {
+					continue
+				}
+				if _, ok := resolvedDependencies[id]; ok {
+					continue
+				}
+				filteredIDs = append(filteredIDs, id)
+			}
+
+			if len(filteredIDs) == 0 {
+				break
+			}
+
+			depInfoData, err := cfDefaultClient.getModInfoMultiple(filteredIDs)
+			if err != nil {
+				fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
+			}
+
+			for _, currData := range depInfoData {
+				allowedChannel := pack.GetAllowedChannel(nil)
+				depFileInfo, err := getLatestFile(currData, mcVersions, 0, pack.GetCompatibleLoaders(), allowedChannel)
+				if err != nil {
+					fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
+					continue
+				}
+
+				metaPath := getCurseForgeMetaPath(currData)
+				resolvedDependencies[currData.ID] = &installableDep{
+					modInfo:  currData,
+					fileInfo: depFileInfo,
+					metaPath: metaPath,
+				}
+
+				for _, dep := range depFileInfo.Dependencies {
+					if dep.Type == dependencyTypeRequired {
+						enqueueProject(mapDepOverride(dep.ModID, isQuilt, primaryMCVersion), currData.ID)
+					}
+				}
+			}
+
+			cycles++
+		}
+		if cycles >= maxCycles {
+			return errors.New("dependencies recurse too deeply, try increasing maxCycles")
+		}
+
+		if len(resolvedDependencies) > 0 {
+			depsToInstall := make([]*installableDep, 0, len(resolvedDependencies))
+			for id, dep := range resolvedDependencies {
+				if _, ok := installedProjectPaths[id]; !ok {
+					depsToInstall = append(depsToInstall, dep)
+				}
+			}
+
+			if len(depsToInstall) > 0 {
+				fmt.Println("Dependencies found:")
+				for _, v := range depsToInstall {
+					fmt.Println(v.Name)
+				}
+
+				if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
+					for _, v := range depsToInstall {
+						err = createModFile(v.modInfo, v.fileInfo, index, true, nil, "")
+						if err != nil {
+							return err
+						}
+						fmt.Printf("Dependency \"%s\" successfully added! (%s)\n", v.modInfo.Name, v.fileInfo.FileName)
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+type cfDependencyInstaller struct{}
+
+func (i cfDependencyInstaller) CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.Index) error {
+	return CheckAndInstallDependencies(mods, pack, index)
+}
+
 var addonIDFlag uint32
 var fileIDFlag uint32
-
 var gameFlag string
 var categoryFlag string
+var updateChannelFlag string
 
 func init() {
 	curseforgeCmd.AddCommand(installCmd)
@@ -542,4 +593,7 @@ func init() {
 	installCmd.Flags().Uint32Var(&fileIDFlag, "file-id", 0, "The CurseForge file ID to use")
 	installCmd.Flags().StringVar(&gameFlag, "game", "minecraft", "The game to add files from (slug, as stored in URLs); the game in the URL takes precedence")
 	installCmd.Flags().StringVar(&categoryFlag, "category", "", "The category to add files from (slug, as stored in URLs); the category in the URL takes precedence")
+	installCmd.Flags().StringVar(&updateChannelFlag, "update-channel", "", "The update channel to use for this mod (release, beta, alpha)")
+
+	core.DependencyInstallers["curseforge"] = cfDependencyInstaller{}
 }

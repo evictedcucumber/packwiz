@@ -199,7 +199,23 @@ var UpdateCmd = &cobra.Command{
 			}
 		}
 
-		err = finalizePackWithDependencies(&pack, &index, core.SyncDepsOpts{RefreshMods: updatedMods})
+		// Check and install missing dependencies for the updated mods
+		modsByUpdater := make(map[string][]*core.Mod)
+		for _, m := range updatedMods {
+			for updaterName := range m.Update {
+				modsByUpdater[updaterName] = append(modsByUpdater[updaterName], m)
+			}
+		}
+		for updaterName, modsList := range modsByUpdater {
+			if installer, ok := core.DependencyInstallers[updaterName]; ok {
+				err = installer.CheckAndInstallDependencies(modsList, pack, &index)
+				if err != nil {
+					fmt.Printf("Failed to check dependencies for %s: %v\n", updaterName, err)
+				}
+			}
+		}
+
+		err = finalizePackWithDependencies(&pack, &index, core.SyncDepsOpts{NormalizeAll: true, RefreshAll: true})
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
