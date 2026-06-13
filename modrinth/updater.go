@@ -55,11 +55,6 @@ func (u mrUpdater) CheckUpdate(mods []*core.Mod, pack core.Pack) ([]core.UpdateC
 			continue
 		}
 
-		if *newVersion.ID == data.InstalledVersion { //The latest version from the site is the same as the installed one
-			results[i] = core.UpdateCheck{UpdateAvailable: false}
-			continue
-		}
-
 		if len(newVersion.Files) == 0 {
 			results[i] = core.UpdateCheck{Error: errors.New("new version doesn't have any files")}
 			continue
@@ -73,9 +68,23 @@ func (u mrUpdater) CheckUpdate(mods []*core.Mod, pack core.Pack) ([]core.UpdateC
 			}
 		}
 
+		// Check if version is different
+		updateAvailable := *newVersion.ID != data.InstalledVersion
+		updateString := mod.FileName + " -> " + *newFilename
+
+		// If already on latest version, still return version info for requery mode
+		if !updateAvailable {
+			results[i] = core.UpdateCheck{
+				UpdateAvailable: false,
+				UpdateString:    updateString,
+				CachedState:     cachedStateStore{data.ProjectID, newVersion},
+			}
+			continue
+		}
+
 		results[i] = core.UpdateCheck{
 			UpdateAvailable: true,
-			UpdateString:    mod.FileName + " -> " + *newFilename,
+			UpdateString:    updateString,
 			CachedState:     cachedStateStore{data.ProjectID, newVersion},
 		}
 	}
@@ -102,6 +111,7 @@ func (u mrUpdater) DoUpdate(mods []*core.Mod, cachedState []interface{}) error {
 		}
 
 		mod.FileName = *file.Filename
+		mod.Version = getModrinthVersionLabel(version)
 		mod.Download = core.ModDownload{
 			URL:        *file.URL,
 			HashFormat: algorithm,

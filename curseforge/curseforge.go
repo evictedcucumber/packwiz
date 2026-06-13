@@ -478,17 +478,32 @@ func (u cfUpdater) CheckUpdate(mods []*core.Mod, pack core.Pack) ([]core.UpdateC
 
 		allowedChannel := pack.GetAllowedChannel(v)
 		fileID, fileInfoData, fileName := findLatestFile(modInfos[i], mcVersions, packLoaders, allowedChannel)
-		if fileID != project.FileID && fileID != 0 {
-			// Update (or downgrade, if changing to an older version) available!
-			results[i] = core.UpdateCheck{
-				UpdateAvailable: true,
-				UpdateString:    v.FileName + " -> " + fileName,
-				CachedState:     cachedStateStore{modInfos[i], fileID, fileInfoData},
+		
+		updateString := v.FileName + " -> " + fileName
+		
+		// Check if version is different
+		updateAvailable := fileID != project.FileID && fileID != 0
+		
+		// If already on latest version, still return version info for requery mode
+		if !updateAvailable {
+			if fileID != 0 {
+				results[i] = core.UpdateCheck{
+					UpdateAvailable: false,
+					UpdateString:    updateString,
+					CachedState:     cachedStateStore{modInfos[i], fileID, fileInfoData},
+				}
+			} else {
+				// Could not find a file, too old: no update available
+				results[i] = core.UpdateCheck{UpdateAvailable: false}
 			}
-		} else {
-			// Could not find a file, too old, or up to date: no update available
-			results[i] = core.UpdateCheck{UpdateAvailable: false}
 			continue
+		}
+
+		// Update (or downgrade, if changing to an older version) available!
+		results[i] = core.UpdateCheck{
+			UpdateAvailable: true,
+			UpdateString:    updateString,
+			CachedState:     cachedStateStore{modInfos[i], fileID, fileInfoData},
 		}
 	}
 	return results, nil
@@ -512,6 +527,9 @@ func (u cfUpdater) DoUpdate(mods []*core.Mod, cachedState []interface{}) error {
 
 		v.FileName = fileInfoData.FileName
 		v.Name = modState.Name
+		if fileInfoData.FriendlyName != "" {
+			v.Version = fileInfoData.FriendlyName
+		}
 		hash, hashFormat := fileInfoData.getBestHash()
 		v.Download = core.ModDownload{
 			HashFormat: hashFormat,

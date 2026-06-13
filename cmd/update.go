@@ -32,6 +32,11 @@ var UpdateCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		requeryMode := viper.GetBool("update.requery")
+		if requeryMode {
+			fmt.Println("Requery mode: checking all mods against release channel settings...")
+		}
+
 		var singleUpdatedName string
 		updatedMods := make([]*core.Mod, 0)
 		if viper.GetBool("update.all") {
@@ -78,14 +83,18 @@ var UpdateCmd = &cobra.Command{
 						fmt.Printf("Failed to check updates for %s: %s\n", v[i].Name, check.Error.Error())
 						continue
 					}
-					if check.UpdateAvailable {
+					if check.UpdateAvailable || requeryMode {
 						if v[i].Pin {
 							fmt.Printf("Update skipped for pinned mod %s\n", v[i].Name)
 							continue
 						}
 
 						if !updatesFound {
-							fmt.Println("Updates found:")
+							if requeryMode {
+								fmt.Println("Mods to requery:")
+							} else {
+								fmt.Println("Updates found:")
+							}
 							updatesFound = true
 						}
 						fmt.Printf("%s: %s\n", v[i].Name, check.UpdateString)
@@ -96,11 +105,19 @@ var UpdateCmd = &cobra.Command{
 			}
 
 			if !updatesFound {
-				fmt.Println("All files are up to date!")
+				if requeryMode {
+					fmt.Println("All mods already match the release channel settings!")
+				} else {
+					fmt.Println("All files are up to date!")
+				}
 				return
 			}
 
-			if !cmdshared.PromptYesNo("Do you want to update? [Y/n]: ") {
+			promptMsg := "Do you want to update? [Y/n]: "
+			if requeryMode {
+				promptMsg = "Do you want to requery these mods? [Y/n]: "
+			}
+			if !cmdshared.PromptYesNo(promptMsg) {
 				fmt.Println("Cancelled!")
 				return
 			}
@@ -165,8 +182,17 @@ var UpdateCmd = &cobra.Command{
 					os.Exit(1)
 				}
 
-				if check[0].UpdateAvailable {
-					fmt.Printf("Update available: %s\n", check[0].UpdateString)
+				if check[0].UpdateAvailable || requeryMode {
+					if requeryMode {
+						fmt.Printf("Requery: %s\n", check[0].UpdateString)
+					} else {
+						fmt.Printf("Update available: %s\n", check[0].UpdateString)
+					}
+
+					if !cmdshared.PromptYesNo("Do you want to update? [Y/n]: ") {
+						fmt.Println("Cancelled!")
+						return
+					}
 
 					err = updater.DoUpdate([]*core.Mod{&modData}, []interface{}{check[0].CachedState})
 					if err != nil {
@@ -233,4 +259,7 @@ func init() {
 
 	UpdateCmd.Flags().BoolP("all", "a", false, "Update all external files")
 	_ = viper.BindPFlag("update.all", UpdateCmd.Flags().Lookup("all"))
+
+	UpdateCmd.Flags().Bool("requery", false, "Requery all mods against release channel settings (ignores current version)")
+	_ = viper.BindPFlag("update.requery", UpdateCmd.Flags().Lookup("requery"))
 }

@@ -91,7 +91,7 @@ var installCmd = &cobra.Command{
 			if allowedChannel == "" {
 				allowedChannel = pack.GetAllowedChannel(nil)
 			}
-			err = installVersionById(versionID, versionFilename, pack, &index, allowedChannel)
+			err = installVersionById(versionID, versionFilename, pack, &index, allowedChannel, allowedChannel)
 			if err != nil {
 				fmt.Printf("Failed to add project: %s\n", err)
 				os.Exit(1)
@@ -117,7 +117,7 @@ var installCmd = &cobra.Command{
 						fmt.Printf("Failed to add project: %s\n", err)
 						os.Exit(1)
 					}
-					err = installVersion(project, versionData, versionFilename, pack, &index, allowedChannel)
+					err = installVersion(project, versionData, versionFilename, pack, &index, allowedChannel, allowedChannel)
 					if err != nil {
 						fmt.Printf("Failed to add project: %s\n", err)
 						os.Exit(1)
@@ -126,7 +126,7 @@ var installCmd = &cobra.Command{
 				}
 
 				// No version specified; find latest
-				err = installProject(project, versionFilename, pack, &index, allowedChannel)
+				err = installProject(project, versionFilename, pack, &index, allowedChannel, allowedChannel)
 				if err != nil {
 					fmt.Printf("Failed to add project: %s\n", err)
 					os.Exit(1)
@@ -140,7 +140,7 @@ var installCmd = &cobra.Command{
 	},
 }
 
-func installVersionById(versionId string, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string) error {
+func installVersionById(versionId string, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string, updateChannel string) error {
 	version, err := mrDefaultClient.Versions.Get(versionId)
 	if err != nil {
 		return fmt.Errorf("failed to fetch version %s: %v", versionId, err)
@@ -151,7 +151,7 @@ func installVersionById(versionId string, versionFilename string, pack core.Pack
 		return fmt.Errorf("failed to fetch project %s: %v", *version.ProjectID, err)
 	}
 
-	return installVersion(project, version, versionFilename, pack, index, allowedChannel)
+	return installVersion(project, version, versionFilename, pack, index, allowedChannel, updateChannel)
 }
 
 func installViaSearch(query string, versionFilename string, autoAcceptFirst bool, pack core.Pack, index *core.Index, allowedChannel string) error {
@@ -178,7 +178,7 @@ func installViaSearch(query string, versionFilename string, autoAcceptFirst bool
 			return err
 		}
 
-		return installProject(project, versionFilename, pack, index, allowedChannel)
+		return installProject(project, versionFilename, pack, index, allowedChannel, allowedChannel)
 	}
 
 	// Create menu for the user to choose the correct project
@@ -206,13 +206,13 @@ func installViaSearch(query string, versionFilename string, autoAcceptFirst bool
 			return err
 		}
 
-		return installProject(project, versionFilename, pack, index, allowedChannel)
+		return installProject(project, versionFilename, pack, index, allowedChannel, allowedChannel)
 	})
 
 	return menu.Run()
 }
 
-func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string) error {
+func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string, updateChannel string) error {
 	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, allowedChannel)
 	if err != nil {
 		return fmt.Errorf("failed to get latest version: %v", err)
@@ -221,7 +221,7 @@ func installProject(project *modrinthApi.Project, versionFilename string, pack c
 		return errors.New("mod not available for the configured Minecraft version(s) (use the 'packwiz settings acceptable-versions' command to accept more) or loader")
 	}
 
-	return installVersion(project, latestVersion, versionFilename, pack, index, allowedChannel)
+	return installVersion(project, latestVersion, versionFilename, pack, index, allowedChannel, updateChannel)
 }
 
 const maxCycles = 20
@@ -245,7 +245,7 @@ type modrinthVersionQueueItem struct {
 	parentID  string
 }
 
-func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string) error {
+func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string, updateChannel string) error {
 	if len(version.Files) == 0 {
 		return errors.New("version doesn't have any files attached")
 	}
@@ -260,7 +260,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	// TODO: handle optional/required resource pack files
 
 	// Create the metadata file
-	err := createFileMeta(project, version, file, pack, index, false, nil, updateChannelFlag)
+	err := createFileMeta(project, version, file, pack, index, false, nil, updateChannel)
 	if err != nil {
 		return err
 	}

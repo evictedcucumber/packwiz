@@ -31,6 +31,9 @@ var detectCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Get the pack's release channel for detected mods
+		allowedChannel := pack.GetAllowedChannel(nil)
+
 		// Walk files in the mods folder
 		var hashes []uint32
 		modPaths := make(map[uint32]string)
@@ -98,7 +101,7 @@ var detectCmd = &cobra.Command{
 
 		fmt.Println("Creating metadata files...")
 		for _, v := range res.ExactMatches {
-			err = createModFile(modInfosMap[v.ID], v.File, &index, false, nil, "")
+			err = createModFile(modInfosMap[v.ID], v.File, &index, false, nil, allowedChannel)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)

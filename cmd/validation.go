@@ -15,6 +15,7 @@ type validationIssueKind int
 const (
 	issueKindFix validationIssueKind = iota
 	issueKindDelete
+	issueKindFullFix
 )
 
 type validationIssue struct {
@@ -26,31 +27,33 @@ type validationIssue struct {
 }
 
 var allowedPackKeys = map[string]struct{}{
-	"name":        {},
-	"author":      {},
-	"version":     {},
-	"description": {},
-	"pack-format": {},
-	"loader":      {},
-	"modlist":     {},
-	"index":       {},
-	"versions":    {},
-	"export":      {},
-	"options":     {},
+	"name":           {},
+	"author":         {},
+	"version":        {},
+	"description":    {},
+	"pack-format":    {},
+	"loader":         {},
+	"modlist":        {},
+	"index":          {},
+	"versions":       {},
+	"export":         {},
+	"options":        {},
+	"release-channel": {},
 }
 
 var allowedModKeys = map[string]struct{}{
-	"name":         {},
-	"filename":     {},
-	"version":      {},
-	"page-url":     {},
-	"category":     {},
-	"side":         {},
-	"pin":          {},
-	"download":     {},
-	"update":       {},
-	"dependencies": {},
-	"option":       {},
+	"name":          {},
+	"filename":      {},
+	"version":       {},
+	"page-url":      {},
+	"category":      {},
+	"side":          {},
+	"pin":           {},
+	"download":      {},
+	"update":        {},
+	"dependencies":  {},
+	"option":        {},
+	"update-channel": {},
 }
 
 var obsoleteModOptionKeys = []string{"optional", "default"}
@@ -309,12 +312,15 @@ func normalizeDependencyPath(packRoot, dependencyPath string) string {
 func printValidationHints(issues []validationIssue) {
 	hasFixable := false
 	hasDeletable := false
+	hasFullFixable := false
 	for _, issue := range issues {
 		switch issue.Kind {
 		case issueKindFix:
 			hasFixable = true
 		case issueKindDelete:
 			hasDeletable = true
+		case issueKindFullFix:
+			hasFullFixable = true
 		}
 	}
 	if hasFixable {
@@ -323,4 +329,49 @@ func printValidationHints(issues []validationIssue) {
 	if hasDeletable {
 		fmt.Println("Run 'packwiz fix --delete' to remove invalid, obsolete, or unknown keys.")
 	}
+	if hasFullFixable {
+		fmt.Println("Run 'packwiz fix --full' to fix version mismatches and update mod references.")
+	}
+}
+
+func collectFullValidationIssues(pack core.Pack, index core.Index) ([]validationIssue, error) {
+	issues := make([]validationIssue, 0)
+
+	mods, err := index.LoadAllMods()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, mod := range mods {
+		// Check each updater for version mismatches and reference issues
+		for updaterName := range mod.Update {
+			if fixer, ok := core.MetadataFixers[updaterName]; ok {
+				// Use the metadata fixer to validate the mod
+				validationIssues, err := fixer.ValidateMetadata(mod)
+				if err != nil {
+					// If there's an error, it might indicate a reference issue
+					issues = append(issues, validationIssue{
+						Key:      mod.GetFilePath(),
+						Message:  fmt.Sprintf("error checking %s metadata: %v", updaterName, err),
+						Expected: "valid project/file/version IDs",
+						Example:  "run 'packwiz fix --full' to fix this issue",
+						Kind:     issueKindFullFix,
+					})
+				} else if len(validationIssues) > 0 {
+					// If there are validation issues, report them
+					for _, issue := range validationIssues {
+						issues = append(issues, validationIssue{
+							Key:      mod.GetFilePath(),
+							Message:  issue,
+							Expected: "metadata to match the provider's data",
+							Example:  "run 'packwiz fix --full' to fix this issue",
+							Kind:     issueKindFullFix,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	return issues, nil
 }

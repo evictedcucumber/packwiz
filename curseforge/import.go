@@ -184,6 +184,9 @@ var importCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Get the pack's release channel for imported mods
+		allowedChannel := pack.GetAllowedChannel(nil)
+
 		modList := packImport.Mods()
 		modIDs := make([]uint32, len(modList))
 		for i, v := range modList {
@@ -260,7 +263,7 @@ var importCmd = &cobra.Command{
 				continue
 			}
 
-			err = createModFile(modInfoValue, modFileInfoValue, &index, false, nil, "")
+			err = createModFile(modInfoValue, modFileInfoValue, &index, false, nil, allowedChannel)
 			if err != nil {
 				fmt.Printf("Failed to save project \"%s\": %s\n", modInfoValue.Name, err)
 				os.Exit(1)

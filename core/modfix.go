@@ -39,7 +39,8 @@ func (in *Index) FixModMetadata(pack Pack, opts FixModMetadataOpts) (int, error)
 			changed = true
 		}
 
-		if mod.UpdateChannel == "" {
+		// Only set update-channel if not pinned - pinning should prevent channel changes
+		if mod.UpdateChannel == "" && !mod.Pin {
 			mod.UpdateChannel = "project"
 			changed = true
 		}
@@ -64,6 +65,61 @@ func (in *Index) FixModMetadata(pack Pack, opts FixModMetadataOpts) (int, error)
 				changed = true
 			}
 			if modHasRemovableKeys(mod.GetFilePath()) {
+				changed = true
+			}
+		}
+
+		if !changed {
+			continue
+		}
+
+		format, hash, err := mod.Write()
+		if err != nil {
+			return fixed, fmt.Errorf("failed to write mod %s: %w", mod.Name, err)
+		}
+
+		after, err := os.ReadFile(mod.GetFilePath())
+		if err != nil {
+			return fixed, fmt.Errorf("failed to read mod %s after write: %w", mod.Name, err)
+		}
+		if !bytes.Equal(before, after) {
+			fixed++
+		}
+
+		if err := in.RefreshFileWithHash(mod.GetFilePath(), format, hash, true); err != nil {
+			return fixed, err
+		}
+	}
+
+	return fixed, nil
+}
+
+// FullFixModMetadata performs complete fix including version mismatches and reference updates.
+func (in *Index) FullFixModMetadata(pack Pack) (int, error) {
+	mods, err := in.LoadAllMods()
+	if err != nil {
+		return 0, err
+	}
+
+	fixed := 0
+	for _, mod := range mods {
+		before, err := os.ReadFile(mod.GetFilePath())
+		if err != nil {
+			return fixed, fmt.Errorf("failed to read mod %s: %w", mod.Name, err)
+		}
+
+		changed := false
+		for updateSystem := range mod.Update {
+			fixer, ok := MetadataFixers[updateSystem]
+			if !ok {
+				continue
+			}
+			metadataChanged, err := fixer.FixMetadata(mod)
+			if err != nil {
+				fmt.Printf("Warning: failed to fix metadata for mod %s using %s: %v\n", mod.Name, updateSystem, err)
+				continue
+			}
+			if metadataChanged {
 				changed = true
 			}
 		}

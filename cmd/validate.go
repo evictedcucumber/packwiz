@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/viper"
 )
 
+var validateFullFlag bool
+
 var validateCmd = &cobra.Command{
 	Use:     "validate",
 	Short:   "Validate the current modpack and config",
@@ -50,6 +52,17 @@ var validateCmd = &cobra.Command{
 			fmt.Printf("Validation failed! %s\n", err)
 			os.Exit(1)
 		}
+
+		if validateFullFlag {
+			fmt.Println("Performing full validation (checking versions and links)...")
+			fullIssues, err := collectFullValidationIssues(pack, index)
+			if err != nil {
+				fmt.Printf("Validation failed! %s\n", err)
+				os.Exit(1)
+			}
+			issues = append(issues, fullIssues...)
+		}
+
 		if len(issues) > 0 {
 			printValidationIssues("Validation failed!", issues)
 			printValidationHints(issues)
@@ -220,4 +233,5 @@ func validatePackConfig(packFile string) ([]validationIssue, error) {
 
 func init() {
 	rootCmd.AddCommand(validateCmd)
+	validateCmd.Flags().BoolVar(&validateFullFlag, "full", false, "Perform complete checks including version mismatches and link validation")
 }

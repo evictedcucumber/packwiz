@@ -142,7 +142,7 @@ var installCmd = &cobra.Command{
 		}
 
 		// Create the metadata file first
-		err = createModFile(modInfoData, fileInfoData, &index, false, nil, updateChannelFlag)
+		err = createModFile(modInfoData, fileInfoData, &index, false, nil, allowedChannel)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)

@@ -65,6 +65,8 @@ var DependencyResolvers = make(map[string]DependencyResolver)
 // MetadataFixer can fill missing mod metadata fields using provider APIs.
 type MetadataFixer interface {
 	FillMissingMetadata(mod *Mod) (bool, error)
+	ValidateMetadata(mod *Mod) ([]string, error)
+	FixMetadata(mod *Mod) (bool, error)
 }
 
 // MetadataFixers stores metadata fixers keyed by update system name (e.g., "modrinth", "curseforge").

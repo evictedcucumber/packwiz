@@ -13,6 +13,7 @@ import (
 
 var fixDepsFlag bool
 var fixDeleteFlag bool
+var fixFullFlag bool
 
 var fixCmd = &cobra.Command{
 	Use:   "fix",
@@ -70,6 +71,20 @@ If modlist generation is enabled, modlist.md is also rewritten.`,
 			fmt.Printf("Updated %d mod metadata file(s).\n", modFixCount)
 		} else {
 			fmt.Println("All mod metadata files already compliant.")
+		}
+
+		if fixFullFlag {
+			fmt.Println("Performing full fix (checking versions and updating references)...")
+			fullFixCount, err := index.FullFixModMetadata(pack)
+			if err != nil {
+				fmt.Printf("Error performing full fix: %s\n", err)
+				os.Exit(1)
+			}
+			if fullFixCount > 0 {
+				fmt.Printf("Updated %d mod metadata file(s) with version/reference fixes.\n", fullFixCount)
+			} else {
+				fmt.Println("All mod metadata files already match their provider data.")
+			}
 		}
 
 		syncOpts := core.SyncDepsOpts{NormalizeAll: true}
@@ -189,4 +204,5 @@ func init() {
 	rootCmd.AddCommand(fixCmd)
 	fixCmd.Flags().BoolVar(&fixDepsFlag, "deps", false, "Also resolve dependencies from provider APIs and regenerate dependencies.toml")
 	fixCmd.Flags().BoolVar(&fixDeleteFlag, "delete", false, "Remove invalid dependency references, obsolete keys, and unknown keys")
+	fixCmd.Flags().BoolVar(&fixFullFlag, "full", false, "Perform complete fix including version mismatches and reference updates")
 }
