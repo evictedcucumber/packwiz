@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	modrinthApi "codeberg.org/jmansfield/go-modrinth/modrinth"
 	"github.com/evictedcucumber/packwiz/cmd"
@@ -33,6 +34,45 @@ func init() {
 	core.MetadataFixers["modrinth"] = mrMetadataFixer{}
 
 	mrDefaultClient.UserAgent = core.UserAgent
+}
+
+// retryableHTTPError checks if an HTTP error is retryable (5xx errors)
+func isRetryableHTTPError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr interface{ StatusCode() int }
+	if errors.As(err, &httpErr) {
+		statusCode := httpErr.StatusCode()
+		// Retry on 5xx errors (server errors)
+		return statusCode >= 500 && statusCode < 600
+	}
+	return false
+}
+
+// retryWithBackoff executes a function with exponential backoff retry logic
+func retryWithBackoff(operation string, maxRetries int, fn func() error) error {
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		// Don't retry if it's not a retryable error
+		if !isRetryableHTTPError(err) {
+			return fmt.Errorf("%s failed (non-retryable error): %w", operation, err)
+		}
+
+		// Don't sleep after the last attempt
+		if attempt < maxRetries {
+			waitTime := time.Duration(math.Pow(2, float64(attempt))) * time.Second
+			fmt.Printf("Warning: %s failed (attempt %d/%d), retrying in %v...\n", operation, attempt+1, maxRetries+1, waitTime)
+			time.Sleep(waitTime)
+		}
+	}
+	return fmt.Errorf("%s failed after %d attempts: %w", operation, maxRetries+1, lastErr)
 }
 
 func getProjectIdsViaSearch(query string, versions []string) ([]*modrinthApi.SearchResult, error) {

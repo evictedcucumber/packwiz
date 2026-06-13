@@ -136,7 +136,12 @@ func (r mrResolver) ResolveDependencies(mod *core.Mod, allMods []*core.Mod, inde
 		return nil, nil
 	}
 
-	depVersion, err := mrDefaultClient.Versions.Get(data.InstalledVersion)
+	var depVersion *modrinthApi.Version
+	err := retryWithBackoff("fetch version metadata from Modrinth", 3, func() error {
+		var retryErr error
+		depVersion, retryErr = mrDefaultClient.Versions.Get(data.InstalledVersion)
+		return retryErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get version metadata from Modrinth: %w", err)
 	}
