@@ -260,7 +260,7 @@ var importCmd = &cobra.Command{
 				continue
 			}
 
-			err = createModFile(modInfoValue, modFileInfoValue, &index, false, nil)
+			err = createModFile(modInfoValue, modFileInfoValue, &index, false, nil, "")
 			if err != nil {
 				fmt.Printf("Failed to save project \"%s\": %s\n", modInfoValue.Name, err)
 				os.Exit(1)

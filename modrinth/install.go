@@ -227,11 +227,12 @@ func installProject(project *modrinthApi.Project, versionFilename string, pack c
 const maxCycles = 20
 
 type depMetadataStore struct {
-	projectInfo *modrinthApi.Project
-	versionInfo *modrinthApi.Version
-	fileInfo    *modrinthApi.File
-	deps        []string
-	metaPath    string
+	projectInfo   *modrinthApi.Project
+	versionInfo   *modrinthApi.Version
+	fileInfo      *modrinthApi.File
+	deps          []string
+	metaPath      string
+	updateChannel string
 }
 
 type modrinthProjectQueueItem struct {
@@ -566,12 +567,22 @@ func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.I
 				return errors.New("failed to get dependency data: invalid response")
 			}
 			depProjectID := *depProject.ID
-			allowedChannel := pack.GetAllowedChannel(nil)
-			latestVersion, err := getLatestVersion(depProjectID, *depProject.Title, pack, allowedChannel)
-			if err != nil {
-				fmt.Printf("Failed to get latest version of dependency %v: %v\n", *depProject.Title, err)
-				continue
+			
+			// Check if this dependency already exists and has an update channel override
+			var depMod *core.Mod
+			if slices.Contains(installedProjects, depProjectID) {
+				// Load the mod to check for update channel override
+				installedPaths := getInstalledProjectPaths(index)
+				if modPath, ok := installedPaths[depProjectID]; ok {
+					loadedMod, err := core.LoadMod(modPath)
+					if err == nil {
+						depMod = &loadedMod
+					}
+				}
 			}
+			
+			allowedChannel := pack.GetAllowedChannel(depMod)
+			latestVersion, err := getLatestVersion(depProjectID, *depProject.Title, pack, allowedChannel)
 
 			var file = latestVersion.Files[0]
 			for _, v := range latestVersion.Files {
@@ -586,10 +597,11 @@ func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.I
 			}
 
 			resolvedDependencies[depProjectID] = &depMetadataStore{
-				projectInfo: depProject,
-				versionInfo: latestVersion,
-				fileInfo:    file,
-				metaPath:    metaPath,
+				projectInfo:   depProject,
+				versionInfo:   latestVersion,
+				fileInfo:      file,
+				metaPath:      metaPath,
+				updateChannel: allowedChannel,
 			}
 
 			resolveDirectDependencies(depProjectID, latestVersion.Dependencies)
@@ -617,7 +629,7 @@ func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.I
 
 			if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
 				for _, dep := range depsToInstall {
-					err := createFileMeta(dep.projectInfo, dep.versionInfo, dep.fileInfo, pack, index, true, nil, "")
+					err := createFileMeta(dep.projectInfo, dep.versionInfo, dep.fileInfo, pack, index, true, nil, dep.updateChannel)
 					if err != nil {
 						return err
 					}

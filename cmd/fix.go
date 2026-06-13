@@ -134,6 +134,11 @@ func fixPackConfig(packFile string, removeInvalid bool) ([]string, error) {
 		fixes = append(fixes, "added modlist")
 	}
 
+	if releaseChannel, ok := raw["release-channel"].(string); !ok || releaseChannel == "" {
+		raw["release-channel"] = "release"
+		fixes = append(fixes, "added release-channel")
+	}
+
 	indexVal, hasIndex := raw["index"]
 	indexMap, ok := indexVal.(map[string]interface{})
 	if !hasIndex || !ok {

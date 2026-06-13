@@ -241,11 +241,18 @@ func (pack Pack) GetLoaders() (loaders []string) {
 
 func (pack Pack) GetAllowedChannel(mod *Mod) string {
 	if mod != nil && mod.UpdateChannel != "" {
+		// "project" is a special value that means "use the pack's release-channel"
+		if mod.UpdateChannel == "project" {
+			if pack.ReleaseChannel != "" {
+				return pack.ReleaseChannel
+			}
+			return "release"
+		}
 		return mod.UpdateChannel
 	}
 	if pack.ReleaseChannel != "" {
 		return pack.ReleaseChannel
 	}
-	return "alpha"
+	return "release"
 }
 

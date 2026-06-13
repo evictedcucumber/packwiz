@@ -21,8 +21,9 @@ const maxCycles = 20
 
 type installableDep struct {
 	modInfo
-	fileInfo modFileInfo
-	metaPath string
+	fileInfo      modFileInfo
+	metaPath      string
+	updateChannel string
 }
 
 type cfProjectQueueItem struct {
@@ -517,7 +518,16 @@ func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.I
 			}
 
 			for _, currData := range depInfoData {
-				allowedChannel := pack.GetAllowedChannel(nil)
+				// Check if this dependency already exists and has an update channel override
+				var depMod *core.Mod
+				if modPath, ok := installedProjectPaths[currData.ID]; ok {
+					loadedMod, err := core.LoadMod(modPath)
+					if err == nil {
+						depMod = &loadedMod
+					}
+				}
+				
+				allowedChannel := pack.GetAllowedChannel(depMod)
 				depFileInfo, err := getLatestFile(currData, mcVersions, 0, pack.GetCompatibleLoaders(), allowedChannel)
 				if err != nil {
 					fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
@@ -526,9 +536,10 @@ func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.I
 
 				metaPath := getCurseForgeMetaPath(currData)
 				resolvedDependencies[currData.ID] = &installableDep{
-					modInfo:  currData,
-					fileInfo: depFileInfo,
-					metaPath: metaPath,
+					modInfo:      currData,
+					fileInfo:     depFileInfo,
+					metaPath:     metaPath,
+					updateChannel: allowedChannel,
 				}
 
 				for _, dep := range depFileInfo.Dependencies {
@@ -560,7 +571,7 @@ func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.I
 
 				if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
 					for _, v := range depsToInstall {
-						err = createModFile(v.modInfo, v.fileInfo, index, true, nil, "")
+						err = createModFile(v.modInfo, v.fileInfo, index, true, nil, v.updateChannel)
 						if err != nil {
 							return err
 						}

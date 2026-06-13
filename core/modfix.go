@@ -39,6 +39,11 @@ func (in *Index) FixModMetadata(pack Pack, opts FixModMetadataOpts) (int, error)
 			changed = true
 		}
 
+		if mod.UpdateChannel == "" {
+			mod.UpdateChannel = "project"
+			changed = true
+		}
+
 		for updateSystem := range mod.Update {
 			fixer, ok := MetadataFixers[updateSystem]
 			if !ok {
@@ -114,7 +119,7 @@ func modHasRemovableKeys(modPath string) bool {
 
 func isAllowedModKey(key string) bool {
 	switch key {
-	case "name", "filename", "version", "page-url", "category", "side", "pin", "download", "update", "dependencies", "option":
+	case "name", "filename", "version", "page-url", "category", "side", "pin", "download", "update", "dependencies", "option", "update-channel":
 		return true
 	default:
 		return false
