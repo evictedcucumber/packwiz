@@ -24,4 +24,5 @@ Manage modrinth-based mods
 * [packwiz](packwiz.md)	 - A command line tool for creating Minecraft modpacks
 * [packwiz modrinth add](packwiz_modrinth_add.md)	 - Add a project from a Modrinth URL
 * [packwiz modrinth export](packwiz_modrinth_export.md)	 - Export the current modpack into a .mrpack for Modrinth
+* [packwiz modrinth select-version](packwiz_modrinth.md)	 - Interactively select a Modrinth version for a tracked mod file
 

@@ -37,6 +37,12 @@ packwiz update mods/sodium.pw.toml
 
 The `mr` and `cf` command groups also expose their own `update` and `add` subcommands for source-specific workflows.
 
+Modrinth also includes an interactive version picker for tracked manifests:
+
+```bash
+packwiz mr select-version mods/sodium.pw.toml
+```
+
 Update all mods:
 
 ```bash

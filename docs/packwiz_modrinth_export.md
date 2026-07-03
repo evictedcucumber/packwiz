@@ -10,6 +10,7 @@ packwiz modrinth export [flags]
 
 ```
   -h, --help              help for export
+  --ignore-side       Export all mods without side-specific metadata
   -o, --output string     The file to export the modpack to
       --restrictDomains   Restricts domains to those allowed by modrinth.com (default true)
 ```

@@ -362,6 +362,36 @@ func isVersionTypeAllowed(versionType string, allowedChannel string) bool {
 	}
 }
 
+func filterVersionsByAllowedChannel(versions []*Version, allowedChannel string) []*Version {
+	filteredResult := make([]*Version, 0, len(versions))
+	for _, v := range versions {
+		vt := ""
+		if v.VersionType != nil {
+			vt = *v.VersionType
+		}
+		if isVersionTypeAllowed(vt, allowedChannel) {
+			filteredResult = append(filteredResult, v)
+		}
+	}
+	return filteredResult
+}
+
+func getAllowedVersions(projectID string, gameVersions []string, loaders []string, allowedChannel string) ([]*Version, error) {
+	result, err := mrDefaultClient.Versions.ListVersions(projectID, ListVersionsOptions{
+		GameVersions: gameVersions,
+		Loaders:      loaders,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch version list: %w", err)
+	}
+
+	filteredResult := filterVersionsByAllowedChannel(result, allowedChannel)
+	if len(filteredResult) == 0 {
+		return nil, errors.New("no valid versions found matching channel " + allowedChannel + "\n\tUse the 'packwiz settings acceptable-versions' command to accept more game versions\n\tTo use datapacks, add a datapack loader mod and specify the datapack-folder option with the folder this mod loads datapacks from")
+	}
+	return filteredResult, nil
+}
+
 func getLatestVersion(projectID string, name string, pack core.Pack, allowedChannel string) (*Version, error) {
 	gameVersions, err := pack.GetSupportedMCVersions()
 	if err != nil {
@@ -374,28 +404,9 @@ func getLatestVersion(projectID string, name string, pack core.Pack, allowedChan
 		loaders = append(pack.GetCompatibleLoaders(), defaultMRLoaders...)
 	}
 
-	result, err := mrDefaultClient.Versions.ListVersions(projectID, ListVersionsOptions{
-		GameVersions: gameVersions,
-		Loaders:      loaders,
-	})
+	filteredResult, err := getAllowedVersions(projectID, gameVersions, loaders, allowedChannel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch latest version: %w", err)
-	}
-
-	// Filter results by allowedChannel
-	var filteredResult []*Version
-	for _, v := range result {
-		vt := ""
-		if v.VersionType != nil {
-			vt = *v.VersionType
-		}
-		if isVersionTypeAllowed(vt, allowedChannel) {
-			filteredResult = append(filteredResult, v)
-		}
-	}
-
-	if len(filteredResult) == 0 {
-		return nil, errors.New("no valid versions found matching channel " + allowedChannel + "\n\tUse the 'packwiz settings acceptable-versions' command to accept more game versions\n\tTo use datapacks, add a datapack loader mod and specify the datapack-folder option with the folder this mod loads datapacks from")
+		return nil, err
 	}
 
 	// TODO: option to always compare using flexver?

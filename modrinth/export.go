@@ -84,6 +84,7 @@ var exportCmd = &cobra.Command{
 		fmt.Printf("Retrieving %v external files...\n", len(mods))
 
 		restrictDomains := viper.GetBool("modrinth.export.restrictDomains")
+		ignoreSide := viper.GetBool("modrinth.export.ignoreSide")
 
 		for _, mod := range mods {
 			if !canBeIncludedDirectly(mod, restrictDomains) {
@@ -126,18 +127,7 @@ var exportCmd = &cobra.Command{
 					panic(err)
 				}
 
-				var clientEnv, serverEnv string
-				envInstalled := "required"
-				if dl.Mod.Side == core.UniversalSide {
-					clientEnv = envInstalled
-					serverEnv = envInstalled
-				} else if dl.Mod.Side == core.ClientSide {
-					clientEnv = envInstalled
-					serverEnv = "unsupported"
-				} else if dl.Mod.Side == core.ServerSide {
-					clientEnv = "unsupported"
-					serverEnv = envInstalled
-				}
+				clientEnv, serverEnv := modrinthExportEnv(dl.Mod, ignoreSide)
 
 				// Modrinth URLs must be RFC3986
 				u, err := core.ReencodeURL(dl.Mod.Download.URL)
@@ -159,9 +149,10 @@ var exportCmd = &cobra.Command{
 
 				fmt.Printf("%s (%s) added to manifest\n", dl.Mod.Name, dl.Mod.FileName)
 			} else {
-				if dl.Mod.Side == core.ClientSide {
+				folder := modrinthOverrideFolder(dl.Mod, ignoreSide)
+				if folder == "client-overrides" {
 					_ = cmdshared.AddToZip(dl, exp, "client-overrides", &index)
-				} else if dl.Mod.Side == core.ServerSide {
+				} else if folder == "server-overrides" {
 					_ = cmdshared.AddToZip(dl, exp, "server-overrides", &index)
 				} else {
 					_ = cmdshared.AddToZip(dl, exp, "overrides", &index)
@@ -269,10 +260,38 @@ func canBeIncludedDirectly(mod *core.Mod, restrictDomains bool) bool {
 	return false
 }
 
+func modrinthExportEnv(mod *core.Mod, ignoreSide bool) (string, string) {
+	if ignoreSide || mod.Side == core.UniversalSide {
+		return "required", "required"
+	}
+	if mod.Side == core.ClientSide {
+		return "required", "unsupported"
+	}
+	if mod.Side == core.ServerSide {
+		return "unsupported", "required"
+	}
+	return "required", "required"
+}
+
+func modrinthOverrideFolder(mod *core.Mod, ignoreSide bool) string {
+	if ignoreSide {
+		return "overrides"
+	}
+	if mod.Side == core.ClientSide {
+		return "client-overrides"
+	}
+	if mod.Side == core.ServerSide {
+		return "server-overrides"
+	}
+	return "overrides"
+}
+
 func init() {
 	modrinthCmd.AddCommand(exportCmd)
 	exportCmd.Flags().Bool("restrictDomains", true, "Restricts domains to those allowed by modrinth.com")
+	exportCmd.Flags().Bool("ignore-side", false, "Export all mods without side-specific metadata")
 	exportCmd.Flags().StringP("output", "o", "", "The file to export the modpack to")
 	_ = viper.BindPFlag("modrinth.export.restrictDomains", exportCmd.Flags().Lookup("restrictDomains"))
+	_ = viper.BindPFlag("modrinth.export.ignoreSide", exportCmd.Flags().Lookup("ignore-side"))
 	_ = viper.BindPFlag("modrinth.export.output", exportCmd.Flags().Lookup("output"))
 }
