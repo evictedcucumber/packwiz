@@ -36,7 +36,7 @@ var selectVersionCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		modPath, err := resolveTrackedModMetaPath(index, args[0])
+		modPath, modIndexPath, err := resolveTrackedModMetaPath(index, args[0])
 		if err != nil {
 			fmt.Printf("Can't find this file: %s\n", err)
 			fmt.Println("Use a path to a tracked .pw.toml file (you may need to run packwiz refresh).")
@@ -139,7 +139,7 @@ var selectVersionCmd = &cobra.Command{
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		err = index.RefreshFileWithHash(modPath, format, hash, true)
+		err = index.RefreshFileWithHash(modIndexPath, format, hash, true)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -190,33 +190,33 @@ func formatVersionSelectionLabel(version *Version, currentVersionID string) stri
 	return strings.Join(parts, " | ")
 }
 
-func resolveTrackedModMetaPath(index core.Index, input string) (string, error) {
+func resolveTrackedModMetaPath(index core.Index, input string) (string, string, error) {
 	if stat, err := os.Stat(input); err == nil && !stat.IsDir() {
 		absPath, err := filepath.Abs(input)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		packRoot, err := filepath.Abs(index.ResolveIndexPath("."))
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		relPath, err := filepath.Rel(packRoot, absPath)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		relPath = filepath.ToSlash(relPath)
 		if file, ok := index.Files[relPath]; ok && file.IsMetaFile() {
-			return absPath, nil
+			return absPath, relPath, nil
 		}
-		return "", fmt.Errorf("%q is not a tracked metadata file in index.toml", input)
+		return "", "", fmt.Errorf("%q is not a tracked metadata file in index.toml", input)
 	}
 
 	relInput := filepath.ToSlash(filepath.Clean(input))
 	if file, ok := index.Files[relInput]; ok && file.IsMetaFile() {
-		return index.ResolveIndexPath(relInput), nil
+		return index.ResolveIndexPath(relInput), relInput, nil
 	}
 
-	return "", fmt.Errorf("select-version only accepts a tracked .pw.toml file, not %q", input)
+	return "", "", fmt.Errorf("select-version only accepts a tracked .pw.toml file, not %q", input)
 }
 
 func writePackAndIndex(pack *core.Pack, index *core.Index, opts core.SyncDepsOpts) error {
