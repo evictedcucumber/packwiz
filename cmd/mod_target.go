@@ -15,10 +15,15 @@ func resolveModTargetPath(index core.Index, input string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		relPath, err := index.RelIndexPath(absPath)
+		packRoot, err := filepath.Abs(index.ResolveIndexPath("."))
 		if err != nil {
 			return "", err
 		}
+		relPath, err := filepath.Rel(packRoot, absPath)
+		if err != nil {
+			return "", err
+		}
+		relPath = filepath.ToSlash(relPath)
 		if file, ok := index.Files[relPath]; ok && file.IsMetaFile() {
 			return absPath, nil
 		}
@@ -46,10 +51,15 @@ func resolveTrackedModMetaPath(index core.Index, input string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		relPath, err := index.RelIndexPath(absPath)
+		packRoot, err := filepath.Abs(index.ResolveIndexPath("."))
 		if err != nil {
 			return "", err
 		}
+		relPath, err := filepath.Rel(packRoot, absPath)
+		if err != nil {
+			return "", err
+		}
+		relPath = filepath.ToSlash(relPath)
 		if file, ok := index.Files[relPath]; ok && file.IsMetaFile() {
 			return absPath, nil
 		}
