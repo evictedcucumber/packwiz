@@ -42,11 +42,15 @@ func LoadIndex(indexFile string) (Index, error) {
 	if len(rep.HashFormat) == 0 {
 		rep.HashFormat = "sha256"
 	}
+	packRoot, err := filepath.Abs(filepath.Dir(indexFile))
+	if err != nil {
+		return Index{}, err
+	}
 	index := Index{
 		HashFormat: rep.HashFormat,
 		Files:      rep.Files.toMemoryRep(),
 		indexFile:  indexFile,
-		packRoot:   filepath.Dir(indexFile),
+		packRoot:   packRoot,
 	}
 	return index, nil
 }

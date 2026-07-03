@@ -348,6 +348,23 @@ func findLatestVersion(versions []*Version, gameVersions []string, useFlexVer bo
 	return latestValidVersion
 }
 
+func versionType(version *Version) string {
+	if version == nil || version.VersionType == nil {
+		return ""
+	}
+	return strings.ToLower(*version.VersionType)
+}
+
+func shouldWarnAboutVersionMismatch(flexverLatest *Version, releaseDateLatest *Version) bool {
+	if flexverLatest == nil || releaseDateLatest == nil {
+		return false
+	}
+	if flexverLatest.VersionNumber == nil || releaseDateLatest.VersionNumber == nil {
+		return false
+	}
+	return versionType(flexverLatest) == versionType(releaseDateLatest)
+}
+
 func isVersionTypeAllowed(versionType string, allowedChannel string) bool {
 	switch strings.ToLower(allowedChannel) {
 	case "release":
@@ -413,7 +430,7 @@ func getLatestVersion(projectID string, name string, pack core.Pack, allowedChan
 	// TODO: ask user which one to use?
 	flexverLatest := findLatestVersion(filteredResult, gameVersions, true)
 	releaseDateLatest := findLatestVersion(filteredResult, gameVersions, false)
-	if flexverLatest != releaseDateLatest && releaseDateLatest.VersionNumber != nil && flexverLatest.VersionNumber != nil {
+	if flexverLatest != releaseDateLatest && shouldWarnAboutVersionMismatch(flexverLatest, releaseDateLatest) {
 		fmt.Printf("Warning: Modrinth versions for %s inconsistent between latest version number and newest release date (%s vs %s)\n", name, *flexverLatest.VersionNumber, *releaseDateLatest.VersionNumber)
 	}
 

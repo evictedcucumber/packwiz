@@ -40,3 +40,43 @@ func TestFilterVersionsByAllowedChannel(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldWarnAboutVersionMismatch(t *testing.T) {
+	stringPtr := func(value string) *string {
+		return &value
+	}
+
+	tests := []struct {
+		name     string
+		left     *Version
+		right    *Version
+		wantWarn bool
+	}{
+		{
+			name:     "same channel warns",
+			left:     &Version{VersionNumber: stringPtr("1.0.0"), VersionType: stringPtr("release")},
+			right:    &Version{VersionNumber: stringPtr("1.0.1"), VersionType: stringPtr("release")},
+			wantWarn: true,
+		},
+		{
+			name:     "different channels do not warn",
+			left:     &Version{VersionNumber: stringPtr("1.0.0"), VersionType: stringPtr("release")},
+			right:    &Version{VersionNumber: stringPtr("1.0.1"), VersionType: stringPtr("beta")},
+			wantWarn: false,
+		},
+		{
+			name:     "missing type does not warn",
+			left:     &Version{VersionNumber: stringPtr("1.0.0")},
+			right:    &Version{VersionNumber: stringPtr("1.0.1"), VersionType: stringPtr("release")},
+			wantWarn: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := shouldWarnAboutVersionMismatch(test.left, test.right); got != test.wantWarn {
+				t.Fatalf("got %v, want %v", got, test.wantWarn)
+			}
+		})
+	}
+}
