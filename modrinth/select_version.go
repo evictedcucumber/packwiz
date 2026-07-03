@@ -196,10 +196,15 @@ func resolveTrackedModMetaPath(index core.Index, input string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		relPath, err := index.RelIndexPath(absPath)
+		packRoot, err := filepath.Abs(index.ResolveIndexPath("."))
 		if err != nil {
 			return "", err
 		}
+		relPath, err := filepath.Rel(packRoot, absPath)
+		if err != nil {
+			return "", err
+		}
+		relPath = filepath.ToSlash(relPath)
 		if file, ok := index.Files[relPath]; ok && file.IsMetaFile() {
 			return absPath, nil
 		}
@@ -211,7 +216,7 @@ func resolveTrackedModMetaPath(index core.Index, input string) (string, error) {
 		return index.ResolveIndexPath(relInput), nil
 	}
 
-	return "", fmt.Errorf("pin only accepts a tracked .pw.toml file, not %q", input)
+	return "", fmt.Errorf("select-version only accepts a tracked .pw.toml file, not %q", input)
 }
 
 func writePackAndIndex(pack *core.Pack, index *core.Index, opts core.SyncDepsOpts) error {
