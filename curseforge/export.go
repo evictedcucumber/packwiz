@@ -20,8 +20,9 @@ var exportCmd = &cobra.Command{
 	Short: "Export the current modpack into a .zip for curseforge",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		ignoreSide := viper.GetBool("curseforge.export.ignoreSide")
 		side := viper.GetString("curseforge.export.side")
-		if side != core.UniversalSide && side != core.ServerSide && side != core.ClientSide {
+		if !ignoreSide && side != core.UniversalSide && side != core.ServerSide && side != core.ClientSide {
 			fmt.Printf("Invalid side %q, must be one of client, server, or both (default)\n", side)
 			os.Exit(1)
 		}
@@ -65,16 +66,7 @@ var exportCmd = &cobra.Command{
 			fmt.Printf("Error reading file: %v\n", err)
 			os.Exit(1)
 		}
-		i := 0
-		// Filter mods by side
-		// TODO: opt-in optional disabled filtering?
-		for _, mod := range mods {
-			if mod.Side == side || mod.Side == core.UniversalSide || side == core.UniversalSide {
-				mods[i] = mod
-				i++
-			}
-		}
-		mods = mods[:i]
+		mods = filterModsBySide(mods, side, ignoreSide)
 
 		var exportData cfExportData
 		exportDataUnparsed, ok := pack.Export["curseforge"]
@@ -227,6 +219,22 @@ func init() {
 
 	exportCmd.Flags().StringP("side", "s", "client", "The side to export mods with")
 	_ = viper.BindPFlag("curseforge.export.side", exportCmd.Flags().Lookup("side"))
+	exportCmd.Flags().Bool("ignore-side", false, "Export all mods regardless of side")
+	_ = viper.BindPFlag("curseforge.export.ignoreSide", exportCmd.Flags().Lookup("ignore-side"))
 	exportCmd.Flags().StringP("output", "o", "", "The file to export the modpack to")
 	_ = viper.BindPFlag("curseforge.export.output", exportCmd.Flags().Lookup("output"))
+}
+
+func filterModsBySide(mods []*core.Mod, side string, ignoreSide bool) []*core.Mod {
+	if ignoreSide || side == core.UniversalSide {
+		return mods
+	}
+
+	filtered := make([]*core.Mod, 0, len(mods))
+	for _, mod := range mods {
+		if mod.Side == side || mod.Side == core.UniversalSide {
+			filtered = append(filtered, mod)
+		}
+	}
+	return filtered
 }

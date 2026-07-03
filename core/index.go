@@ -133,9 +133,14 @@ var ignoreDefaults = []string{
 	// Defaults (can be overridden with a negating pattern preceded with !)
 
 	// Exclude Git metadata
+	".git",
 	".git/**",
 	".gitattributes",
 	".gitignore",
+	"gitignore",
+
+	// Exclude generated mod lists
+	"modlist.md",
 
 	// Exclude macOS metadata
 	".DS_Store",
@@ -144,11 +149,15 @@ var ignoreDefaults = []string{
 	"/*.zip",
 
 	// Exclude exported Modrinth packs
+	".mrpack",
 	"*.mrpack",
 
 	// Exclude packwiz binaries, if the user puts them in their pack folder
 	"packwiz.exe",
 	"packwiz", // Note: also excludes packwiz/ as a directory - you can negate this pattern if you want a directory called packwiz
+
+	// Exclude packwiz metadata files
+	"dependencies.toml",
 }
 
 func readGitignore(path string) (*gitignore.GitIgnore, bool) {

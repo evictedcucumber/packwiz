@@ -10,6 +10,7 @@ packwiz curseforge export [flags]
 
 ```
   -h, --help            help for export
+      --ignore-side     Export all mods regardless of side
   -o, --output string   The file to export the modpack to
   -s, --side string     The side to export mods with (default "client")
 ```
