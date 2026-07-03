@@ -1,7 +1,6 @@
 package modrinth
 
 import (
-	modrinthApi "codeberg.org/jmansfield/go-modrinth/modrinth"
 	"errors"
 	"fmt"
 	"slices"
@@ -33,7 +32,7 @@ func (u mrUpdater) ParseUpdate(updateUnparsed map[string]interface{}) (interface
 
 type cachedStateStore struct {
 	ProjectID string
-	Version   *modrinthApi.Version
+	Version   *Version
 }
 
 func (u mrUpdater) CheckUpdate(mods []*core.Mod, pack core.Pack) ([]core.UpdateCheck, error) {
@@ -136,7 +135,7 @@ func (r mrResolver) ResolveDependencies(mod *core.Mod, allMods []*core.Mod, inde
 		return nil, nil
 	}
 
-	var depVersion *modrinthApi.Version
+	var depVersion *Version
 	err := retryWithBackoff("fetch version metadata from Modrinth", 3, func() error {
 		var retryErr error
 		depVersion, retryErr = mrDefaultClient.Versions.Get(data.InstalledVersion)

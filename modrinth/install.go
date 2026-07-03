@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	modrinthApi "codeberg.org/jmansfield/go-modrinth/modrinth"
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/spf13/viper"
 
@@ -102,7 +101,7 @@ var installCmd = &cobra.Command{
 		// Look up project ID
 		if projectID != "" {
 			// Modrinth transparently handles slugs/project IDs in their API; we don't have to detect which one it is.
-			var project *modrinthApi.Project
+			var project *Project
 			project, err = mrDefaultClient.Projects.Get(projectID)
 			if err == nil {
 				// We found a project with that id/slug
@@ -195,7 +194,7 @@ func installViaSearch(query string, versionFilename string, autoAcceptFirst bool
 		}
 
 		// Get the selected project
-		selectedProject, ok := menuRes[0].Value.(*modrinthApi.SearchResult)
+		selectedProject, ok := menuRes[0].Value.(*SearchResult)
 		if !ok {
 			return errors.New("error converting interface from wmenu")
 		}
@@ -212,7 +211,7 @@ func installViaSearch(query string, versionFilename string, autoAcceptFirst bool
 	return menu.Run()
 }
 
-func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string, updateChannel string) error {
+func installProject(project *Project, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string, updateChannel string) error {
 	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, allowedChannel)
 	if err != nil {
 		return fmt.Errorf("failed to get latest version: %v", err)
@@ -227,9 +226,9 @@ func installProject(project *modrinthApi.Project, versionFilename string, pack c
 const maxCycles = 20
 
 type depMetadataStore struct {
-	projectInfo   *modrinthApi.Project
-	versionInfo   *modrinthApi.Version
-	fileInfo      *modrinthApi.File
+	projectInfo   *Project
+	versionInfo   *Version
+	fileInfo      *File
 	deps          []string
 	metaPath      string
 	updateChannel string
@@ -245,7 +244,7 @@ type modrinthVersionQueueItem struct {
 	parentID  string
 }
 
-func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string, updateChannel string) error {
+func installVersion(project *Project, version *Version, versionFilename string, pack core.Pack, index *core.Index, allowedChannel string, updateChannel string) error {
 	if len(version.Files) == 0 {
 		return errors.New("version doesn't have any files attached")
 	}
@@ -308,7 +307,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	return nil
 }
 
-func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, dependency bool, dependencies []string, updateChannel string) error {
+func createFileMeta(project *Project, version *Version, file *File, pack core.Pack, index *core.Index, dependency bool, dependencies []string, updateChannel string) error {
 	updateMap := make(map[string]map[string]interface{})
 
 	var err error
@@ -375,7 +374,7 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 	return index.RefreshFileWithHash(path, format, hash, true)
 }
 
-func getModrinthMetaPath(project *modrinthApi.Project, version *modrinthApi.Version, pack core.Pack) (string, error) {
+func getModrinthMetaPath(project *Project, version *Version, pack core.Pack) (string, error) {
 	var folder string
 	folder = viper.GetString("meta-folder")
 	if folder == "" {
@@ -415,14 +414,14 @@ func getInstalledProjectPaths(index *core.Index) map[string]string {
 	return installedProjects
 }
 
-func getProjectPageURL(project *modrinthApi.Project) string {
+func getProjectPageURL(project *Project) string {
 	if project == nil || project.ProjectType == nil || project.Slug == nil {
 		return ""
 	}
 	return fmt.Sprintf("https://modrinth.com/%s/%s", *project.ProjectType, *project.Slug)
 }
 
-func getModrinthVersionLabel(version *modrinthApi.Version) string {
+func getModrinthVersionLabel(version *Version) string {
 	if version == nil {
 		return ""
 	}
@@ -492,7 +491,7 @@ func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.I
 		versionQueue = append(versionQueue, modrinthVersionQueueItem{versionID: versionID, parentID: parentID})
 	}
 
-	resolveDirectDependencies := func(nodeID string, deps []*modrinthApi.Dependency) {
+	resolveDirectDependencies := func(nodeID string, deps []*Dependency) {
 		for _, dep := range deps {
 			if dep == nil {
 				continue
@@ -567,7 +566,7 @@ func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.I
 				return errors.New("failed to get dependency data: invalid response")
 			}
 			depProjectID := *depProject.ID
-			
+
 			// Check if this dependency already exists and has an update channel override
 			var depMod *core.Mod
 			if slices.Contains(installedProjects, depProjectID) {
@@ -580,7 +579,7 @@ func CheckAndInstallDependencies(mods []*core.Mod, pack core.Pack, index *core.I
 					}
 				}
 			}
-			
+
 			allowedChannel := pack.GetAllowedChannel(depMod)
 			latestVersion, err := getLatestVersion(depProjectID, *depProject.Title, pack, allowedChannel)
 

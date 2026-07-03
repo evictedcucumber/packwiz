@@ -3,6 +3,11 @@ package modrinth
 import (
 	"errors"
 	"fmt"
+	"github.com/evictedcucumber/packwiz/cmd"
+	"github.com/evictedcucumber/packwiz/core"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"github.com/unascribed/FlexVer/go/flexver"
 	"math"
 	"net/http"
 	"net/url"
@@ -10,13 +15,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	modrinthApi "codeberg.org/jmansfield/go-modrinth/modrinth"
-	"github.com/evictedcucumber/packwiz/cmd"
-	"github.com/evictedcucumber/packwiz/core"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
-	"github.com/unascribed/FlexVer/go/flexver"
 )
 
 var modrinthCmd = &cobra.Command{
@@ -25,7 +23,7 @@ var modrinthCmd = &cobra.Command{
 	Short:   "Manage modrinth-based mods",
 }
 
-var mrDefaultClient = modrinthApi.NewClient(&http.Client{})
+var mrDefaultClient = NewClient(&http.Client{})
 
 func init() {
 	cmd.Add(modrinthCmd)
@@ -75,13 +73,13 @@ func retryWithBackoff(operation string, maxRetries int, fn func() error) error {
 	return fmt.Errorf("%s failed after %d attempts: %w", operation, maxRetries+1, lastErr)
 }
 
-func getProjectIdsViaSearch(query string, versions []string) ([]*modrinthApi.SearchResult, error) {
+func getProjectIdsViaSearch(query string, versions []string) ([]*SearchResult, error) {
 	facets := make([]string, 0)
 	for _, v := range versions {
 		facets = append(facets, "versions:"+v)
 	}
 
-	res, err := mrDefaultClient.Projects.Search(&modrinthApi.SearchOptions{
+	res, err := mrDefaultClient.Projects.Search(&SearchOptions{
 		Limit:  5,
 		Index:  "relevance",
 		Facets: [][]string{facets},
@@ -316,7 +314,7 @@ func compareLoaderLists(a []string, b []string) int32 {
 	return 0
 }
 
-func findLatestVersion(versions []*modrinthApi.Version, gameVersions []string, useFlexVer bool) *modrinthApi.Version {
+func findLatestVersion(versions []*Version, gameVersions []string, useFlexVer bool) *Version {
 	latestValidVersion := versions[0]
 	bestGameVersion := core.HighestSliceIndex(gameVersions, versions[0].GameVersions)
 	for _, v := range versions[1:] {
@@ -364,7 +362,7 @@ func isVersionTypeAllowed(versionType string, allowedChannel string) bool {
 	}
 }
 
-func getLatestVersion(projectID string, name string, pack core.Pack, allowedChannel string) (*modrinthApi.Version, error) {
+func getLatestVersion(projectID string, name string, pack core.Pack, allowedChannel string) (*Version, error) {
 	gameVersions, err := pack.GetSupportedMCVersions()
 	if err != nil {
 		return nil, err
@@ -376,7 +374,7 @@ func getLatestVersion(projectID string, name string, pack core.Pack, allowedChan
 		loaders = append(pack.GetCompatibleLoaders(), defaultMRLoaders...)
 	}
 
-	result, err := mrDefaultClient.Versions.ListVersions(projectID, modrinthApi.ListVersionsOptions{
+	result, err := mrDefaultClient.Versions.ListVersions(projectID, ListVersionsOptions{
 		GameVersions: gameVersions,
 		Loaders:      loaders,
 	})
@@ -385,7 +383,7 @@ func getLatestVersion(projectID string, name string, pack core.Pack, allowedChan
 	}
 
 	// Filter results by allowedChannel
-	var filteredResult []*modrinthApi.Version
+	var filteredResult []*Version
 	for _, v := range result {
 		vt := ""
 		if v.VersionType != nil {
@@ -411,7 +409,7 @@ func getLatestVersion(projectID string, name string, pack core.Pack, allowedChan
 	return releaseDateLatest, nil
 }
 
-func getSide(mod *modrinthApi.Project) string {
+func getSide(mod *Project) string {
 	server := shouldDownloadOnSide(*mod.ServerSide)
 	client := shouldDownloadOnSide(*mod.ClientSide)
 
@@ -430,7 +428,7 @@ func shouldDownloadOnSide(side string) bool {
 	return side == "required" || side == "optional"
 }
 
-func getBestHash(v *modrinthApi.File) (string, string) {
+func getBestHash(v *File) (string, string) {
 	// Try preferred hashes first; SHA1 is required for Modrinth pack exporting, but
 	// so is SHA512, so we can't win with the current one-hash format
 	val, exists := v.Hashes["sha512"]
@@ -481,7 +479,7 @@ func getInstalledProjectIDs(index *core.Index) []string {
 	return installedProjects
 }
 
-func resolveVersion(project *modrinthApi.Project, version string) (*modrinthApi.Version, error) {
+func resolveVersion(project *Project, version string) (*Version, error) {
 	// If it exists in the version list, it is already a version ID (and doesn't need querying further)
 	if slices.Contains(project.Versions, version) {
 		versionData, err := mrDefaultClient.Versions.Get(version)
@@ -493,7 +491,7 @@ func resolveVersion(project *modrinthApi.Project, version string) (*modrinthApi.
 
 	// Look up all versions
 	// TODO: PR a version number filter to Modrinth?
-	versionsList, err := mrDefaultClient.Versions.ListVersions(*project.ID, modrinthApi.ListVersionsOptions{})
+	versionsList, err := mrDefaultClient.Versions.ListVersions(*project.ID, ListVersionsOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch version list for %s: %v", *project.ID, err)
 	}

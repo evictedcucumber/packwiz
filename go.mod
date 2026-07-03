@@ -28,7 +28,6 @@ require (
 )
 
 require (
-	codeberg.org/jmansfield/go-modrinth v0.6.0
 	github.com/spf13/pflag v1.0.7
 	github.com/unascribed/FlexVer/go/flexver v1.0.0
 )

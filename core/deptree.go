@@ -149,7 +149,7 @@ func (in Index) DependencyTreePath() string {
 	return filepath.Join(in.packRoot, DependencyTreeFileName)
 }
 
-// WriteDependencyTree writes the dependency tree to dependencies.toml and registers it in the index
+// WriteDependencyTree writes the dependency tree to dependencies.toml without tracking it in the index
 func (in *Index) WriteDependencyTree() error {
 	packDeps, err := in.GenerateDependencyTree()
 	if err != nil {
@@ -168,13 +168,7 @@ func (in *Index) WriteDependencyTree() error {
 	if err := enc.Encode(packDeps); err != nil {
 		return err
 	}
-	_ = f.Close()
-
-	hashFormat, hash, err := hashFile(path)
-	if err != nil {
-		return err
-	}
-	return in.RefreshFileWithHash(path, hashFormat, hash, false)
+	return nil
 }
 
 // LoadDependencyTree attempts to read the dependency tree from dependencies.toml

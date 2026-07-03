@@ -3,7 +3,6 @@ package modrinth
 import (
 	"fmt"
 
-	modrinthApi "codeberg.org/jmansfield/go-modrinth/modrinth"
 	"github.com/evictedcucumber/packwiz/core"
 )
 
@@ -19,7 +18,7 @@ func (f mrMetadataFixer) FillMissingMetadata(mod *core.Mod) (bool, error) {
 	changed := false
 
 	if mod.PageURL == "" && data.ProjectID != "" {
-		var project *modrinthApi.Project
+		var project *Project
 		err := retryWithBackoff("fetch project from Modrinth", 3, func() error {
 			var retryErr error
 			project, retryErr = mrDefaultClient.Projects.Get(data.ProjectID)
@@ -36,7 +35,7 @@ func (f mrMetadataFixer) FillMissingMetadata(mod *core.Mod) (bool, error) {
 	}
 
 	if mod.Version == "" && data.InstalledVersion != "" {
-		var version *modrinthApi.Version
+		var version *Version
 		err := retryWithBackoff("fetch version from Modrinth", 3, func() error {
 			var retryErr error
 			version, retryErr = mrDefaultClient.Versions.Get(data.InstalledVersion)
@@ -69,7 +68,7 @@ func (f mrMetadataFixer) ValidateMetadata(mod *core.Mod) ([]string, error) {
 	}
 
 	// Check if the project exists
-	var project *modrinthApi.Project
+	var project *Project
 	err := retryWithBackoff("fetch project from Modrinth", 3, func() error {
 		var retryErr error
 		project, retryErr = mrDefaultClient.Projects.Get(data.ProjectID)
@@ -81,7 +80,7 @@ func (f mrMetadataFixer) ValidateMetadata(mod *core.Mod) ([]string, error) {
 	}
 
 	// Check if the version exists
-	var version *modrinthApi.Version
+	var version *Version
 	err = retryWithBackoff("fetch version from Modrinth", 3, func() error {
 		var retryErr error
 		version, retryErr = mrDefaultClient.Versions.Get(data.InstalledVersion)
@@ -126,7 +125,7 @@ func (f mrMetadataFixer) FixMetadata(mod *core.Mod) (bool, error) {
 	changed := false
 
 	// Fetch the current version from Modrinth
-	var version *modrinthApi.Version
+	var version *Version
 	err := retryWithBackoff("fetch version from Modrinth", 3, func() error {
 		var retryErr error
 		version, retryErr = mrDefaultClient.Versions.Get(data.InstalledVersion)
@@ -144,7 +143,7 @@ func (f mrMetadataFixer) FixMetadata(mod *core.Mod) (bool, error) {
 	}
 
 	// Fetch the project from Modrinth
-	var project *modrinthApi.Project
+	var project *Project
 	err = retryWithBackoff("fetch project from Modrinth", 3, func() error {
 		var retryErr error
 		project, retryErr = mrDefaultClient.Projects.Get(data.ProjectID)
