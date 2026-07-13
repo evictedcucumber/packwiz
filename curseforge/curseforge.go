@@ -168,14 +168,14 @@ func getPathForFile(gameID uint32, classID uint32, categoryID uint32, slug strin
 	if metaFolder == "" {
 		if m, ok := defaultFolders[gameID]; ok {
 			if folder, ok := m[classID]; ok {
-				return filepath.Join(viper.GetString("meta-folder-base"), folder, slug+core.MetaExtension)
+				return filepath.ToSlash(filepath.Join(viper.GetString("meta-folder-base"), folder, slug+core.MetaExtension))
 			} else if folder, ok := m[categoryID]; ok {
-				return filepath.Join(viper.GetString("meta-folder-base"), folder, slug+core.MetaExtension)
+				return filepath.ToSlash(filepath.Join(viper.GetString("meta-folder-base"), folder, slug+core.MetaExtension))
 			}
 		}
 		metaFolder = "."
 	}
-	return filepath.Join(viper.GetString("meta-folder-base"), metaFolder, slug+core.MetaExtension)
+	return filepath.ToSlash(filepath.Join(viper.GetString("meta-folder-base"), metaFolder, slug+core.MetaExtension))
 }
 
 func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, dependency bool, dependencies []string, updateChannel string) error {
@@ -229,7 +229,7 @@ func createModFile(modInfo modInfo, fileInfo modFileInfo, index *core.Index, dep
 
 func getCurseForgeMetaPath(modInfo modInfo) string {
 	folder := getCategoryForFile(modInfo.GameID, modInfo.ClassID, modInfo.PrimaryCategoryID)
-	return filepath.Join(viper.GetString("meta-folder-base"), folder, modInfo.Slug+core.MetaExtension)
+	return filepath.ToSlash(filepath.Join(viper.GetString("meta-folder-base"), folder, modInfo.Slug+core.MetaExtension))
 }
 
 func getCategoryForFile(gameID uint32, classID uint32, categoryID uint32) string {

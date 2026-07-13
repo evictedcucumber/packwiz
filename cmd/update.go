@@ -135,7 +135,7 @@ var UpdateCmd = &cobra.Command{
 						fmt.Println(err.Error())
 						continue
 					}
-					err = index.RefreshFileWithHash(modData.GetFilePath(), format, hash, true)
+					err = index.RefreshFileWithHash(modData.GetMetaPath(), format, hash, true)
 					if err != nil {
 						fmt.Println(err.Error())
 						continue
@@ -154,7 +154,7 @@ var UpdateCmd = &cobra.Command{
 				fmt.Println("Use the project slug or a path to a tracked .pw.toml file (you may need to run packwiz refresh).")
 				os.Exit(1)
 			}
-			modData, err := core.LoadMod(modPath)
+			modData, err := core.LoadMod(index.ResolveIndexPath(modPath))
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)

@@ -153,6 +153,17 @@ func (pack *Pack) UpdateIndexHash() error {
 
 // Write saves the pack file
 func (pack Pack) Write() error {
+	if filepath.IsAbs(pack.Index.File) {
+		packFile := viper.GetString("pack-file")
+		if packFile == "" {
+			packFile = "pack.toml"
+		}
+		rel, err := filepath.Rel(filepath.Dir(packFile), pack.Index.File)
+		if err == nil {
+			pack.Index.File = filepath.ToSlash(rel)
+		}
+	}
+
 	f, err := os.Create(viper.GetString("pack-file"))
 	if err != nil {
 		return err

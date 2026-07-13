@@ -141,8 +141,16 @@ func modCategory(in Index, mod *Mod) string {
 	if mod.Category != "" {
 		return mod.Category
 	}
-	modPath := filepath.Dir(mod.GetFilePath())
-	relDir, err := filepath.Rel(in.packRoot, modPath)
+	absModPath, err := filepath.Abs(mod.GetFilePath())
+	if err != nil {
+		return "uncategorized"
+	}
+	modPath := filepath.Dir(absModPath)
+	absPackRoot, err := filepath.Abs(in.packRoot)
+	if err != nil {
+		return "uncategorized"
+	}
+	relDir, err := filepath.Rel(absPackRoot, modPath)
 	if err != nil || relDir == "." {
 		return "uncategorized"
 	}

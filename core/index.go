@@ -126,7 +126,11 @@ func (in Index) ResolveIndexPath(p string) string {
 
 // RelIndexPath turns a file path on disk into a path from the index
 func (in Index) RelIndexPath(p string) (string, error) {
-	rel, err := filepath.Rel(in.packRoot, p)
+	absVal, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(in.packRoot, absVal)
 	if err != nil {
 		return "", err
 	}

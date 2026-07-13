@@ -32,7 +32,7 @@ var removeCmd = &cobra.Command{
 			fmt.Println("Use the project slug or a path to a tracked .pw.toml file (you may need to run packwiz refresh).")
 			os.Exit(1)
 		}
-		err = os.Remove(resolvedMod)
+		err = os.Remove(index.ResolveIndexPath(resolvedMod))
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)

@@ -25,7 +25,7 @@ func resolveModTargetPath(index core.Index, input string) (string, error) {
 		}
 		relPath = filepath.ToSlash(relPath)
 		if file, ok := index.Files[relPath]; ok && file.IsMetaFile() {
-			return absPath, nil
+			return relPath, nil
 		}
 		return "", fmt.Errorf("%q is not a tracked metadata file in index.toml", input)
 	}
@@ -33,12 +33,12 @@ func resolveModTargetPath(index core.Index, input string) (string, error) {
 	// 2) If the argument is an index-relative path, resolve it.
 	relInput := filepath.ToSlash(filepath.Clean(input))
 	if file, ok := index.Files[relInput]; ok && file.IsMetaFile() {
-		return index.ResolveIndexPath(relInput), nil
+		return relInput, nil
 	}
 
 	// 3) Fall back to slug lookup.
 	if modPath, ok := index.FindMod(input); ok {
-		return modPath, nil
+		return index.RelIndexPath(modPath)
 	}
 
 	return "", fmt.Errorf("no mod matched %q", input)
@@ -61,7 +61,7 @@ func resolveTrackedModMetaPath(index core.Index, input string) (string, error) {
 		}
 		relPath = filepath.ToSlash(relPath)
 		if file, ok := index.Files[relPath]; ok && file.IsMetaFile() {
-			return absPath, nil
+			return relPath, nil
 		}
 		return "", fmt.Errorf("%q is not a tracked metadata file in index.toml", input)
 	}
@@ -69,7 +69,7 @@ func resolveTrackedModMetaPath(index core.Index, input string) (string, error) {
 	// 2) If the argument is an index-relative path, resolve it.
 	relInput := filepath.ToSlash(filepath.Clean(input))
 	if file, ok := index.Files[relInput]; ok && file.IsMetaFile() {
-		return index.ResolveIndexPath(relInput), nil
+		return relInput, nil
 	}
 
 	return "", fmt.Errorf("pin only accepts a tracked .pw.toml file, not %q", input)

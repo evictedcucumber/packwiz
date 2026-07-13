@@ -125,7 +125,7 @@ func validateModMetadata(index core.Index) ([]validationIssue, error) {
 
 		if mod.Option == nil {
 			issues = append(issues, validationIssue{
-				Key:      mod.GetFilePath(),
+				Key:      mod.GetMetaPath(),
 				Message:  "missing option.dependency in mod metadata",
 				Expected: "an [option] table with dependency set",
 				Example:  "option = { dependency = false }",
@@ -153,7 +153,7 @@ func validateModPageURLsForMod(mod *core.Mod) ([]validationIssue, error) {
 	issues := make([]validationIssue, 0)
 	if mod.PageURL == "" {
 		issues = append(issues, validationIssue{
-			Key:      mod.GetFilePath(),
+			Key:      mod.GetMetaPath(),
 			Message:  "missing page-url in mod metadata",
 			Expected: "a project page URL for the mod source",
 			Example:  "page-url = \"https://modrinth.com/mod/example\"",
@@ -162,7 +162,7 @@ func validateModPageURLsForMod(mod *core.Mod) ([]validationIssue, error) {
 	}
 	if mod.Version == "" {
 		issues = append(issues, validationIssue{
-			Key:      mod.GetFilePath(),
+			Key:      mod.GetMetaPath(),
 			Message:  "missing version in mod metadata",
 			Expected: "a human-readable version string from the source project",
 			Example:  "version = \"1.2.3\"",
@@ -245,7 +245,7 @@ func validateDependencyLinks(index core.Index) ([]validationIssue, error) {
 	packRoot := filepath.Dir(viper.GetString("pack-file"))
 	trackedMods := make(map[string]struct{})
 	for _, mod := range mods {
-		trackedMods[normalizeDependencyPath(packRoot, mod.GetFilePath())] = struct{}{}
+		trackedMods[normalizeDependencyPath(packRoot, mod.GetMetaPath())] = struct{}{}
 	}
 
 	issues := make([]validationIssue, 0)
@@ -253,7 +253,7 @@ func validateDependencyLinks(index core.Index) ([]validationIssue, error) {
 		for _, dependencyPath := range mod.Dependencies {
 			if dependencyPath == "" {
 				issues = append(issues, validationIssue{
-					Key:      mod.GetFilePath(),
+					Key:      mod.GetMetaPath(),
 					Message:  "contains an empty dependency reference",
 					Expected: "a path to a tracked .pw.toml file",
 					Example:  "run 'packwiz fix --delete' to remove invalid dependency references",
@@ -265,7 +265,7 @@ func validateDependencyLinks(index core.Index) ([]validationIssue, error) {
 			resolvedDependencyPath := normalizeDependencyPath(packRoot, dependencyPath)
 			if _, err := os.Stat(resolvedDependencyPath); err != nil {
 				issues = append(issues, validationIssue{
-					Key:      mod.GetFilePath(),
+					Key:      mod.GetMetaPath(),
 					Message:  fmt.Sprintf("dependency reference %q does not exist", dependencyPath),
 					Expected: "an existing tracked .pw.toml file",
 					Example:  "run 'packwiz fix --delete' to remove invalid dependency references",
@@ -276,7 +276,7 @@ func validateDependencyLinks(index core.Index) ([]validationIssue, error) {
 
 			if _, ok := trackedMods[resolvedDependencyPath]; !ok {
 				issues = append(issues, validationIssue{
-					Key:      mod.GetFilePath(),
+					Key:      mod.GetMetaPath(),
 					Message:  fmt.Sprintf("dependency reference %q is not tracked in the index", dependencyPath),
 					Expected: "a .pw.toml file that is present in the index",
 					Example:  "run 'packwiz fix --delete' to remove invalid dependency references",
@@ -351,7 +351,7 @@ func collectFullValidationIssues(pack core.Pack, index core.Index) ([]validation
 				if err != nil {
 					// If there's an error, it might indicate a reference issue
 					issues = append(issues, validationIssue{
-						Key:      mod.GetFilePath(),
+						Key:      mod.GetMetaPath(),
 						Message:  fmt.Sprintf("error checking %s metadata: %v", updaterName, err),
 						Expected: "valid project/file/version IDs",
 						Example:  "run 'packwiz fix --full' to fix this issue",
@@ -361,7 +361,7 @@ func collectFullValidationIssues(pack core.Pack, index core.Index) ([]validation
 					// If there are validation issues, report them
 					for _, issue := range validationIssues {
 						issues = append(issues, validationIssue{
-							Key:      mod.GetFilePath(),
+							Key:      mod.GetMetaPath(),
 							Message:  issue,
 							Expected: "metadata to match the provider's data",
 							Example:  "run 'packwiz fix --full' to fix this issue",

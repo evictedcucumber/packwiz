@@ -86,7 +86,7 @@ func (in *Index) FixModMetadata(pack Pack, opts FixModMetadataOpts) (int, error)
 			fixed++
 		}
 
-		if err := in.RefreshFileWithHash(mod.GetFilePath(), format, hash, true); err != nil {
+		if err := in.RefreshFileWithHash(mod.GetMetaPath(), format, hash, true); err != nil {
 			return fixed, err
 		}
 	}
@@ -141,7 +141,7 @@ func (in *Index) FullFixModMetadata(pack Pack) (int, error) {
 			fixed++
 		}
 
-		if err := in.RefreshFileWithHash(mod.GetFilePath(), format, hash, true); err != nil {
+		if err := in.RefreshFileWithHash(mod.GetMetaPath(), format, hash, true); err != nil {
 			return fixed, err
 		}
 	}

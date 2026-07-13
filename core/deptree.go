@@ -341,7 +341,7 @@ func (in *Index) normalizeModDependencyPaths(mod *Mod) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("failed to write updated mod %s: %w", mod.Name, err)
 	}
-	if err := in.RefreshFileWithHash(mod.GetFilePath(), format, hash, true); err != nil {
+	if err := in.RefreshFileWithHash(mod.GetMetaPath(), format, hash, true); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -395,7 +395,7 @@ func (in *Index) resolveModDependencies(pack Pack, allMods []*Mod, mod *Mod) (bo
 	if err != nil {
 		return false, fmt.Errorf("failed to write updated mod %s: %w", mod.Name, err)
 	}
-	if err := in.RefreshFileWithHash(mod.GetFilePath(), format, hash, true); err != nil {
+	if err := in.RefreshFileWithHash(mod.GetMetaPath(), format, hash, true); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -467,7 +467,7 @@ func (in *Index) PruneDependencyReference(removedModPath string) error {
 		if err != nil {
 			return fmt.Errorf("failed to write updated mod %s: %w", mod.Name, err)
 		}
-		if err := in.RefreshFileWithHash(mod.GetFilePath(), format, hash, true); err != nil {
+		if err := in.RefreshFileWithHash(mod.GetMetaPath(), format, hash, true); err != nil {
 			return err
 		}
 	}

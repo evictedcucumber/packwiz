@@ -33,8 +33,8 @@ func TestResolveTrackedModMetaPathAcceptsTrackedMetaFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != metaPath {
-		t.Fatalf("expected %q, got %q", metaPath, resolved)
+	if resolved != "mods/example.pw.toml" {
+		t.Fatalf("expected %q, got %q", "mods/example.pw.toml", resolved)
 	}
 }
 

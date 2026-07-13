@@ -270,10 +270,9 @@ var importCmd = &cobra.Command{
 			}
 
 			modFilePath := getPathForFile(modInfoValue.GameID, modInfoValue.ClassID, modInfoValue.PrimaryCategoryID, modInfoValue.Slug)
-			ref, err := filepath.Abs(filepath.Join(filepath.Dir(modFilePath), modFileInfoValue.FileName))
-			if err == nil {
-				referencedModPaths = append(referencedModPaths, ref)
-			}
+			// Use relative path for comparison
+			ref := filepath.ToSlash(filepath.Join(filepath.Dir(modFilePath), modFileInfoValue.FileName))
+			referencedModPaths = append(referencedModPaths, ref)
 
 			fmt.Printf("Imported dependency \"%s\" successfully!\n", modInfoValue.Name)
 			successes++
@@ -291,25 +290,24 @@ var importCmd = &cobra.Command{
 		successes = 0
 		for _, v := range filesList {
 			filePath := index.ResolveIndexPath(v.Name())
-			filePathAbs, err := filepath.Abs(filePath)
-			if err == nil {
-				found := false
-				for _, v := range referencedModPaths {
-					if v == filePathAbs {
-						found = true
-						break
-					}
+			// Use relative path for comparison
+			filePathRel := filepath.ToSlash(v.Name())
+			found := false
+			for _, v := range referencedModPaths {
+				if v == filePathRel {
+					found = true
+					break
 				}
-				if found {
-					fmt.Printf("Ignored file \"%s\" (referenced by metadata)\n", filePath)
-					successes++
-					continue
-				}
-				if v.Name() == "manifest.json" || v.Name() == "minecraftinstance.json" || v.Name() == ".curseclient" {
-					fmt.Printf("Ignored file \"%s\"\n", v.Name())
-					successes++
-					continue
-				}
+			}
+			if found {
+				fmt.Printf("Ignored file \"%s\" (referenced by metadata)\n", filePath)
+				successes++
+				continue
+			}
+			if v.Name() == "manifest.json" || v.Name() == "minecraftinstance.json" || v.Name() == ".curseclient" {
+				fmt.Printf("Ignored file \"%s\"\n", v.Name())
+				successes++
+				continue
 			}
 
 			f, err := os.Create(filePath)

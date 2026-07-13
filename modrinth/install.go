@@ -386,9 +386,9 @@ func getModrinthMetaPath(project *Project, version *Version, pack core.Pack) (st
 	}
 
 	if project.Slug != nil {
-		return filepath.Join(viper.GetString("meta-folder-base"), folder, *project.Slug+core.MetaExtension), nil
+		return filepath.ToSlash(filepath.Join(viper.GetString("meta-folder-base"), folder, *project.Slug+core.MetaExtension)), nil
 	}
-	return filepath.Join(viper.GetString("meta-folder-base"), folder, core.SlugifyName(*project.Title)+core.MetaExtension), nil
+	return filepath.ToSlash(filepath.Join(viper.GetString("meta-folder-base"), folder, core.SlugifyName(*project.Title)+core.MetaExtension)), nil
 }
 
 func getInstalledProjectPaths(index *core.Index) map[string]string {

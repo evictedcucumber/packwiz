@@ -26,7 +26,7 @@ func pinMod(args []string, pinned bool) {
 		fmt.Println("Use a path to a tracked .pw.toml file (you may need to run packwiz refresh).")
 		os.Exit(1)
 	}
-	modData, err := core.LoadMod(modPath)
+	modData, err := core.LoadMod(index.ResolveIndexPath(modPath))
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

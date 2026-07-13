@@ -43,7 +43,7 @@ var selectVersionCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		modData, err := core.LoadMod(modPath)
+		modData, err := core.LoadMod(index.ResolveIndexPath(modPath))
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -191,6 +191,8 @@ func formatVersionSelectionLabel(version *Version, currentVersionID string) stri
 }
 
 func resolveTrackedModMetaPath(index core.Index, input string) (string, string, error) {
+	var finalAbsPath string
+	var finalRelPath string
 	if stat, err := os.Stat(input); err == nil && !stat.IsDir() {
 		absPath, err := filepath.Abs(input)
 		if err != nil {
@@ -206,17 +208,29 @@ func resolveTrackedModMetaPath(index core.Index, input string) (string, string, 
 		}
 		relPath = filepath.ToSlash(relPath)
 		if file, ok := index.Files[relPath]; ok && file.IsMetaFile() {
-			return absPath, relPath, nil
+			finalAbsPath = absPath
+			finalRelPath = relPath
+		} else {
+			return "", "", fmt.Errorf("%q is not a tracked metadata file in index.toml", input)
 		}
-		return "", "", fmt.Errorf("%q is not a tracked metadata file in index.toml", input)
+	} else {
+		relInput := filepath.ToSlash(filepath.Clean(input))
+		if file, ok := index.Files[relInput]; ok && file.IsMetaFile() {
+			finalAbsPath = index.ResolveIndexPath(relInput)
+			finalRelPath = relInput
+		} else {
+			return "", "", fmt.Errorf("select-version only accepts a tracked .pw.toml file, not %q", input)
+		}
 	}
 
-	relInput := filepath.ToSlash(filepath.Clean(input))
-	if file, ok := index.Files[relInput]; ok && file.IsMetaFile() {
-		return index.ResolveIndexPath(relInput), relInput, nil
+	wd, err := os.Getwd()
+	if err == nil {
+		relToWd, err := filepath.Rel(wd, finalAbsPath)
+		if err == nil {
+			return relToWd, finalRelPath, nil
+		}
 	}
-
-	return "", "", fmt.Errorf("select-version only accepts a tracked .pw.toml file, not %q", input)
+	return finalAbsPath, finalRelPath, nil
 }
 
 func writePackAndIndex(pack *core.Pack, index *core.Index, opts core.SyncDepsOpts) error {

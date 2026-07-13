@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/spf13/viper"
 )
 
 // Mod stores metadata about a mod. This is written to a TOML file for each mod.
@@ -89,24 +90,66 @@ func LoadMod(modFile string) (Mod, error) {
 			return mod, errors.New("Update plugin " + k + " not found!")
 		}
 	}
+	// Store path relative to pack root if possible
+	packFile := viper.GetString("pack-file")
+	if packFile != "" {
+		packDir := filepath.Dir(packFile)
+		if filepath.IsAbs(modFile) {
+			rel, err := filepath.Rel(packDir, modFile)
+			if err == nil {
+				modFile = filepath.ToSlash(rel)
+			}
+		} else {
+			// Already relative, ensure it's in forward slash format
+			modFile = filepath.ToSlash(modFile)
+		}
+	}
 	mod.metaFile = modFile
 	return mod, nil
 }
 
-// SetMetaPath sets the file path of a metadata file
+// SetMetaPath sets the file path of a metadata file (stored as relative to pack root)
 func (m *Mod) SetMetaPath(metaFile string) string {
+	// Convert to relative path from pack root if possible
+	packFile := viper.GetString("pack-file")
+	if packFile != "" {
+		packDir := filepath.Dir(packFile)
+		if filepath.IsAbs(metaFile) {
+			rel, err := filepath.Rel(packDir, metaFile)
+			if err == nil {
+				metaFile = filepath.ToSlash(rel)
+			}
+		} else {
+			// Already relative, ensure it's in forward slash format
+			metaFile = filepath.ToSlash(metaFile)
+		}
+	}
 	m.metaFile = metaFile
 	return m.metaFile
 }
 
+// resolveMetaPath resolves the stored metaFile path to an absolute path for file operations
+func (m *Mod) resolveMetaPath() string {
+	if filepath.IsAbs(m.metaFile) {
+		return m.metaFile
+	}
+	packFile := viper.GetString("pack-file")
+	if packFile == "" {
+		packFile = "pack.toml"
+	}
+	packDir := filepath.Dir(packFile)
+	return filepath.Join(packDir, filepath.FromSlash(m.metaFile))
+}
+
 // Write saves the mod file, returning a hash format and the value of the hash of the saved file
 func (m Mod) Write() (string, string, error) {
-	f, err := os.Create(m.metaFile)
+	metaPath := m.resolveMetaPath()
+	f, err := os.Create(metaPath)
 	if err != nil {
 		// Attempt to create the containing directory
-		err2 := os.MkdirAll(filepath.Dir(m.metaFile), os.ModePerm)
+		err2 := os.MkdirAll(filepath.Dir(metaPath), os.ModePerm)
 		if err2 == nil {
-			f, err = os.Create(m.metaFile)
+			f, err = os.Create(metaPath)
 		}
 		if err != nil {
 			return "sha256", "", err
@@ -140,12 +183,17 @@ func (m Mod) GetParsedUpdateData(updaterName string) (interface{}, bool) {
 
 // GetFilePath is a clumsy hack that I made because Mod already stores it's path anyway
 func (m Mod) GetFilePath() string {
+	return m.resolveMetaPath()
+}
+
+// GetMetaPath returns the stored relative path to the metadata file
+func (m Mod) GetMetaPath() string {
 	return m.metaFile
 }
 
 // GetDestFilePath returns the path of the destination file of the mod
 func (m Mod) GetDestFilePath() string {
-	return filepath.Join(filepath.Dir(m.metaFile), filepath.FromSlash(m.FileName))
+	return filepath.Join(filepath.Dir(m.resolveMetaPath()), filepath.FromSlash(m.FileName))
 }
 
 var slugifyRegex1 = regexp.MustCompile(`\(.*\)`)
