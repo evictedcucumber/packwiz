@@ -1,13 +1,3 @@
 .direnv
-.idea/
-.vscode/
-*.dll
-*.dylib
-*.exe
-*.exe~
-*.out
-*.so
-*.test
-/packwiz
-dist/
-result
+target
+coverage

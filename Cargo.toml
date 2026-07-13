@@ -1,0 +1,24 @@
+[package]
+name = "packwiz"
+version = "1.0.0"
+description = "A modrinth modpack manager."
+authors = ["evictedcucumber"]
+edition = "2024"
+rust-version = "1.97.0"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.103"
+clap = { version = "4.6.1", features = ["derive"] }
+regex = "1.13.0"
+thiserror = "2.0.18"
+
+[lints.rust]
+warnings = "deny"
+unused = "deny"
+rust_2018_idioms = "deny"
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
+nursery = "deny"

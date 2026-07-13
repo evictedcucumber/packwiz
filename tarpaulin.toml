@@ -1,0 +1,9 @@
+[test_config]
+name = "example-rust-project"
+branch-coverage = true
+color = "Always"
+exclude-files = ["src/main.rs"]
+
+[report]
+out = ["Html"]
+output-dir = "./coverage"
