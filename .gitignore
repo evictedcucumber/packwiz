@@ -22,3 +22,5 @@
 result
 
 dist/
+
+.claude/
