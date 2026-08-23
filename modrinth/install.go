@@ -54,6 +54,11 @@ var installCmd = &cobra.Command{
 			versionFilename = versionFilenameFlag
 		}
 
+		if releaseTypeFlag != "" && !core.IsValidReleaseType(releaseTypeFlag) {
+			fmt.Printf("Invalid --release-type %q; must be one of: release, beta, alpha\n", releaseTypeFlag)
+			os.Exit(1)
+		}
+
 		if (len(args) == 0 || len(args[0]) == 0) && projectID == "" {
 			fmt.Println("You must specify a project; with the ID flags, or by passing a Modrinth URL directly.")
 			os.Exit(1)
@@ -71,7 +76,7 @@ var installCmd = &cobra.Command{
 
 		// Got version ID; install using this ID
 		if versionID != "" {
-			err = installVersionById(versionID, versionFilename, pack, &index)
+			err = installVersionById(versionID, versionFilename, pack, &index, releaseTypeFlag)
 			if err != nil {
 				fmt.Printf("Failed to add project: %s\n", err)
 				os.Exit(1)
@@ -94,7 +99,7 @@ var installCmd = &cobra.Command{
 				fmt.Printf("Failed to add project: %s\n", err)
 				os.Exit(1)
 			}
-			err = installVersion(project, versionData, versionFilename, pack, &index)
+			err = installVersion(project, versionData, versionFilename, pack, &index, releaseTypeFlag)
 			if err != nil {
 				fmt.Printf("Failed to add project: %s\n", err)
 				os.Exit(1)
@@ -103,7 +108,7 @@ var installCmd = &cobra.Command{
 		}
 
 		// No version specified; find latest
-		err = installProject(project, versionFilename, pack, &index)
+		err = installProject(project, versionFilename, pack, &index, releaseTypeFlag)
 		if err != nil {
 			fmt.Printf("Failed to add project: %s\n", err)
 			os.Exit(1)
@@ -111,7 +116,7 @@ var installCmd = &cobra.Command{
 	},
 }
 
-func installVersionById(versionId string, versionFilename string, pack core.Pack, index *core.Index) error {
+func installVersionById(versionId string, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
 	version, err := mrDefaultClient.Versions.Get(versionId)
 	if err != nil {
 		return fmt.Errorf("failed to fetch version %s: %v", versionId, err)
@@ -122,11 +127,11 @@ func installVersionById(versionId string, versionFilename string, pack core.Pack
 		return fmt.Errorf("failed to fetch project %s: %v", *version.ProjectID, err)
 	}
 
-	return installVersion(project, version, versionFilename, pack, index)
+	return installVersion(project, version, versionFilename, pack, index, releaseType)
 }
 
-func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index) error {
-	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack)
+func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
+	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, releaseType)
 	if err != nil {
 		return fmt.Errorf("failed to get latest version: %v", err)
 	}
@@ -134,7 +139,7 @@ func installProject(project *modrinthApi.Project, versionFilename string, pack c
 		return errors.New("mod not available for the configured Minecraft version(s) (use the 'packwiz settings acceptable-versions' command to accept more) or loader")
 	}
 
-	return installVersion(project, latestVersion, versionFilename, pack, index)
+	return installVersion(project, latestVersion, versionFilename, pack, index, releaseType)
 }
 
 const maxCycles = 20
@@ -145,7 +150,7 @@ type depMetadataStore struct {
 	fileInfo    *modrinthApi.File
 }
 
-func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index) error {
+func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
 	if len(version.Files) == 0 {
 		return errors.New("version doesn't have any files attached")
 	}
@@ -230,7 +235,8 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 						return errors.New("failed to get dependency data: invalid response")
 					}
 					// Get latest version - could reuse version lookup data but it's not as easy (particularly since the version won't necessarily be the latest)
-					latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack)
+					// Dependencies use the pack's default release type rather than inheriting the flag passed for the mod being added
+					latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, "")
 					if err != nil {
 						fmt.Printf("Failed to get latest version of dependency %v: %v\n", *project.Title, err)
 						continue
@@ -277,7 +283,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 
 				if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
 					for _, v := range depMetadata {
-						err := createFileMeta(v.projectInfo, v.versionInfo, v.fileInfo, pack, index)
+						err := createFileMeta(v.projectInfo, v.versionInfo, v.fileInfo, pack, index, "")
 						if err != nil {
 							return err
 						}
@@ -300,7 +306,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	// TODO: handle optional/required resource pack files
 
 	// Create the metadata file
-	err := createFileMeta(project, version, file, pack, index)
+	err := createFileMeta(project, version, file, pack, index, releaseType)
 	if err != nil {
 		return err
 	}
@@ -322,13 +328,15 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	return nil
 }
 
-func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index) error {
+func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, releaseType string) error {
 	updateMap := make(map[string]map[string]interface{})
 
 	var err error
 	updateMap["modrinth"], err = mrUpdateData{
 		ProjectID:        *project.ID,
 		InstalledVersion: *version.ID,
+		// Only persisted when explicitly overridden; empty means "use the pack default"
+		ReleaseType: releaseType,
 	}.ToMap()
 	if err != nil {
 		return err
@@ -385,6 +393,7 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 var projectIDFlag string
 var versionIDFlag string
 var versionFilenameFlag string
+var releaseTypeFlag string
 
 func init() {
 	modrinthCmd.AddCommand(installCmd)
@@ -392,4 +401,5 @@ func init() {
 	installCmd.Flags().StringVar(&projectIDFlag, "project-id", "", "The Modrinth project ID to use")
 	installCmd.Flags().StringVar(&versionIDFlag, "version-id", "", "The Modrinth version ID to use")
 	installCmd.Flags().StringVar(&versionFilenameFlag, "version-filename", "", "The Modrinth version filename to use")
+	installCmd.Flags().StringVar(&releaseTypeFlag, "release-type", "", "The minimum release type to accept when looking up the latest version (release, beta or alpha); overrides the pack default for this mod")
 }

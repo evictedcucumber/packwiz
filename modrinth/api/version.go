@@ -25,6 +25,7 @@ type Version struct {
 	ID            *string       `json:"id,omitempty"`
 	ProjectID     *string       `json:"project_id,omitempty"`
 	VersionNumber *string       `json:"version_number,omitempty"`
+	VersionType   *string       `json:"version_type,omitempty"`
 	GameVersions  []string      `json:"game_versions,omitempty"`
 	Loaders       []string      `json:"loaders,omitempty"`
 	DatePublished *time.Time    `json:"date_published,omitempty"`

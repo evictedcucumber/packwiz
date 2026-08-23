@@ -18,6 +18,28 @@ func TestMrUpdateDataToMap(t *testing.T) {
 	}
 }
 
+func TestMrUpdateDataToMapOmitsEmptyReleaseType(t *testing.T) {
+	u := mrUpdateData{ProjectID: "abc123", InstalledVersion: "def456"}
+	m, err := u.ToMap()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := m["release-type"]; ok {
+		t.Errorf("expected release-type to be omitted when empty, got %v", m["release-type"])
+	}
+}
+
+func TestMrUpdateDataToMapIncludesReleaseTypeWhenSet(t *testing.T) {
+	u := mrUpdateData{ProjectID: "abc123", InstalledVersion: "def456", ReleaseType: "beta"}
+	m, err := u.ToMap()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m["release-type"] != "beta" {
+		t.Errorf("expected release-type %q, got %v", "beta", m["release-type"])
+	}
+}
+
 func TestMrUpdaterParseUpdate(t *testing.T) {
 	input := map[string]interface{}{
 		"mod-id":  "abc123",
