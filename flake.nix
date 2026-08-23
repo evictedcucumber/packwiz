@@ -9,7 +9,11 @@
   }:
     with nixpkgs.lib; let
       # List of explicitly unsupported systems
-      explicitlyUnsupportedSystems = [];
+      explicitlyUnsupportedSystems = [
+        # Go has no bootstrap binary for FreeBSD in nixpkgs, so buildGoModule
+        # can't evaluate on this system.
+        "x86_64-freebsd"
+      ];
 
       # Packwiz should support all 64-bit systems supported by go, but nix only
       # support strictly less, so all nix-supported systems are included
