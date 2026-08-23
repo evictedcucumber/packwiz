@@ -2,7 +2,6 @@ module github.com/evictedcucumber/packwiz
 
 require (
 	github.com/BurntSushi/toml v1.5.0
-	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/VividCortex/ewma v1.2.0 // indirect
 	github.com/aviddiviner/go-murmur v0.0.0-20150519214947-b9740d71e571
 	github.com/fatih/camelcase v1.0.0

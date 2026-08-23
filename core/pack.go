@@ -7,10 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/Masterminds/semver/v3"
 	"github.com/spf13/viper"
 )
 
@@ -32,18 +30,10 @@ type Pack struct {
 	Options  map[string]interface{}            `toml:"options"`
 }
 
-const CurrentPackFormat = "packwiz:1.1.0"
-
-var PackFormatConstraintAccepted = mustParseConstraint("~1")
-var PackFormatConstraintSuggestUpgrade = mustParseConstraint("~1.1")
-
-func mustParseConstraint(s string) *semver.Constraints {
-	c, err := semver.NewConstraint(s)
-	if err != nil {
-		panic(err)
-	}
-	return c
-}
+// CurrentPackFormat identifies packs created by this fork of packwiz. It is
+// intentionally distinct from upstream packwiz's "packwiz:x.x.x" format, so
+// packs are only compatible with this fork's own tooling.
+const CurrentPackFormat = "evictedcucumber-packwiz:1.0.0"
 
 // LoadPack loads the modpack metadata to a Pack struct
 func LoadPack() (Pack, error) {
@@ -52,30 +42,9 @@ func LoadPack() (Pack, error) {
 		return Pack{}, err
 	}
 
-	// Check pack-format
-	if len(modpack.PackFormat) == 0 {
-		fmt.Println("Modpack manifest has no pack-format field; assuming packwiz:1.1.0")
-		modpack.PackFormat = "packwiz:1.1.0"
+	if modpack.PackFormat != CurrentPackFormat {
+		return Pack{}, fmt.Errorf("pack-format field %q is not supported; this pack must be created with this fork of packwiz (expected %q)", modpack.PackFormat, CurrentPackFormat)
 	}
-	// Auto-migrate versions
-	if modpack.PackFormat == "packwiz:1.0.0" {
-		fmt.Println("Automatically migrating pack to packwiz:1.1.0 format...")
-		modpack.PackFormat = "packwiz:1.1.0"
-	}
-	if !strings.HasPrefix(modpack.PackFormat, "packwiz:") {
-		return Pack{}, errors.New("pack-format field does not indicate a valid packwiz pack")
-	}
-	ver, err := semver.StrictNewVersion(strings.TrimPrefix(modpack.PackFormat, "packwiz:"))
-	if err != nil {
-		return Pack{}, fmt.Errorf("pack-format field is not valid semver: %w", err)
-	}
-	if !PackFormatConstraintAccepted.Check(ver) {
-		return Pack{}, errors.New("the modpack is incompatible with this version of packwiz; please update")
-	}
-	if !PackFormatConstraintSuggestUpgrade.Check(ver) {
-		fmt.Println("Modpack has a newer feature number than is supported by this version of packwiz. Update to the latest version of packwiz for new features and bugfixes!")
-	}
-	// TODO: suggest migration if necessary (primarily for 2.0.0)
 
 	// Read options into viper
 	if modpack.Options != nil {
