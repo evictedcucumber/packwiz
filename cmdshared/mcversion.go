@@ -38,6 +38,7 @@ func GetValidMCVersions() (McVersionManifest, error) {
 	if err != nil {
 		return McVersionManifest{}, err
 	}
+	defer res.Body.Close()
 	dec := json.NewDecoder(res.Body)
 	out := McVersionManifest{}
 	err = dec.Decode(&out)

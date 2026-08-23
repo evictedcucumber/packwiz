@@ -241,6 +241,7 @@ func fetchMavenWithFilterMap(q VersionListQuery, url string, filterMap func(vers
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 	dec := xml.NewDecoder(res.Body)
 	out := MavenMetadata{}
 	err = dec.Decode(&out)
@@ -348,6 +349,7 @@ func getForgeRecommended(q VersionListQuery) string {
 	if err != nil {
 		return ""
 	}
+	defer res.Body.Close()
 	dec := json.NewDecoder(res.Body)
 	out := ForgeRecommended{}
 	err = dec.Decode(&out)

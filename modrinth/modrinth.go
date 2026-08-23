@@ -343,8 +343,8 @@ func getLatestVersion(projectID string, name string, pack core.Pack) (*modrinthA
 }
 
 func getSide(mod *modrinthApi.Project) string {
-	server := shouldDownloadOnSide(*mod.ServerSide)
-	client := shouldDownloadOnSide(*mod.ClientSide)
+	server := mod.ServerSide != nil && shouldDownloadOnSide(*mod.ServerSide)
+	client := mod.ClientSide != nil && shouldDownloadOnSide(*mod.ClientSide)
 
 	if server && client {
 		return core.UniversalSide
