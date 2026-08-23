@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"slices"
 
-	modrinthApi "codeberg.org/jmansfield/go-modrinth/modrinth"
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/core"
+	modrinthApi "github.com/evictedcucumber/packwiz/modrinth/api"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/unascribed/FlexVer/go/flexver"
