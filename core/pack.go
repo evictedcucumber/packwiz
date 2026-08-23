@@ -150,6 +150,16 @@ func (pack Pack) GetSupportedMCVersions() ([]string, error) {
 	return allVersionsDeduped, nil
 }
 
+// GetReleaseType gets the minimum acceptable release type for this pack (release, beta or alpha),
+// defaulting to "release" if not configured
+func (pack Pack) GetReleaseType() string {
+	releaseType := viper.GetString("release-type")
+	if !IsValidReleaseType(releaseType) {
+		return ReleaseTypeRelease
+	}
+	return releaseType
+}
+
 func (pack Pack) GetPackName() string {
 	if pack.Name == "" {
 		return "export"

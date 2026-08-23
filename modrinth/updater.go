@@ -14,6 +14,8 @@ type mrUpdateData struct {
 	ProjectID string `mapstructure:"mod-id"`
 	// TODO(format): change to "version-id"
 	InstalledVersion string `mapstructure:"version"`
+	// ReleaseType overrides the pack's default release type for this mod. Empty means "use the pack default"
+	ReleaseType string `mapstructure:"release-type,omitempty"`
 }
 
 func (u mrUpdateData) ToMap() (map[string]interface{}, error) {
@@ -47,7 +49,7 @@ func (u mrUpdater) CheckUpdate(mods []*core.Mod, pack core.Pack) ([]core.UpdateC
 
 		data := rawData.(mrUpdateData)
 
-		newVersion, err := getLatestVersion(data.ProjectID, mod.Name, pack)
+		newVersion, err := getLatestVersion(data.ProjectID, mod.Name, pack, data.ReleaseType)
 		if err != nil {
 			results[i] = core.UpdateCheck{Error: fmt.Errorf("failed to get latest version: %v", err)}
 			continue

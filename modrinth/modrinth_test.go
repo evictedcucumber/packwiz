@@ -349,6 +349,50 @@ func TestFindLatestVersionUsesLoaderListAsTiebreaker(t *testing.T) {
 	}
 }
 
+// --- filterVersionsByReleaseType ---
+
+func TestFilterVersionsByReleaseTypeReleaseExcludesLessStable(t *testing.T) {
+	release := &modrinthApi.Version{VersionType: strPtr("release")}
+	beta := &modrinthApi.Version{VersionType: strPtr("beta")}
+	alpha := &modrinthApi.Version{VersionType: strPtr("alpha")}
+
+	result := filterVersionsByReleaseType([]*modrinthApi.Version{release, beta, alpha}, "release")
+	if len(result) != 1 || result[0] != release {
+		t.Errorf("expected only the release version, got %v", result)
+	}
+}
+
+func TestFilterVersionsByReleaseTypeBetaIncludesReleaseAndBeta(t *testing.T) {
+	release := &modrinthApi.Version{VersionType: strPtr("release")}
+	beta := &modrinthApi.Version{VersionType: strPtr("beta")}
+	alpha := &modrinthApi.Version{VersionType: strPtr("alpha")}
+
+	result := filterVersionsByReleaseType([]*modrinthApi.Version{release, beta, alpha}, "beta")
+	if len(result) != 2 {
+		t.Errorf("expected release and beta versions, got %v", result)
+	}
+}
+
+func TestFilterVersionsByReleaseTypeAlphaIncludesAll(t *testing.T) {
+	release := &modrinthApi.Version{VersionType: strPtr("release")}
+	beta := &modrinthApi.Version{VersionType: strPtr("beta")}
+	alpha := &modrinthApi.Version{VersionType: strPtr("alpha")}
+
+	result := filterVersionsByReleaseType([]*modrinthApi.Version{release, beta, alpha}, "alpha")
+	if len(result) != 3 {
+		t.Errorf("expected all versions, got %v", result)
+	}
+}
+
+func TestFilterVersionsByReleaseTypeMissingTypeTreatedAsRelease(t *testing.T) {
+	noType := &modrinthApi.Version{}
+
+	result := filterVersionsByReleaseType([]*modrinthApi.Version{noType}, "release")
+	if len(result) != 1 {
+		t.Errorf("expected version with no version_type to be treated as a release, got %v", result)
+	}
+}
+
 // --- getSide ---
 
 func TestGetSideUniversal(t *testing.T) {

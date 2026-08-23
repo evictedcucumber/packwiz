@@ -175,6 +175,39 @@ func TestGetSupportedMCVersionsMissing(t *testing.T) {
 	}
 }
 
+func TestGetReleaseTypeDefaultsToRelease(t *testing.T) {
+	oldVal := viper.Get("release-type")
+	viper.Set("release-type", "")
+	t.Cleanup(func() { viper.Set("release-type", oldVal) })
+
+	pack := Pack{}
+	if got := pack.GetReleaseType(); got != ReleaseTypeRelease {
+		t.Errorf("GetReleaseType() = %q, want %q", got, ReleaseTypeRelease)
+	}
+}
+
+func TestGetReleaseTypeUsesConfiguredValue(t *testing.T) {
+	oldVal := viper.Get("release-type")
+	viper.Set("release-type", "beta")
+	t.Cleanup(func() { viper.Set("release-type", oldVal) })
+
+	pack := Pack{}
+	if got := pack.GetReleaseType(); got != ReleaseTypeBeta {
+		t.Errorf("GetReleaseType() = %q, want %q", got, ReleaseTypeBeta)
+	}
+}
+
+func TestGetReleaseTypeInvalidFallsBackToRelease(t *testing.T) {
+	oldVal := viper.Get("release-type")
+	viper.Set("release-type", "bogus")
+	t.Cleanup(func() { viper.Set("release-type", oldVal) })
+
+	pack := Pack{}
+	if got := pack.GetReleaseType(); got != ReleaseTypeRelease {
+		t.Errorf("GetReleaseType() = %q, want %q", got, ReleaseTypeRelease)
+	}
+}
+
 func TestGetPackNameNoName(t *testing.T) {
 	pack := Pack{}
 	if got := pack.GetPackName(); got != "export" {

@@ -248,6 +248,21 @@ func compareLoaderLists(a []string, b []string) int32 {
 	return 0
 }
 
+// filterVersionsByReleaseType returns only the versions whose release type is at least as stable as releaseType
+func filterVersionsByReleaseType(versions []*modrinthApi.Version, releaseType string) []*modrinthApi.Version {
+	var filtered []*modrinthApi.Version
+	for _, v := range versions {
+		fileReleaseType := core.ReleaseTypeRelease
+		if v.VersionType != nil && *v.VersionType != "" {
+			fileReleaseType = *v.VersionType
+		}
+		if core.ReleaseTypeAccepts(releaseType, fileReleaseType) {
+			filtered = append(filtered, v)
+		}
+	}
+	return filtered
+}
+
 func findLatestVersion(versions []*modrinthApi.Version, gameVersions []string, useFlexVer bool) *modrinthApi.Version {
 	latestValidVersion := versions[0]
 	bestGameVersion := core.HighestSliceIndex(gameVersions, versions[0].GameVersions)
@@ -282,7 +297,14 @@ func findLatestVersion(versions []*modrinthApi.Version, gameVersions []string, u
 	return latestValidVersion
 }
 
-func getLatestVersion(projectID string, name string, pack core.Pack) (*modrinthApi.Version, error) {
+// getLatestVersion finds the latest version of a project that is compatible with the pack, and whose
+// release type is at least as stable as releaseType. If releaseType is empty, the pack's default
+// release type is used (see Pack.GetReleaseType).
+func getLatestVersion(projectID string, name string, pack core.Pack, releaseType string) (*modrinthApi.Version, error) {
+	if releaseType == "" {
+		releaseType = pack.GetReleaseType()
+	}
+
 	gameVersions, err := pack.GetSupportedMCVersions()
 	if err != nil {
 		return nil, err
@@ -304,6 +326,11 @@ func getLatestVersion(projectID string, name string, pack core.Pack) (*modrinthA
 	if len(result) == 0 {
 		// TODO: retry with datapack specified, to determine what the issue is? or just request all and filter afterwards
 		return nil, errors.New("no valid versions found\n\tUse the 'packwiz settings acceptable-versions' command to accept more game versions\n\tTo use datapacks, add a datapack loader mod and specify the datapack-folder option with the folder this mod loads datapacks from")
+	}
+
+	result = filterVersionsByReleaseType(result, releaseType)
+	if len(result) == 0 {
+		return nil, fmt.Errorf("no versions found matching release type %q or more stable\n\tUse the 'packwiz settings release-type' command to change the pack default, or the --release-type flag to override it for this mod", releaseType)
 	}
 
 	// TODO: option to always compare using flexver?
