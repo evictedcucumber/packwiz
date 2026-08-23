@@ -5,10 +5,8 @@ require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/VividCortex/ewma v1.2.0 // indirect
 	github.com/aviddiviner/go-murmur v0.0.0-20150519214947-b9740d71e571
-	github.com/daviddengcn/go-colortext v1.0.0 // indirect
 	github.com/fatih/camelcase v1.0.0
 	github.com/igorsobreira/titlecase v0.0.0-20140109233139-4156b5b858ac
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
@@ -19,8 +17,6 @@ require (
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/term v0.34.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
-	gopkg.in/dixonwille/wlog.v2 v2.0.0 // indirect
-	gopkg.in/dixonwille/wmenu.v4 v4.0.2
 )
 
 require (
