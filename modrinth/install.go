@@ -362,7 +362,8 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 			HashFormat: algorithm,
 			Hash:       hash,
 		},
-		Update: updateMap,
+		Update:       updateMap,
+		Dependencies: buildDependencyList(version),
 	}
 	var path string
 	folder := viper.GetString("meta-folder")

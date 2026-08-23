@@ -439,6 +439,61 @@ func resolveVersion(project *modrinthApi.Project, version string) (*modrinthApi.
 	return nil, fmt.Errorf("unable to find version %s", version)
 }
 
+// buildDependencyList converts a version's raw dependency list into the persisted core.ModDependency form,
+// resolving dependencies that are only specified by version ID into their project ID.
+func buildDependencyList(version *modrinthApi.Version) []core.ModDependency {
+	if len(version.Dependencies) == 0 {
+		return nil
+	}
+
+	var versionIDsToResolve []string
+	for _, dep := range version.Dependencies {
+		if dep.ProjectID == nil && dep.VersionID != nil {
+			versionIDsToResolve = append(versionIDsToResolve, *dep.VersionID)
+		}
+	}
+
+	resolvedProjectIDs := make(map[string]string) // version ID -> project ID
+	if len(versionIDsToResolve) > 0 {
+		versions, err := mrDefaultClient.Versions.GetMultiple(versionIDsToResolve)
+		if err != nil {
+			fmt.Printf("Warning: failed to resolve dependency version IDs: %v\n", err)
+		} else {
+			for _, v := range versions {
+				if v.ID != nil && v.ProjectID != nil {
+					resolvedProjectIDs[*v.ID] = *v.ProjectID
+				}
+			}
+		}
+	}
+
+	var deps []core.ModDependency
+	seen := make(map[string]bool)
+	for _, dep := range version.Dependencies {
+		var projectID string
+		if dep.ProjectID != nil {
+			projectID = *dep.ProjectID
+		} else if dep.VersionID != nil {
+			projectID = resolvedProjectIDs[*dep.VersionID]
+		}
+		if projectID == "" || seen[projectID] {
+			continue
+		}
+		seen[projectID] = true
+
+		depType := "required"
+		if dep.DependencyType != nil && *dep.DependencyType != "" {
+			depType = *dep.DependencyType
+		}
+
+		deps = append(deps, core.ModDependency{
+			ID:   projectID,
+			Type: depType,
+		})
+	}
+	return deps
+}
+
 // mapDepOverride transforms manual dependency overrides (which will likely be removed when packwiz is able to determine provided mods)
 func mapDepOverride(depID string, isQuilt bool, mcVersion string) string {
 	if isQuilt && (depID == "P7dR8mSH" || depID == "fabric-api") {

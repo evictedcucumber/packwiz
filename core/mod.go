@@ -24,6 +24,18 @@ type Mod struct {
 	updateData map[string]interface{}
 
 	Option *ModOption `toml:"option,omitempty"`
+
+	// Dependencies lists the other projects this mod depends on, as last reported by its source.
+	// This is metadata for reporting/cross-referencing purposes only; it is not used to resolve installs.
+	Dependencies []ModDependency `toml:"dependencies,omitempty"`
+}
+
+// ModDependency represents another project that this mod depends on, as reported by its source.
+// ID is meaningful in the context of whichever updater manages this mod (e.g. a Modrinth project ID).
+type ModDependency struct {
+	ID string `toml:"id"`
+	// Type is the kind of dependency, e.g. "required" or "optional" (values are source-defined)
+	Type string `toml:"type"`
 }
 
 const (
