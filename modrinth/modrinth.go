@@ -32,25 +32,6 @@ func init() {
 	mrDefaultClient.UserAgent = core.UserAgent
 }
 
-func getProjectIdsViaSearch(query string, versions []string) ([]*modrinthApi.SearchResult, error) {
-	facets := make([]string, 0)
-	for _, v := range versions {
-		facets = append(facets, "versions:"+v)
-	}
-
-	res, err := mrDefaultClient.Projects.Search(&modrinthApi.SearchOptions{
-		Limit:  5,
-		Index:  "relevance",
-		Facets: [][]string{facets},
-		Query:  query,
-	})
-
-	if err != nil {
-		return nil, err
-	}
-	return res.Hits, nil
-}
-
 // "Loaders" that are supported regardless of the configured mod loaders
 var defaultMRLoaders = []string{
 	// TODO: check if Canvas/Iris/Optifine are installed? suggest installing them?
@@ -190,23 +171,19 @@ var urlRegexes = [...]*regexp.Regexp{
 	regexp.MustCompile("^https?://(www.)?modrinth\\.com/(?P<urlCategory>[^/]+)/(?P<slug>[a-zA-Z0-9!@$()`.+,_\"-]{3,64})(?:/version/(?P<version>[a-zA-Z0-9!@$()`.+,_\"-]{1,32}))?"),
 	// Version/project IDs are more restrictive: [a-zA-Z0-9]+ (base62)
 	regexp.MustCompile("^https?://cdn\\.modrinth\\.com/data/(?P<slug>[a-zA-Z0-9]+)/versions/(?P<versionID>[a-zA-Z0-9]+)/(?P<filename>[^/]+)$"),
-	regexp.MustCompile("^(?P<slug>[a-zA-Z0-9!@$()`.+,_\"-]{3,64})$"),
 }
-
-const slugRegexIdx = 2
 
 var urlCategories = []string{
 	"mod", "plugin", "datapack", "shader", "resourcepack", "modpack",
 }
 
-func parseSlugOrUrl(input string, slug *string, version *string, versionID *string, filename *string) (parsedSlug bool, err error) {
-	for regexIdx, r := range urlRegexes {
+func parseUrl(input string, slug *string, version *string, versionID *string, filename *string) (err error) {
+	for _, r := range urlRegexes {
 		matches := r.FindStringSubmatch(input)
 		if matches != nil {
 			if i := r.SubexpIndex("urlCategory"); i >= 0 {
 				if !slices.Contains(urlCategories, matches[i]) {
-					err = errors.New("unknown project type: " + matches[i])
-					return
+					return errors.New("unknown project type: " + matches[i])
 				}
 			}
 			if i := r.SubexpIndex("slug"); i >= 0 {
@@ -219,18 +196,16 @@ func parseSlugOrUrl(input string, slug *string, version *string, versionID *stri
 				*versionID = matches[i]
 			}
 			if i := r.SubexpIndex("filename"); i >= 0 {
-				var parsed string
-				parsed, err = url.PathUnescape(matches[i])
+				parsed, err := url.PathUnescape(matches[i])
 				if err != nil {
-					return
+					return err
 				}
 				*filename = parsed
 			}
-			parsedSlug = regexIdx == slugRegexIdx
-			return
+			return nil
 		}
 	}
-	return
+	return errors.New("not a valid Modrinth URL")
 }
 
 func compareLoaderLists(a []string, b []string) int32 {

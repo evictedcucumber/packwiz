@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	modrinthApi "codeberg.org/jmansfield/go-modrinth/modrinth"
 	"github.com/evictedcucumber/packwiz/cmdshared"
@@ -14,15 +13,14 @@ import (
 
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/spf13/cobra"
-	"gopkg.in/dixonwille/wmenu.v4"
 )
 
 // installCmd represents the install command
 var installCmd = &cobra.Command{
-	Use:     "add [URL|slug|search]",
-	Short:   "Add a project from a Modrinth URL, slug/project ID or search",
+	Use:     "add [URL]",
+	Short:   "Add a project from a Modrinth URL",
 	Aliases: []string{"install", "get"},
-	Args:    cobra.ArbitraryArgs,
+	Args:    cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		pack, err := core.LoadPack()
 		if err != nil {
@@ -41,14 +39,14 @@ var installCmd = &cobra.Command{
 		if projectIDFlag != "" {
 			projectID = projectIDFlag
 			if len(args) != 0 {
-				fmt.Println("--project-id cannot be used with a separately specified URL/slug/search term")
+				fmt.Println("--project-id cannot be used with a separately specified URL")
 				os.Exit(1)
 			}
 		}
 		if versionIDFlag != "" {
 			versionID = versionIDFlag
 			if len(args) != 0 {
-				fmt.Println("--version-id cannot be used with a separately specified URL/slug/search term")
+				fmt.Println("--version-id cannot be used with a separately specified URL")
 				os.Exit(1)
 			}
 		}
@@ -57,15 +55,14 @@ var installCmd = &cobra.Command{
 		}
 
 		if (len(args) == 0 || len(args[0]) == 0) && projectID == "" {
-			fmt.Println("You must specify a project; with the ID flags, or by passing a URL, slug or search term directly.")
+			fmt.Println("You must specify a project; with the ID flags, or by passing a Modrinth URL directly.")
 			os.Exit(1)
 		}
 
 		var version string
-		var parsedSlug bool
 		if projectID == "" && versionID == "" && len(args) == 1 {
-			// Try interpreting the argument as a slug/project ID, or project/version/CDN URL
-			parsedSlug, err = parseSlugOrUrl(args[0], &projectID, &version, &versionID, &versionFilename)
+			// Interpret the argument as a project/version/CDN URL
+			err = parseUrl(args[0], &projectID, &version, &versionID, &versionFilename)
 			if err != nil {
 				fmt.Printf("Failed to parse URL: %v\n", err)
 				os.Exit(1)
@@ -83,45 +80,31 @@ var installCmd = &cobra.Command{
 		}
 
 		// Look up project ID
-		if projectID != "" {
-			// Modrinth transparently handles slugs/project IDs in their API; we don't have to detect which one it is.
-			var project *modrinthApi.Project
-			project, err = mrDefaultClient.Projects.Get(projectID)
-			if err == nil {
-				// We found a project with that id/slug
-				if version != "" {
-					// Try to look up version number
-					versionData, err := resolveVersion(project, version)
-					if err != nil {
-						fmt.Printf("Failed to add project: %s\n", err)
-						os.Exit(1)
-					}
-					err = installVersion(project, versionData, versionFilename, pack, &index)
-					if err != nil {
-						fmt.Printf("Failed to add project: %s\n", err)
-						os.Exit(1)
-					}
-					return
-				}
-
-				// No version specified; find latest
-				err = installProject(project, versionFilename, pack, &index)
-				if err != nil {
-					fmt.Printf("Failed to add project: %s\n", err)
-					os.Exit(1)
-				}
-				return
-			}
+		// Modrinth transparently handles slugs/project IDs in their API; we don't have to detect which one it is.
+		project, err := mrDefaultClient.Projects.Get(projectID)
+		if err != nil {
+			fmt.Printf("Failed to add project: %s\n", err)
+			os.Exit(1)
 		}
 
-		// Arguments weren't a valid slug/project ID, try to search for it instead (if it was not parsed as a URL)
-		if projectID == "" || parsedSlug {
-			err = installViaSearch(strings.Join(args, " "), versionFilename, !parsedSlug, pack, &index)
+		if version != "" {
+			// Try to look up version number
+			versionData, err := resolveVersion(project, version)
 			if err != nil {
 				fmt.Printf("Failed to add project: %s\n", err)
 				os.Exit(1)
 			}
-		} else {
+			err = installVersion(project, versionData, versionFilename, pack, &index)
+			if err != nil {
+				fmt.Printf("Failed to add project: %s\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+
+		// No version specified; find latest
+		err = installProject(project, versionFilename, pack, &index)
+		if err != nil {
 			fmt.Printf("Failed to add project: %s\n", err)
 			os.Exit(1)
 		}
@@ -140,64 +123,6 @@ func installVersionById(versionId string, versionFilename string, pack core.Pack
 	}
 
 	return installVersion(project, version, versionFilename, pack, index)
-}
-
-func installViaSearch(query string, versionFilename string, autoAcceptFirst bool, pack core.Pack, index *core.Index) error {
-	mcVersions, err := pack.GetSupportedMCVersions()
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Searching Modrinth...")
-
-	results, err := getProjectIdsViaSearch(query, mcVersions)
-	if err != nil {
-		return err
-	}
-
-	if len(results) == 0 {
-		return errors.New("no projects found")
-	}
-
-	if viper.GetBool("non-interactive") || (len(results) == 1 && autoAcceptFirst) {
-		// Install the first project found
-		project, err := mrDefaultClient.Projects.Get(*results[0].ProjectID)
-		if err != nil {
-			return err
-		}
-
-		return installProject(project, versionFilename, pack, index)
-	}
-
-	// Create menu for the user to choose the correct project
-	menu := wmenu.NewMenu("Choose a number:")
-	menu.Option("Cancel", nil, false, nil)
-	for i, v := range results {
-		// Should be non-nil (Title is a required field)
-		menu.Option(*v.Title, v, i == 0, nil)
-	}
-
-	menu.Action(func(menuRes []wmenu.Opt) error {
-		if len(menuRes) != 1 || menuRes[0].Value == nil {
-			return errors.New("project selection cancelled")
-		}
-
-		// Get the selected project
-		selectedProject, ok := menuRes[0].Value.(*modrinthApi.SearchResult)
-		if !ok {
-			return errors.New("error converting interface from wmenu")
-		}
-
-		// Install the selected project
-		project, err := mrDefaultClient.Projects.Get(*selectedProject.ProjectID)
-		if err != nil {
-			return err
-		}
-
-		return installProject(project, versionFilename, pack, index)
-	})
-
-	return menu.Run()
 }
 
 func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index) error {
