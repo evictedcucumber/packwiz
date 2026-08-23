@@ -145,6 +145,16 @@ var ignoreDefaults = []string{
 	// Exclude packwiz binaries, if the user puts them in their pack folder
 	"packwiz.exe",
 	"packwiz", // Note: also excludes packwiz/ as a directory - you can negate this pattern if you want a directory called packwiz
+
+	// Exclude repo metadata that commonly lives alongside a pack
+	"README.md",
+	"LICENSE",
+	".direnv/**",
+	".editorconfig",
+	".envrc",
+	"flake.lock",
+	"flake.nix",
+	"lefthook.yml",
 }
 
 func readGitignore(path string) (*gitignore.GitIgnore, bool) {
