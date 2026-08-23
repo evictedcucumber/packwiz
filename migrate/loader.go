@@ -65,21 +65,14 @@ var loaderCommand = &cobra.Command{
 			fmt.Println("Updating to explicit loader version")
 			// This one is easy :D
 			versionData, loader := getVersionsForLoader(currentLoaders[0], mcVersion, core.Latest)
-			// Check if the loader happens to be Forge/NeoForge, since there's two version formats
-			if loader.Name == "forge" || loader.Name == "neoforge" {
-				wantedVersion := cmdshared.GetRawForgeVersion(args[0])
-				validateVersion(versionData.Versions, wantedVersion, loader)
-				_ = updatePackToVersion(wantedVersion, modpack, loader)
-			} else if loader.Name == "liteloader" {
-				// These are weird and just have a MC version
-				fmt.Println("LiteLoader only has 1 version per Minecraft version so we're unable to update!")
-				os.Exit(0)
-			} else {
-				// We're on Fabric or quilt
-				validateVersion(versionData.Versions, args[0], loader)
-				if ok := updatePackToVersion(args[0], modpack, loader); !ok {
-					os.Exit(1)
-				}
+			wantedVersion := args[0]
+			// NeoForge reused Forge's mcVersion-prefixed version format, but only for 1.20.1
+			if loader.Name == "neoforge" && mcVersion == "1.20.1" {
+				wantedVersion = cmdshared.GetRawForgeVersion(args[0])
+			}
+			validateVersion(versionData.Versions, wantedVersion, loader)
+			if ok := updatePackToVersion(wantedVersion, modpack, loader); !ok {
+				os.Exit(1)
 			}
 			// Write the pack to disk
 			err = modpack.Write()

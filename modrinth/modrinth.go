@@ -53,11 +53,7 @@ var withDatapackPathMRLoaders = []string{
 }
 
 var loaderFolders = map[string]string{
-	"quilt":      "mods",
-	"fabric":     "mods",
-	"forge":      "mods",
 	"neoforge":   "mods",
-	"liteloader": "mods",
 	"modloader":  "mods",
 	"rift":       "mods",
 	"bukkit":     "plugins",
@@ -76,13 +72,7 @@ var loaderFolders = map[string]string{
 
 // Preference list for loader types, for comparing files where the version is the same - more preferred is lower
 var loaderPreferenceList = []string{
-	// Prefer quilt versions over fabric versions
-	"quilt",
-	"fabric",
-	// Prefer neoforge versions over forge versions
 	"neoforge",
-	"forge",
-	"liteloader",
 	"modloader",
 	"rift",
 	// Prefer mods to plugins
@@ -109,12 +99,9 @@ var loaderPreferenceList = []string{
 
 // Groups of loaders that should be treated the same as the key, if both versions support the key
 // i.e. the key is a more "generic" loader; support for it implies support for the whole group
-// e.g. [quilt, fabric] should compare equal to [fabric] (but less than [quilt] as Quilt support doesn't imply Fabric support)
-// This is useful when authors forget to add Quilt/Purpur etc. to all versions
+// This is useful when authors forget to add Purpur etc. to all versions
 // TODO: make abstracted from source backend
 var loaderCompatGroups = map[string][]string{
-	"fabric":     {"quilt"},
-	"forge":      {"neoforge"},
 	"bukkit":     {"purpur", "paper", "spigot"},
 	"bungeecord": {"waterfall"},
 }
@@ -137,7 +124,7 @@ func getProjectTypeFolder(projectType string, fileLoaders []string, packLoaders 
 		}
 		return "shaderpacks", nil
 	} else if projectType == "mod" {
-		// Look up pack loaders in the list of loaders (note this is currently filtered to quilt/fabric/neoforge/forge)
+		// Look up pack loaders in the list of loaders (note this is currently filtered to neoforge)
 		bestLoaderIdx := math.MaxInt
 		for _, v := range fileLoaders {
 			if slices.Contains(packLoaders, v) {
@@ -216,7 +203,7 @@ func compareLoaderLists(a []string, b []string) int32 {
 			compat = append(compat, v...)
 		}
 	}
-	// Prefer loaders; principally Quilt over Fabric, mods over datapacks (Modrinth backend handles filtering)
+	// Prefer loaders; principally mods over datapacks (Modrinth backend handles filtering)
 	minIdxA := math.MaxInt
 	for _, v := range a {
 		if slices.Contains(compat, v) {
@@ -492,19 +479,4 @@ func buildDependencyList(version *modrinthApi.Version) []core.ModDependency {
 		})
 	}
 	return deps
-}
-
-// mapDepOverride transforms manual dependency overrides (which will likely be removed when packwiz is able to determine provided mods)
-func mapDepOverride(depID string, isQuilt bool, mcVersion string) string {
-	if isQuilt && (depID == "P7dR8mSH" || depID == "fabric-api") {
-		// Transform FAPI dependencies to QFAPI/QSL dependencies when using Quilt
-		return "qvIfYCYJ"
-	}
-	if isQuilt && (depID == "Ha28R6CL" || depID == "fabric-language-kotlin") {
-		// Transform FLK dependencies to QKL dependencies when using Quilt >=1.19.2 non-snapshot
-		if flexver.Less("1.19.1", mcVersion) && flexver.Less(mcVersion, "2.0.0") {
-			return "lwVhp9o5"
-		}
-	}
-	return depID
 }

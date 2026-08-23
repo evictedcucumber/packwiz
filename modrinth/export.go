@@ -193,13 +193,7 @@ var exportCmd = &cobra.Command{
 			fmt.Println("Error creating manifest: " + err.Error())
 			os.Exit(1)
 		}
-		if quiltVersion, ok := pack.Versions["quilt"]; ok {
-			dependencies["quilt-loader"] = quiltVersion
-		} else if fabricVersion, ok := pack.Versions["fabric"]; ok {
-			dependencies["fabric-loader"] = fabricVersion
-		} else if forgeVersion, ok := pack.Versions["forge"]; ok {
-			dependencies["forge"] = forgeVersion
-		} else if neoforgeVersion, ok := pack.Versions["neoforge"]; ok {
+		if neoforgeVersion, ok := pack.Versions["neoforge"]; ok {
 			dependencies["neoforge"] = neoforgeVersion
 		}
 

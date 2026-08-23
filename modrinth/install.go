@@ -158,11 +158,6 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	if len(version.Dependencies) > 0 {
 		// TODO: could get installed version IDs, and compare to install the newest - i.e. preferring pinned versions over getting absolute latest?
 		installedProjects := getInstalledProjectIDs(index)
-		isQuilt := slices.Contains(pack.GetCompatibleLoaders(), "quilt")
-		mcVersion, err := pack.GetMCVersion()
-		if err != nil {
-			return err
-		}
 
 		var depMetadata []depMetadataStore
 		var depProjectIDPendingQueue []string
@@ -175,7 +170,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 					depVersionIDPendingQueue = append(depVersionIDPendingQueue, *dep.VersionID)
 				} else {
 					if dep.ProjectID != nil {
-						depProjectIDPendingQueue = append(depProjectIDPendingQueue, mapDepOverride(*dep.ProjectID, isQuilt, mcVersion))
+						depProjectIDPendingQueue = append(depProjectIDPendingQueue, *dep.ProjectID)
 					}
 				}
 			}
@@ -192,7 +187,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 					if err == nil {
 						for _, v := range depVersions {
 							// Add project ID to queue
-							depProjectIDPendingQueue = append(depProjectIDPendingQueue, mapDepOverride(*v.ProjectID, isQuilt, mcVersion))
+							depProjectIDPendingQueue = append(depProjectIDPendingQueue, *v.ProjectID)
 						}
 					} else {
 						fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
@@ -217,7 +212,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 				}
 				depProjectIDPendingQueue = depProjectIDPendingQueue[:i]
 
-				// Clean up duplicates from dep queue (from deps on both QFAPI + FAPI)
+				// Clean up duplicates from dep queue
 				slices.Sort(depProjectIDPendingQueue)
 				depProjectIDPendingQueue = slices.Compact(depProjectIDPendingQueue)
 
@@ -246,7 +241,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 						// TODO: recommend optional dependencies?
 						if dep.DependencyType != nil && *dep.DependencyType == "required" {
 							if dep.ProjectID != nil {
-								depProjectIDPendingQueue = append(depProjectIDPendingQueue, mapDepOverride(*dep.ProjectID, isQuilt, mcVersion))
+								depProjectIDPendingQueue = append(depProjectIDPendingQueue, *dep.ProjectID)
 							}
 							if dep.VersionID != nil {
 								depVersionIDPendingQueue = append(depVersionIDPendingQueue, *dep.VersionID)
