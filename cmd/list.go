@@ -39,6 +39,24 @@ var listCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Filter mods by main/dependency status
+		if viper.IsSet("list.only") {
+			only := viper.GetString("list.only")
+			if only != "main" && only != "dependencies" {
+				fmt.Printf("Invalid --only %q, must be one of main, dependencies\n", only)
+				os.Exit(1)
+			}
+
+			i := 0
+			for _, mod := range mods {
+				if (only == "dependencies") == mod.AddedAsDependency {
+					mods[i] = mod
+					i++
+				}
+			}
+			mods = mods[:i]
+		}
+
 		// Filter mods by side
 		if viper.IsSet("list.side") {
 			side := viper.GetString("list.side")
@@ -62,14 +80,20 @@ var listCmd = &cobra.Command{
 		})
 
 		// Print mods
-		if viper.GetBool("list.version") {
-			for _, mod := range mods {
-				fmt.Printf("%s (%s)\n", mod.Name, mod.FileName)
+		showKind := viper.GetBool("list.show-kind")
+		for _, mod := range mods {
+			line := mod.Name
+			if viper.GetBool("list.version") {
+				line = fmt.Sprintf("%s (%s)", line, mod.FileName)
 			}
-		} else {
-			for _, mod := range mods {
-				fmt.Println(mod.Name)
+			if showKind {
+				kind := "main"
+				if mod.AddedAsDependency {
+					kind = "dependency"
+				}
+				line = fmt.Sprintf("%s [%s]", line, kind)
 			}
+			fmt.Println(line)
 		}
 	},
 }
@@ -81,5 +105,9 @@ func init() {
 	_ = viper.BindPFlag("list.version", listCmd.Flags().Lookup("version"))
 	listCmd.Flags().StringP("side", "s", "", "Filter mods by side (e.g., client or server)")
 	_ = viper.BindPFlag("list.side", listCmd.Flags().Lookup("side"))
+	listCmd.Flags().String("only", "", "Filter mods by kind: \"main\" or \"dependencies\"")
+	_ = viper.BindPFlag("list.only", listCmd.Flags().Lookup("only"))
+	listCmd.Flags().Bool("show-kind", false, "Show whether each mod is a main mod or a dependency")
+	_ = viper.BindPFlag("list.show-kind", listCmd.Flags().Lookup("show-kind"))
 
 }

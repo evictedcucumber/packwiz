@@ -28,6 +28,11 @@ type Mod struct {
 	// Dependencies lists the other projects this mod depends on, as last reported by its source.
 	// This is metadata for reporting/cross-referencing purposes only; it is not used to resolve installs.
 	Dependencies []ModDependency `toml:"dependencies,omitempty"`
+
+	// AddedAsDependency marks this mod as having been added because another mod depends on it,
+	// rather than being a main mod the user explicitly wanted. This is metadata for
+	// reporting/cross-referencing purposes only; it does not affect how the mod is installed or updated.
+	AddedAsDependency bool `toml:"added-as-dependency,omitempty"`
 }
 
 // ModDependency represents another project that this mod depends on, as reported by its source.

@@ -278,7 +278,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 
 				if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
 					for _, v := range depMetadata {
-						err := createFileMeta(v.projectInfo, v.versionInfo, v.fileInfo, pack, index, "")
+						err := createFileMeta(v.projectInfo, v.versionInfo, v.fileInfo, pack, index, "", true)
 						if err != nil {
 							return err
 						}
@@ -301,7 +301,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	// TODO: handle optional/required resource pack files
 
 	// Create the metadata file
-	err := createFileMeta(project, version, file, pack, index, releaseType)
+	err := createFileMeta(project, version, file, pack, index, releaseType, false)
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	return nil
 }
 
-func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, releaseType string) error {
+func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, releaseType string, isDependency bool) error {
 	updateMap := make(map[string]map[string]interface{})
 
 	var err error
@@ -357,8 +357,9 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 			HashFormat: algorithm,
 			Hash:       hash,
 		},
-		Update:       updateMap,
-		Dependencies: buildDependencyList(version),
+		Update:            updateMap,
+		Dependencies:      buildDependencyList(version),
+		AddedAsDependency: isDependency,
 	}
 	var path string
 	folder := viper.GetString("meta-folder")
