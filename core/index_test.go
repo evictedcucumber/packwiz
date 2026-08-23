@@ -299,6 +299,53 @@ func TestIndexRefresh(t *testing.T) {
 	}
 }
 
+func TestIndexRefreshSkipsSymlinkedDirectory(t *testing.T) {
+	dir := t.TempDir()
+
+	packFile := filepath.Join(dir, "pack.toml")
+	indexFilePath := filepath.Join(dir, "index.toml")
+
+	mustWriteFile(t, packFile, "name = \"Test\"\n")
+	mustWriteFile(t, indexFilePath, "")
+	mustWriteFile(t, filepath.Join(dir, "mods", "test.jar"), "fake jar content")
+
+	// A symlink pointing at a directory, not covered by any ignore
+	// pattern. WalkDir reports this as a non-directory entry, so
+	// without special handling it gets opened as a regular file and
+	// fails with "is a directory".
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(dir, "linked-dir")); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	oldPackFile := viper.GetString("pack-file")
+	viper.Set("pack-file", packFile)
+	oldNoHashes := viper.GetBool("no-internal-hashes")
+	viper.Set("no-internal-hashes", false)
+	t.Cleanup(func() {
+		viper.Set("pack-file", oldPackFile)
+		viper.Set("no-internal-hashes", oldNoHashes)
+	})
+
+	idx := Index{
+		HashFormat: "sha256",
+		indexFile:  indexFilePath,
+		packRoot:   dir,
+		Files:      IndexFiles{},
+	}
+
+	if err := idx.Refresh(); err != nil {
+		t.Fatalf("Refresh() returned error: %v", err)
+	}
+
+	if _, ok := idx.Files["mods/test.jar"]; !ok {
+		t.Error("expected mods/test.jar to be added to the index")
+	}
+	if _, ok := idx.Files["linked-dir"]; ok {
+		t.Error("expected linked-dir to be excluded since it resolves to a directory")
+	}
+}
+
 func mustWriteFile(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
