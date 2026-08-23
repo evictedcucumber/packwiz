@@ -5,7 +5,6 @@ in
   {
     lib ? pkgs.lib,
     buildGoModule ? pkgs.buildGoModule,
-    fetchFromGitHub ? pkgs.fetchFromGitHub,
     installShellFiles ? pkgs.installShellFiles,
     # version and vendorHash should be specified by the caller
     version ? "latest",
