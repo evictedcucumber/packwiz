@@ -87,7 +87,7 @@ var exportCmd = &cobra.Command{
 
 		for _, mod := range mods {
 			if !canBeIncludedDirectly(mod, restrictDomains) {
-				cmdshared.PrintDisclaimer(false)
+				cmdshared.PrintDisclaimer()
 				break
 			}
 		}

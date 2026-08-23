@@ -2,12 +2,14 @@
 
 This is a fork of [packwiz/packwiz](https://github.com/packwiz/packwiz), the original packwiz project created and maintained by [comp500](https://github.com/comp500) and contributors. All credit for the original design and implementation goes to the upstream project — see their repository for the canonical version.
 
-packwiz is a command line tool for creating Minecraft modpacks. Instead of managing JAR files directly, packwiz creates TOML metadata files which can be easily version-controlled and shared with git (see an example pack [here](https://github.com/packwiz/packwiz-example-pack)). You can then [export it to a CurseForge or Modrinth modpack](https://packwiz.infra.link/tutorials/hosting/curseforge/), or [use packwiz-installer](https://packwiz.infra.link/tutorials/installing/packwiz-installer/) for an auto-updating MultiMC instance.
+packwiz is a command line tool for creating Minecraft modpacks. Instead of managing JAR files directly, packwiz creates TOML metadata files which can be easily version-controlled and shared with git (see an example pack [here](https://github.com/packwiz/packwiz-example-pack)). You can then [export it to a Modrinth modpack](https://packwiz.infra.link/tutorials/hosting/curseforge/), or [use packwiz-installer](https://packwiz.infra.link/tutorials/installing/packwiz-installer/) for an auto-updating MultiMC instance.
+
+This fork only supports Modrinth as a mod source - CurseForge, GitHub releases, and direct-URL/local downloads have been removed.
 
 packwiz is great for...
 
 - Distributing private modpacks for servers
-- Creating modpacks for CurseForge and Modrinth
+- Creating modpacks for Modrinth
 
 packwiz is not so great for...
 
@@ -20,11 +22,9 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Git-friendly TOML-based metadata format
 - MultiMC pack installer/updater, with support for optional mods and fast automatic updates - perfect for servers!
 - Pack distribution with HTTP servers, with a built in local server for testing
-- Easy installation and updating of multiple mods at once from CurseForge and Modrinth
-- Exporting to CurseForge and Modrinth packs
-- Importing from CurseForge packs
+- Easy installation and updating of multiple mods at once from Modrinth
+- Exporting to Modrinth packs
 - Server-only and Client-only mod handling
-- Creation of remote file metadata from JAR files for CurseForge mods
 
 ## Installation
 Prebuilt binaries are available from [GitHub Actions](https://github.com/evictedcucumber/packwiz/actions) - the UI is a bit terrible, but essentially select the top build, then download the artifact ZIP for your system at the bottom of the page.  

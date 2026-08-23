@@ -8,7 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/evictedcucumber/packwiz/curseforge/murmur2"
+	"github.com/evictedcucumber/packwiz/murmur2"
 	"hash"
 	"strconv"
 	"strings"

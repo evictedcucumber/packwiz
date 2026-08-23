@@ -139,9 +139,6 @@ var ignoreDefaults = []string{
 	// Exclude macOS metadata
 	".DS_Store",
 
-	// Exclude exported CurseForge zip files
-	"/*.zip",
-
 	// Exclude exported Modrinth packs
 	"*.mrpack",
 
