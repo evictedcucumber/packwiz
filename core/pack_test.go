@@ -25,40 +25,34 @@ func withPackFile(t *testing.T, content string) string {
 	return packFile
 }
 
-func TestLoadPackMissingFormatDefaults(t *testing.T) {
+func TestLoadPackMissingFormatRejected(t *testing.T) {
 	withPackFile(t, `name = "Test Pack"
 
 [index]
 file = "index.toml"
 `)
-	pack, err := LoadPack()
-	if err != nil {
-		t.Fatalf("LoadPack() returned error: %v", err)
-	}
-	if pack.PackFormat != "packwiz:1.1.0" {
-		t.Errorf("PackFormat = %q, want %q", pack.PackFormat, "packwiz:1.1.0")
+	_, err := LoadPack()
+	if err == nil {
+		t.Error("expected error for missing pack-format, got nil")
 	}
 }
 
-func TestLoadPackAutoMigrate100To110(t *testing.T) {
+func TestLoadPackUpstreamFormatRejected(t *testing.T) {
 	withPackFile(t, `name = "Test Pack"
-pack-format = "packwiz:1.0.0"
+pack-format = "packwiz:1.1.0"
 
 [index]
 file = "index.toml"
 `)
-	pack, err := LoadPack()
-	if err != nil {
-		t.Fatalf("LoadPack() returned error: %v", err)
-	}
-	if pack.PackFormat != "packwiz:1.1.0" {
-		t.Errorf("PackFormat = %q, want %q", pack.PackFormat, "packwiz:1.1.0")
+	_, err := LoadPack()
+	if err == nil {
+		t.Error("expected error for upstream packwiz pack-format, got nil")
 	}
 }
 
 func TestLoadPackIncompatibleFormat(t *testing.T) {
 	withPackFile(t, `name = "Test Pack"
-pack-format = "packwiz:2.0.0"
+pack-format = "evictedcucumber-packwiz:2.0.0"
 
 [index]
 file = "index.toml"
@@ -69,29 +63,19 @@ file = "index.toml"
 	}
 }
 
-func TestLoadPackInvalidSemver(t *testing.T) {
+func TestLoadPackCurrentFormatAccepted(t *testing.T) {
 	withPackFile(t, `name = "Test Pack"
-pack-format = "packwiz:not-a-version"
+pack-format = "evictedcucumber-packwiz:1.0.0"
 
 [index]
 file = "index.toml"
 `)
-	_, err := LoadPack()
-	if err == nil {
-		t.Error("expected error for invalid semver pack-format, got nil")
+	pack, err := LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
 	}
-}
-
-func TestLoadPackInvalidPrefix(t *testing.T) {
-	withPackFile(t, `name = "Test Pack"
-pack-format = "notpackwiz:1.1.0"
-
-[index]
-file = "index.toml"
-`)
-	_, err := LoadPack()
-	if err == nil {
-		t.Error("expected error for non-packwiz pack-format prefix, got nil")
+	if pack.PackFormat != CurrentPackFormat {
+		t.Errorf("PackFormat = %q, want %q", pack.PackFormat, CurrentPackFormat)
 	}
 }
 
