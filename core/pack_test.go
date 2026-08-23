@@ -230,63 +230,24 @@ func TestGetPackNameWithVersion(t *testing.T) {
 	}
 }
 
-func TestGetCompatibleLoadersQuilt(t *testing.T) {
-	pack := Pack{Versions: map[string]string{"quilt": "0.20.0"}}
-	got := pack.GetCompatibleLoaders()
-	want := []string{"quilt", "fabric"}
-	if !slicesEqual(got, want) {
-		t.Errorf("GetCompatibleLoaders() = %v, want %v", got, want)
-	}
-}
-
-func TestGetCompatibleLoadersFabricOnly(t *testing.T) {
-	pack := Pack{Versions: map[string]string{"fabric": "0.15.0"}}
-	got := pack.GetCompatibleLoaders()
-	want := []string{"fabric"}
-	if !slicesEqual(got, want) {
-		t.Errorf("GetCompatibleLoaders() = %v, want %v", got, want)
-	}
-}
-
 func TestGetCompatibleLoadersNeoForge(t *testing.T) {
 	pack := Pack{Versions: map[string]string{"neoforge": "20.4.0"}}
 	got := pack.GetCompatibleLoaders()
-	want := []string{"neoforge", "forge"}
+	want := []string{"neoforge"}
 	if !slicesEqual(got, want) {
 		t.Errorf("GetCompatibleLoaders() = %v, want %v", got, want)
 	}
 }
 
-func TestGetCompatibleLoadersForgeOnly(t *testing.T) {
-	pack := Pack{Versions: map[string]string{"forge": "47.0.0"}}
+func TestGetCompatibleLoadersNone(t *testing.T) {
+	pack := Pack{Versions: map[string]string{"minecraft": "1.21.1"}}
 	got := pack.GetCompatibleLoaders()
-	want := []string{"forge"}
-	if !slicesEqual(got, want) {
-		t.Errorf("GetCompatibleLoaders() = %v, want %v", got, want)
+	if len(got) != 0 {
+		t.Errorf("GetCompatibleLoaders() = %v, want empty", got)
 	}
 }
 
-func TestGetCompatibleLoadersQuiltAndNeoForge(t *testing.T) {
-	pack := Pack{Versions: map[string]string{"quilt": "0.20.0", "neoforge": "20.4.0"}}
-	got := pack.GetCompatibleLoaders()
-	want := []string{"quilt", "fabric", "neoforge", "forge"}
-	if !slicesEqual(got, want) {
-		t.Errorf("GetCompatibleLoaders() = %v, want %v", got, want)
-	}
-}
-
-// GetLoaders lists only loaders explicitly present in pack.Versions - unlike
-// GetCompatibleLoaders, it does not imply fabric from quilt or forge from neoforge.
-func TestGetLoadersQuiltOnlyDoesNotImplyFabric(t *testing.T) {
-	pack := Pack{Versions: map[string]string{"quilt": "0.20.0"}}
-	got := pack.GetLoaders()
-	want := []string{"quilt"}
-	if !slicesEqual(got, want) {
-		t.Errorf("GetLoaders() = %v, want %v", got, want)
-	}
-}
-
-func TestGetLoadersNeoForgeOnlyDoesNotImplyForge(t *testing.T) {
+func TestGetLoadersNeoForge(t *testing.T) {
 	pack := Pack{Versions: map[string]string{"neoforge": "20.4.0"}}
 	got := pack.GetLoaders()
 	want := []string{"neoforge"}
@@ -295,14 +256,11 @@ func TestGetLoadersNeoForgeOnlyDoesNotImplyForge(t *testing.T) {
 	}
 }
 
-func TestGetLoadersAll(t *testing.T) {
-	pack := Pack{Versions: map[string]string{
-		"quilt": "0.20.0", "fabric": "0.15.0", "neoforge": "20.4.0", "forge": "47.0.0",
-	}}
+func TestGetLoadersNone(t *testing.T) {
+	pack := Pack{Versions: map[string]string{"minecraft": "1.21.1"}}
 	got := pack.GetLoaders()
-	want := []string{"quilt", "fabric", "neoforge", "forge"}
-	if !slicesEqual(got, want) {
-		t.Errorf("GetLoaders() = %v, want %v", got, want)
+	if len(got) != 0 {
+		t.Errorf("GetLoaders() = %v, want empty", got)
 	}
 }
 

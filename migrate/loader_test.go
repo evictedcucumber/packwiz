@@ -7,35 +7,35 @@ import (
 )
 
 func TestUpdatePackToVersionSameVersion(t *testing.T) {
-	loader := core.ModLoaderComponent{Name: "fabric", FriendlyName: "Fabric loader"}
-	pack := core.Pack{Versions: map[string]string{"fabric": "0.15.0"}}
+	loader := core.ModLoaderComponent{Name: "neoforge", FriendlyName: "NeoForge"}
+	pack := core.Pack{Versions: map[string]string{"neoforge": "21.1.213"}}
 
-	changed := updatePackToVersion("0.15.0", pack, loader)
+	changed := updatePackToVersion("21.1.213", pack, loader)
 
 	if changed {
 		t.Error("expected updatePackToVersion to return false when the version is unchanged")
 	}
-	if pack.Versions["fabric"] != "0.15.0" {
-		t.Errorf("expected version to remain 0.15.0, got %s", pack.Versions["fabric"])
+	if pack.Versions["neoforge"] != "21.1.213" {
+		t.Errorf("expected version to remain 21.1.213, got %s", pack.Versions["neoforge"])
 	}
 }
 
 func TestUpdatePackToVersionNewVersion(t *testing.T) {
-	loader := core.ModLoaderComponent{Name: "fabric", FriendlyName: "Fabric loader"}
-	pack := core.Pack{Versions: map[string]string{"fabric": "0.15.0"}}
+	loader := core.ModLoaderComponent{Name: "neoforge", FriendlyName: "NeoForge"}
+	pack := core.Pack{Versions: map[string]string{"neoforge": "21.1.213"}}
 
-	changed := updatePackToVersion("0.16.0", pack, loader)
+	changed := updatePackToVersion("21.1.214", pack, loader)
 
 	if !changed {
 		t.Error("expected updatePackToVersion to return true when the version changes")
 	}
-	if pack.Versions["fabric"] != "0.16.0" {
-		t.Errorf("expected version to be updated to 0.16.0, got %s", pack.Versions["fabric"])
+	if pack.Versions["neoforge"] != "21.1.214" {
+		t.Errorf("expected version to be updated to 21.1.214, got %s", pack.Versions["neoforge"])
 	}
 }
 
 func TestUpdatePackToVersionNewLoaderKey(t *testing.T) {
-	loader := core.ModLoaderComponent{Name: "forge", FriendlyName: "Forge"}
+	loader := core.ModLoaderComponent{Name: "neoforge", FriendlyName: "NeoForge"}
 	pack := core.Pack{Versions: map[string]string{"minecraft": "1.20.1"}}
 
 	changed := updatePackToVersion("47.1.106", pack, loader)
@@ -43,7 +43,7 @@ func TestUpdatePackToVersionNewLoaderKey(t *testing.T) {
 	if !changed {
 		t.Error("expected updatePackToVersion to return true for a new loader entry")
 	}
-	if pack.Versions["forge"] != "47.1.106" {
-		t.Errorf("expected forge version to be set to 47.1.106, got %s", pack.Versions["forge"])
+	if pack.Versions["neoforge"] != "47.1.106" {
+		t.Errorf("expected neoforge version to be set to 47.1.106, got %s", pack.Versions["neoforge"])
 	}
 }

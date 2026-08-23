@@ -83,7 +83,7 @@ var initCmd = &cobra.Command{
 
 		modLoaderName := strings.ToLower(viper.GetString("init.modloader"))
 		if len(modLoaderName) == 0 {
-			modLoaderName = strings.ToLower(initReadValue("Mod loader [quilt]: ", "quilt"))
+			modLoaderName = strings.ToLower(initReadValue("Mod loader [neoforge]: ", "neoforge"))
 		}
 
 		loader, ok := core.ModLoaders[modLoaderName]
@@ -104,9 +104,9 @@ var initCmd = &cobra.Command{
 					}
 				}
 				v := componentVersion
-				// Forge uses a format where they prefix their version with their supported minecraft version. NeoForge
-				// did this too, but only during the 1.20.1 days, they've since switched formats.
-				if loader.Name == "forge" || (loader.Name == "neoforge" && mcVersion == "1.20.1") {
+				// NeoForge reused Forge's version-prefixing format (prefixed with the supported
+				// minecraft version), but only during the 1.20.1 days; they've since switched formats.
+				if loader.Name == "neoforge" && mcVersion == "1.20.1" {
 					v = cmdshared.GetRawForgeVersion(componentVersion)
 				}
 				if !slices.Contains(versionData.Versions, v) {

@@ -179,9 +179,9 @@ func TestGetProjectTypeFolderModPicksMostPreferred(t *testing.T) {
 }
 
 func TestGetProjectTypeFolderModIgnoresLoadersNotInPack(t *testing.T) {
-	// fileLoaders has quilt, but packLoaders (installed loaders) is just fabric,
-	// so quilt should be ignored and fabric should be used
-	folder, err := getProjectTypeFolder("mod", []string{"quilt", "fabric"}, []string{"fabric"})
+	// fileLoaders has rift, but packLoaders (installed loaders) is just modloader,
+	// so rift should be ignored and modloader should be used
+	folder, err := getProjectTypeFolder("mod", []string{"rift", "modloader"}, []string{"modloader"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -235,28 +235,28 @@ func TestGetProjectTypeFolderUnknown(t *testing.T) {
 // --- compareLoaderLists ---
 
 func TestCompareLoaderListsBasicPreference(t *testing.T) {
-	// quilt is preferred over fabric
-	result := compareLoaderLists([]string{"fabric"}, []string{"quilt"})
+	// neoforge is preferred over modloader
+	result := compareLoaderLists([]string{"modloader"}, []string{"neoforge"})
 	if result <= 0 {
-		t.Errorf("expected a positive result (b/quilt more preferred), got %d", result)
+		t.Errorf("expected a positive result (b/neoforge more preferred), got %d", result)
 	}
 }
 
 func TestCompareLoaderListsCompatGroupDiscountsWhenBothSharePrerequisite(t *testing.T) {
-	// Both lists contain "fabric" (the prerequisite for the quilt compat group), so the
-	// extra "quilt" entry in a should be discounted, making the lists equally preferred.
-	result := compareLoaderLists([]string{"fabric", "quilt"}, []string{"fabric"})
+	// Both lists contain "bukkit" (the prerequisite for the purpur compat group), so the
+	// extra "purpur" entry in a should be discounted, making the lists equally preferred.
+	result := compareLoaderLists([]string{"purpur", "bukkit"}, []string{"bukkit"})
 	if result != 0 {
-		t.Errorf("expected 0 (quilt discounted since both share fabric), got %d", result)
+		t.Errorf("expected 0 (purpur discounted since both share bukkit), got %d", result)
 	}
 }
 
 func TestCompareLoaderListsCompatGroupNotDiscountedWithoutSharedPrerequisite(t *testing.T) {
-	// b does not contain "fabric", so the compat group is not triggered and quilt in a
+	// b does not contain "bukkit", so the compat group is not triggered and purpur in a
 	// should count fully, making a more preferred.
-	result := compareLoaderLists([]string{"fabric", "quilt"}, []string{"neoforge"})
+	result := compareLoaderLists([]string{"purpur", "bukkit"}, []string{"waterfall"})
 	if result >= 0 {
-		t.Errorf("expected a negative result (a/quilt more preferred), got %d", result)
+		t.Errorf("expected a negative result (a/purpur more preferred), got %d", result)
 	}
 }
 
@@ -267,13 +267,13 @@ func TestFindLatestVersionFlexVerPicksHigherVersion(t *testing.T) {
 	v1 := &modrinthApi.Version{
 		VersionNumber: strPtr("1.0.0"),
 		GameVersions:  []string{"1.20"},
-		Loaders:       []string{"fabric"},
+		Loaders:       []string{"neoforge"},
 		DatePublished: timePtr(date),
 	}
 	v2 := &modrinthApi.Version{
 		VersionNumber: strPtr("2.0.0"),
 		GameVersions:  []string{"1.20"},
-		Loaders:       []string{"fabric"},
+		Loaders:       []string{"neoforge"},
 		DatePublished: timePtr(date),
 	}
 
@@ -312,13 +312,13 @@ func TestFindLatestVersionRespectsGameVersionPreference(t *testing.T) {
 	v1 := &modrinthApi.Version{
 		VersionNumber: strPtr("1.0.0"),
 		GameVersions:  []string{"1.19"},
-		Loaders:       []string{"fabric"},
+		Loaders:       []string{"neoforge"},
 		DatePublished: timePtr(date),
 	}
 	v2 := &modrinthApi.Version{
 		VersionNumber: strPtr("1.0.0"),
 		GameVersions:  []string{"1.20"},
-		Loaders:       []string{"fabric"},
+		Loaders:       []string{"neoforge"},
 		DatePublished: timePtr(date),
 	}
 
@@ -333,19 +333,19 @@ func TestFindLatestVersionUsesLoaderListAsTiebreaker(t *testing.T) {
 	v1 := &modrinthApi.Version{
 		VersionNumber: strPtr("1.0.0"),
 		GameVersions:  []string{},
-		Loaders:       []string{"fabric"},
+		Loaders:       []string{"modloader"},
 		DatePublished: timePtr(date),
 	}
 	v2 := &modrinthApi.Version{
 		VersionNumber: strPtr("1.0.0"),
 		GameVersions:  []string{},
-		Loaders:       []string{"quilt"},
+		Loaders:       []string{"neoforge"},
 		DatePublished: timePtr(date),
 	}
 
 	result := findLatestVersion([]*modrinthApi.Version{v1, v2}, []string{}, true)
 	if result != v2 {
-		t.Errorf("expected v2 (quilt preferred over fabric) to be picked")
+		t.Errorf("expected v2 (neoforge preferred over modloader) to be picked")
 	}
 }
 
@@ -509,56 +509,5 @@ func TestGetBestHashEmpty(t *testing.T) {
 	algo, val := getBestHash(f)
 	if algo != "" || val != "" {
 		t.Errorf("expected empty strings, got %s/%s", algo, val)
-	}
-}
-
-// --- mapDepOverride ---
-
-func TestMapDepOverrideFabricApiById(t *testing.T) {
-	result := mapDepOverride("P7dR8mSH", true, "1.20.0")
-	if result != "qvIfYCYJ" {
-		t.Errorf("expected %q, got %q", "qvIfYCYJ", result)
-	}
-}
-
-func TestMapDepOverrideFabricApiBySlug(t *testing.T) {
-	result := mapDepOverride("fabric-api", true, "1.20.0")
-	if result != "qvIfYCYJ" {
-		t.Errorf("expected %q, got %q", "qvIfYCYJ", result)
-	}
-}
-
-func TestMapDepOverrideFlkInRange(t *testing.T) {
-	result := mapDepOverride("Ha28R6CL", true, "1.19.2")
-	if result != "lwVhp9o5" {
-		t.Errorf("expected %q, got %q", "lwVhp9o5", result)
-	}
-}
-
-func TestMapDepOverrideFlkOutOfRange(t *testing.T) {
-	result := mapDepOverride("Ha28R6CL", true, "1.19.0")
-	if result != "Ha28R6CL" {
-		t.Errorf("expected unchanged %q, got %q", "Ha28R6CL", result)
-	}
-}
-
-func TestMapDepOverrideFlkAtUpperBound(t *testing.T) {
-	result := mapDepOverride("Ha28R6CL", true, "2.0.0")
-	if result != "Ha28R6CL" {
-		t.Errorf("expected unchanged %q, got %q", "Ha28R6CL", result)
-	}
-}
-
-func TestMapDepOverrideNonQuilt(t *testing.T) {
-	result := mapDepOverride("P7dR8mSH", false, "1.20.0")
-	if result != "P7dR8mSH" {
-		t.Errorf("expected unchanged %q, got %q", "P7dR8mSH", result)
-	}
-}
-
-func TestMapDepOverrideUnrelatedDepID(t *testing.T) {
-	result := mapDepOverride("some-other-mod", true, "1.20.0")
-	if result != "some-other-mod" {
-		t.Errorf("expected unchanged %q, got %q", "some-other-mod", result)
 	}
 }

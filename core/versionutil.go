@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -42,34 +41,6 @@ type ModLoaderComponent struct {
 }
 
 var modLoadersList = []ModLoaderComponent{
-	{
-		// There's no need to specify yarn version - yarn isn't used outside a dev environment, and intermediary corresponds to game version anyway
-		Name:         "fabric",
-		FriendlyName: "Fabric loader",
-		VersionListGetter: func(q VersionListQuery) (*ModLoaderVersions, error) {
-			// Fabric loaders isn't locked to a mc version per se
-			return fetchVersionsFromMaven(q, "https://maven.fabricmc.net/net/fabricmc/fabric-loader/maven-metadata.xml")
-		},
-	},
-	{
-		Name:              "forge",
-		FriendlyName:      "Forge",
-		VersionListGetter: fetchForForge,
-	},
-	{
-		Name:         "liteloader",
-		FriendlyName: "LiteLoader",
-		VersionListGetter: func(q VersionListQuery) (*ModLoaderVersions, error) {
-			return fetchLiteloaderStyle(q, "https://repo.mumfrey.com/content/repositories/snapshots/com/mumfrey/liteloader/maven-metadata.xml")
-		},
-	},
-	{
-		Name:         "quilt",
-		FriendlyName: "Quilt loader",
-		VersionListGetter: func(q VersionListQuery) (*ModLoaderVersions, error) {
-			return fetchVersionsFromMaven(q, "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/maven-metadata.xml")
-		},
-	},
 	{
 		Name:              "neoforge",
 		FriendlyName:      "NeoForge",
@@ -126,12 +97,6 @@ func (in VersionListQuery) WithQueryType(queryType QueryType) VersionListQuery {
 // Queries the versions of a modloader
 func DoQuery(q VersionListQuery) (*ModLoaderVersions, error) {
 	return q.Loader.VersionListGetter(q)
-}
-
-// Retrieve a list of versions from maven, with no filtering or processing of the maven data
-func fetchVersionsFromMaven(q VersionListQuery, url string) (*ModLoaderVersions, error) {
-	identity_function := func(version string) *string { return &version }
-	return fetchMavenWithFilterMap(q, url, identity_function)
 }
 
 func fetchForgeStyle(q VersionListQuery, url string) (*ModLoaderVersions, error) {
@@ -217,22 +182,6 @@ func fetchOldNeoForgeStyle(q VersionListQuery, url string) (*ModLoaderVersions, 
 	})
 }
 
-func fetchLiteloaderStyle(q VersionListQuery, url string) (*ModLoaderVersions, error) {
-	// Liteloader style:
-	// each version is formatted like `mcVersion-SNAPSHOT`
-	// eg: `1.12.2-SNAPSHOT`
-	// (yes, it appears like liteloader only has a single version per mc version)
-	return fetchMavenWithFilterMap(q, url, func(version string) *string {
-		before, _, f := strings.Cut(version, "-")
-		// Check if the part before the dash matches the mc version we're looking for
-		if f && before == q.McVersion {
-			return &version
-		} else {
-			return nil
-		}
-	})
-}
-
 // Retrieves all versions through maven metadata, and then processes the using the provided `filterMap` function.
 // When `filterMap` returns a string, the version will be renamed to the provided string. If `nil` is returned, the
 // version is marked as invalid and will not be considered in the result.
@@ -298,21 +247,6 @@ func fetchForNeoForge(q VersionListQuery) (*ModLoaderVersions, error) {
 	}
 }
 
-func fetchForForge(q VersionListQuery) (*ModLoaderVersions, error) {
-	result, err := fetchForgeStyle(q, "https://files.minecraftforge.net/maven/net/minecraftforge/forge/maven-metadata.xml")
-	if err != nil {
-		return nil, err
-	}
-	// Forge is the only loader which defines a special recommended version
-	if q.QueryType == Recommended {
-		recommended := getForgeRecommended(q)
-		if recommended != "" {
-			result.Latest = recommended
-		}
-	}
-	return result, nil
-}
-
 func ComponentToFriendlyName(component string) string {
 	if component == "minecraft" {
 		return "Minecraft"
@@ -336,36 +270,4 @@ func HighestSliceIndex(slice []string, values []string) int {
 		}
 	}
 	return highest
-}
-
-type ForgeRecommended struct {
-	Homepage string            `json:"homepage"`
-	Versions map[string]string `json:"promos"`
-}
-
-// getForgeRecommended gets the recommended version of Forge for the given Minecraft version
-func getForgeRecommended(q VersionListQuery) string {
-	res, err := GetWithUA("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json", "application/json")
-	if err != nil {
-		return ""
-	}
-	defer res.Body.Close()
-	dec := json.NewDecoder(res.Body)
-	out := ForgeRecommended{}
-	err = dec.Decode(&out)
-	if err != nil {
-		fmt.Println(err)
-		return ""
-	}
-	// Get mcVersion-recommended, if it doesn't exist then get mcVersion-latest
-	// If neither exist, return empty string
-	recommendedString := fmt.Sprintf("%s-recommended", q.McVersion)
-	if out.Versions[recommendedString] != "" {
-		return out.Versions[recommendedString]
-	}
-	latestString := fmt.Sprintf("%s-latest", q.McVersion)
-	if out.Versions[latestString] != "" {
-		return out.Versions[latestString]
-	}
-	return ""
 }

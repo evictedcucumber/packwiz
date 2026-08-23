@@ -29,10 +29,6 @@ func registerMock(url string, filename string) {
 func queryWithMock(t *testing.T, q VersionListQuery) *ModLoaderVersions {
 	httpmock.Activate(t)
 
-	registerMock("https://maven.fabricmc.net/net/fabricmc/fabric-loader/maven-metadata.xml", "fabric.xml")
-	registerMock("https://repo.mumfrey.com/content/repositories/snapshots/com/mumfrey/liteloader/maven-metadata.xml", "liteloader.xml")
-	registerMock("https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/maven-metadata.xml", "quilt.xml")
-	registerMock("https://files.minecraftforge.net/maven/net/minecraftforge/forge/maven-metadata.xml", "forge.xml")
 	registerMock("https://maven.neoforged.net/releases/net/neoforged/forge/maven-metadata.xml", "neoforge_old.xml")
 	registerMock("https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml", "neoforge.xml")
 
@@ -88,26 +84,6 @@ func expectInvalid(t *testing.T, loader string, version string, expectedValid st
 	if slices.Contains(versionData.Versions, expectedValid) {
 		t.Errorf("Expected %s not to be a valid version for %s. Valid versions:\n%s", expectedValid, loaderData.FriendlyName, versionData.Versions)
 	}
-}
-
-func TestFabric121(t *testing.T) {
-	expectLatest(t, "fabric", "1.21", "0.17.3")
-}
-
-func TestFabric010Valid(t *testing.T) {
-	expectValid(t, "fabric", "1.21", "0.10.6+build.214")
-}
-
-func TestQuilt121(t *testing.T) {
-	expectLatest(t, "quilt", "1.21", "0.29.3-beta.1")
-}
-
-func TestForge121(t *testing.T) {
-	expectLatest(t, "forge", "1.21", "51.0.33")
-}
-
-func TestLiteLoader112(t *testing.T) {
-	expectLatest(t, "liteloader", "1.12", "1.12-SNAPSHOT")
 }
 
 func TestNeoForge1201(t *testing.T) {
