@@ -203,6 +203,16 @@ func (in *Index) Refresh() error {
 			// Don't add directories to the file list
 			return nil
 		}
+
+		// WalkDir doesn't follow symlinks, so a symlink pointing at a directory is
+		// reported as a non-directory entry here; resolve it so it isn't opened as a
+		// regular file (which fails with "is a directory") or added to the index.
+		if info.Type()&fs.ModeSymlink != 0 {
+			resolved, statErr := os.Stat(path)
+			if statErr != nil || resolved.IsDir() {
+				return nil
+			}
+		}
 		// Exit if the files are the same as the pack/index files
 		absPath, _ := filepath.Abs(path)
 		if absPath == pathPF || absPath == pathIndex {
