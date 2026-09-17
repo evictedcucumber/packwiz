@@ -370,13 +370,26 @@ func getBestHash(v *modrinthApi.File) (string, string) {
 		return "murmur2", val
 	}
 
-	//none of the preferred hashes are present, just get the first one
-	for key, val := range v.Hashes {
-		return key, val
+	// None of the preferred hashes are present: fall back to whichever is present,
+	// picking deterministically (by format name) rather than relying on Go's
+	// randomised map iteration order, so the chosen algorithm doesn't vary between runs.
+	if len(v.Hashes) == 0 {
+		//No hashes were present
+		return "", ""
 	}
+	keys := make([]string, 0, len(v.Hashes))
+	for key := range v.Hashes {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys[0], v.Hashes[keys[0]]
+}
 
-	//No hashes were present
-	return "", ""
+// isPrimary reports whether a Modrinth file is marked as the primary file for
+// its version. Primary is a nullable field in the API response; treat "not
+// present" as not primary rather than panicking on a nil dereference.
+func isPrimary(f *modrinthApi.File) bool {
+	return f != nil && f.Primary != nil && *f.Primary
 }
 
 func getInstalledProjectIDs(index *core.Index) []string {

@@ -18,5 +18,6 @@ type PackFile struct {
 		Server string `json:"server"`
 	} `json:"env"`
 	Downloads []string `json:"downloads"`
-	FileSize  uint32   `json:"fileSize"`
+	// uint64 to avoid silently truncating the size of any file >= 4GiB
+	FileSize uint64 `json:"fileSize"`
 }

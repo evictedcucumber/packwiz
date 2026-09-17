@@ -68,7 +68,7 @@ func (u mrUpdater) CheckUpdate(mods []*core.Mod, pack core.Pack) ([]core.UpdateC
 		newFilename := newVersion.Files[0].Filename
 		// Prefer the primary file
 		for _, v := range newVersion.Files {
-			if *v.Primary {
+			if isPrimary(v) {
 				newFilename = v.Filename
 			}
 		}
@@ -91,7 +91,7 @@ func (u mrUpdater) DoUpdate(mods []*core.Mod, cachedState []interface{}) error {
 		var file = version.Files[0]
 		// Prefer the primary file
 		for _, v := range version.Files {
-			if *v.Primary {
+			if isPrimary(v) {
 				file = v
 			}
 		}

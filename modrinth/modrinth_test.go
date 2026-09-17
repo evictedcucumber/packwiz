@@ -511,3 +511,53 @@ func TestGetBestHashEmpty(t *testing.T) {
 		t.Errorf("expected empty strings, got %s/%s", algo, val)
 	}
 }
+
+func TestGetBestHashFallbackIsDeterministic(t *testing.T) {
+	// Regression test: the fallback previously picked an arbitrary entry via
+	// Go's randomised map iteration order. It should now deterministically
+	// pick the lexicographically smallest format name.
+	f := &modrinthApi.File{Hashes: map[string]string{
+		"zzz-hash": "zzz-val",
+		"aaa-hash": "aaa-val",
+		"mmm-hash": "mmm-val",
+	}}
+	for i := 0; i < 20; i++ {
+		algo, val := getBestHash(f)
+		if algo != "aaa-hash" || val != "aaa-val" {
+			t.Fatalf("run %d: expected aaa-hash/aaa-val, got %s/%s", i, algo, val)
+		}
+	}
+}
+
+// --- isPrimary ---
+
+func TestIsPrimaryTrue(t *testing.T) {
+	primary := true
+	f := &modrinthApi.File{Primary: &primary}
+	if !isPrimary(f) {
+		t.Error("expected true when Primary is set to true")
+	}
+}
+
+func TestIsPrimaryFalse(t *testing.T) {
+	primary := false
+	f := &modrinthApi.File{Primary: &primary}
+	if isPrimary(f) {
+		t.Error("expected false when Primary is set to false")
+	}
+}
+
+func TestIsPrimaryNilField(t *testing.T) {
+	// Regression test: Primary is a nullable field in the API response; a nil
+	// pointer must not panic and should be treated as "not primary".
+	f := &modrinthApi.File{Primary: nil}
+	if isPrimary(f) {
+		t.Error("expected false when Primary is nil")
+	}
+}
+
+func TestIsPrimaryNilFile(t *testing.T) {
+	if isPrimary(nil) {
+		t.Error("expected false for a nil *File")
+	}
+}

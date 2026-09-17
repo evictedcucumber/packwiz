@@ -252,7 +252,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 					var file = latestVersion.Files[0]
 					// Prefer the primary file
 					for _, v := range latestVersion.Files {
-						if *v.Primary {
+						if isPrimary(v) {
 							file = v
 						}
 					}
@@ -294,7 +294,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	var file = version.Files[0]
 	// Prefer the primary file
 	for _, v := range version.Files {
-		if (*v.Primary) || (versionFilename != "" && versionFilename == *v.Filename) {
+		if isPrimary(v) || (versionFilename != "" && v.Filename != nil && versionFilename == *v.Filename) {
 			file = v
 		}
 	}

@@ -160,7 +160,7 @@ var exportCmd = &cobra.Command{
 						Server string `json:"server"`
 					}{Client: clientEnv, Server: serverEnv},
 					Downloads: []string{u},
-					FileSize:  uint32(fileSize),
+					FileSize:  fileSize,
 				})
 
 				fmt.Printf("%s (%s) added to manifest\n", dl.Mod.Name, dl.Mod.FileName)

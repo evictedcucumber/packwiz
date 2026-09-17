@@ -1,10 +1,31 @@
 package modrinth
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/evictedcucumber/packwiz/core"
 )
+
+func TestPackFileSizeSurvivesOver4GiB(t *testing.T) {
+	// Regression test: FileSize used to be uint32, silently truncating the
+	// size of any file >= 4GiB when writing the .mrpack manifest.
+	const overFourGiB uint64 = 5_000_000_000 // > math.MaxUint32 (4294967295)
+
+	pf := PackFile{Path: "mods/big.jar", FileSize: overFourGiB}
+	data, err := json.Marshal(pf)
+	if err != nil {
+		t.Fatalf("json.Marshal() returned error: %v", err)
+	}
+
+	var decoded PackFile
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() returned error: %v", err)
+	}
+	if decoded.FileSize != overFourGiB {
+		t.Errorf("FileSize round-trip = %d, want %d", decoded.FileSize, overFourGiB)
+	}
+}
 
 func TestCanBeIncludedDirectlyURLModeNoRestrict(t *testing.T) {
 	mod := &core.Mod{Download: core.ModDownload{Mode: core.ModeURL, URL: "https://example.com/foo.jar"}}

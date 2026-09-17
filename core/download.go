@@ -9,9 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"slices"
 )
+
+// maxConcurrentDownloads bounds how many files are downloaded/hashed at once;
+// downloads are independent network I/O, so serialising them (as a single
+// goroutine previously did) leaves significant wall-clock time on the table
+// for packs with many mods.
+const maxConcurrentDownloads = 8
 
 const UserAgent = "packwiz/packwiz"
 
@@ -47,6 +54,7 @@ type CompletedDownload struct {
 
 type downloadSessionInternal struct {
 	cacheIndex           CacheIndex
+	cacheMutex           sync.Mutex
 	cacheFolder          string
 	hashesToObtain       []string
 	manualDownloads      []ManualDownload
@@ -72,38 +80,68 @@ func (d *downloadSessionInternal) StartDownloads() chan CompletedDownload {
 		for _, found := range d.foundManualDownloads {
 			downloads <- found
 		}
-		for _, task := range d.downloadTasks {
-			warnings := make([]error, 0)
 
-			// Get handle for mod
-			cacheHandle := d.cacheIndex.GetHandleFromHash(task.hashFormat, task.hash)
-			if cacheHandle != nil {
-				download, err := reuseExistingFile(cacheHandle, d.hashesToObtain, task.mod)
-				if err != nil {
-					// Remove handle and try again
-					cacheHandle.Remove()
-					cacheHandle = nil
-					warnings = append(warnings, fmt.Errorf("redownloading cached file: %w", err))
-				} else {
-					downloads <- download
-					continue
-				}
-			}
-
-			download, err := downloadNewFile(&task, d.cacheFolder, d.hashesToObtain, &d.cacheIndex)
-			if err != nil {
-				downloads <- CompletedDownload{
-					Error: err,
-					Mod:   task.mod,
-				}
-			} else {
-				download.Warnings = warnings
-				downloads <- download
-			}
+		workers := maxConcurrentDownloads
+		if workers > len(d.downloadTasks) {
+			workers = len(d.downloadTasks)
 		}
+
+		tasks := make(chan downloadTask)
+		var wg sync.WaitGroup
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for task := range tasks {
+					downloads <- d.runDownloadTask(task)
+				}
+			}()
+		}
+
+		for _, task := range d.downloadTasks {
+			tasks <- task
+		}
+		close(tasks)
+
+		wg.Wait()
 		close(downloads)
 	}()
 	return downloads
+}
+
+// runDownloadTask resolves a single download task, either by reusing a cached
+// file or downloading it fresh. It's safe to call concurrently from multiple
+// goroutines sharing the same downloadSessionInternal.
+func (d *downloadSessionInternal) runDownloadTask(task downloadTask) CompletedDownload {
+	warnings := make([]error, 0)
+
+	// Get handle for mod
+	d.cacheMutex.Lock()
+	cacheHandle := d.cacheIndex.GetHandleFromHash(task.hashFormat, task.hash)
+	d.cacheMutex.Unlock()
+
+	if cacheHandle != nil {
+		download, err := reuseExistingFile(cacheHandle, d.hashesToObtain, task.mod, &d.cacheMutex)
+		if err != nil {
+			// Remove handle and try again
+			d.cacheMutex.Lock()
+			cacheHandle.Remove()
+			d.cacheMutex.Unlock()
+			warnings = append(warnings, fmt.Errorf("redownloading cached file: %w", err))
+		} else {
+			return download
+		}
+	}
+
+	download, err := downloadNewFile(&task, d.cacheFolder, d.hashesToObtain, &d.cacheIndex, &d.cacheMutex)
+	if err != nil {
+		return CompletedDownload{
+			Error: err,
+			Mod:   task.mod,
+		}
+	}
+	download.Warnings = warnings
+	return download
 }
 
 func (d *downloadSessionInternal) SaveIndex() error {
@@ -118,7 +156,7 @@ func (d *downloadSessionInternal) SaveIndex() error {
 	return nil
 }
 
-func reuseExistingFile(cacheHandle *CacheIndexHandle, hashesToObtain []string, mod *Mod) (CompletedDownload, error) {
+func reuseExistingFile(cacheHandle *CacheIndexHandle, hashesToObtain []string, mod *Mod, cacheMutex *sync.Mutex) (CompletedDownload, error) {
 	// Already stored; try using it!
 	file, err := cacheHandle.Open()
 	if err == nil {
@@ -135,7 +173,10 @@ func reuseExistingFile(cacheHandle *CacheIndexHandle, hashesToObtain []string, m
 				_ = file.Close()
 				return CompletedDownload{}, fmt.Errorf("failed to seek file %s in cache: %w", cacheHandle.Path(), err)
 			}
+			// Writes back into the shared CacheIndex, so needs the lock
+			cacheMutex.Lock()
 			warnings = cacheHandle.UpdateIndex()
+			cacheMutex.Unlock()
 		}
 
 		return CompletedDownload{
@@ -149,7 +190,16 @@ func reuseExistingFile(cacheHandle *CacheIndexHandle, hashesToObtain []string, m
 	}
 }
 
-func downloadNewFile(task *downloadTask, cacheFolder string, hashesToObtain []string, index *CacheIndex) (CompletedDownload, error) {
+// discardTempFile closes and removes an abandoned download temp file, best-effort.
+// Every path that creates a temp file but doesn't hand it off to CreateFromTemp
+// must call this, otherwise it's orphaned under <cache>/temp/ forever (nothing
+// else ever sweeps that directory).
+func discardTempFile(tempFile *os.File) {
+	_ = tempFile.Close()
+	_ = os.Remove(tempFile.Name())
+}
+
+func downloadNewFile(task *downloadTask, cacheFolder string, hashesToObtain []string, index *CacheIndex, cacheMutex *sync.Mutex) (CompletedDownload, error) {
 	// Create temp file to download to
 	tempFile, err := os.CreateTemp(filepath.Join(cacheFolder, "temp"), "download-tmp")
 	if err != nil {
@@ -161,16 +211,19 @@ func downloadNewFile(task *downloadTask, cacheFolder string, hashesToObtain []st
 	if task.url != "" {
 		resp, err := GetWithUA(task.url, "application/octet-stream")
 		if err != nil {
+			discardTempFile(tempFile)
 			return CompletedDownload{}, fmt.Errorf("failed to download %s: %w", task.url, err)
 		}
 		if resp.StatusCode != 200 {
 			_ = resp.Body.Close()
+			discardTempFile(tempFile)
 			return CompletedDownload{}, fmt.Errorf("failed to download %s: invalid status code %v", task.url, resp.StatusCode)
 		}
 		data = resp.Body
 	} else {
 		data, err = task.metaDownloaderData.DownloadFile()
 		if err != nil {
+			discardTempFile(tempFile)
 			return CompletedDownload{}, err
 		}
 	}
@@ -178,29 +231,32 @@ func downloadNewFile(task *downloadTask, cacheFolder string, hashesToObtain []st
 	err = teeHashes(hashesToObtain, hashes, tempFile, data)
 	_ = data.Close()
 	if err != nil {
+		discardTempFile(tempFile)
 		return CompletedDownload{}, fmt.Errorf("failed to download: %w", err)
 	}
 
-	// Create handle with calculated hashes
+	// Create handle with calculated hashes and update the index's stored hashes;
+	// both read/write the shared CacheIndex, so must happen atomically under the
+	// lock - otherwise two concurrent downloads of identical content could both
+	// decide they're new and race to rename into the same cache destination.
+	cacheMutex.Lock()
 	cacheHandle, alreadyExists := index.NewHandleFromHashes(hashes)
-	// Update index stored hashes
 	warnings := cacheHandle.UpdateIndex()
+	cacheMutex.Unlock()
 
 	var file *os.File
 	if alreadyExists {
-		err = tempFile.Close()
-		if err != nil {
-			return CompletedDownload{}, fmt.Errorf("failed to close temporary file %s: %w", tempFile.Name(), err)
-		}
+		// The downloaded content is already present in the cache under another
+		// entry; discard this duplicate temp copy rather than leaving it on disk.
+		discardTempFile(tempFile)
 		file, err = cacheHandle.Open()
 		if err != nil {
 			return CompletedDownload{}, fmt.Errorf("failed to read file %s from cache: %w", cacheHandle.Path(), err)
 		}
 	} else {
-		// Automatically closes tempFile
+		// Moves tempFile into the cache, or removes it if that fails
 		file, err = cacheHandle.CreateFromTemp(tempFile)
 		if err != nil {
-			_ = tempFile.Close()
 			return CompletedDownload{}, fmt.Errorf("failed to move file %s to cache: %w", cacheHandle.Path(), err)
 		}
 	}
@@ -539,10 +595,12 @@ func (h *CacheIndexHandle) CreateFromTemp(temp *os.File) (*os.File, error) {
 	}
 	err = os.MkdirAll(filepath.Dir(h.Path()), 0755)
 	if err != nil {
+		_ = os.Remove(temp.Name())
 		return nil, err
 	}
 	err = os.Rename(temp.Name(), h.Path())
 	if err != nil {
+		_ = os.Remove(temp.Name())
 		return nil, err
 	}
 	return os.Open(h.Path())
@@ -572,19 +630,22 @@ func (h *CacheIndexHandle) UpdateIndex() (warnings []error) {
 }
 
 func (h *CacheIndexHandle) Remove() {
-	for hashFormat := range h.Hashes {
+	// Iterate every format tracked by the index (not just the ones this handle
+	// happens to have a value for) so all per-format lists stay aligned by index;
+	// a format list may have data past hashIdx even if this handle's own value
+	// at hashIdx is empty/unset.
+	for hashFormat := range h.index.Hashes {
 		hashList := h.index.Hashes[hashFormat]
 		if h.hashIdx < len(hashList) {
 			h.index.Hashes[hashFormat] = slices.Delete(hashList, h.hashIdx, h.hashIdx+1)
 		}
 	}
-	return
 }
 
 func removeIndices(hashList []string, indices []int) []string {
 	i := 0
-	for _, v := range hashList {
-		if len(indices) > 0 && i == indices[0] {
+	for readIdx, v := range hashList {
+		if len(indices) > 0 && readIdx == indices[0] {
 			indices = indices[1:]
 		} else {
 			hashList[i] = v

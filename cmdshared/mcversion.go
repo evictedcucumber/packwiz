@@ -47,7 +47,7 @@ func GetValidMCVersions() (McVersionManifest, error) {
 	}
 	// Sort by newest to oldest
 	sort.Slice(out.Versions, func(i, j int) bool {
-		return out.Versions[i].ReleaseTime.Before(out.Versions[j].ReleaseTime)
+		return out.Versions[i].ReleaseTime.After(out.Versions[j].ReleaseTime)
 	})
 	return out, nil
 }
