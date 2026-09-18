@@ -55,14 +55,14 @@ func TestTakeSnapshotFrom(t *testing.T) {
 		"config/c.json":  "hello",
 	})
 
-	snap, err := TakeSnapshotFrom(index, open)
+	snap, err := TakeSnapshotFrom(index, open, nil)
 	if err != nil {
 		t.Fatalf("TakeSnapshotFrom() returned error: %v", err)
 	}
 
 	wantMods := map[string]SnapshotMod{
-		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "1"},
-		"mods/b.pw.toml": {Name: "B", Side: core.UniversalSide, Version: "b-2.jar"},
+		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "1", File: "a-1.jar"},
+		"mods/b.pw.toml": {Name: "B", Side: core.UniversalSide, Version: "b-2.jar", File: "b-2.jar"},
 	}
 	if len(snap.Mods) != len(wantMods) {
 		t.Fatalf("Mods = %+v, want %+v", snap.Mods, wantMods)
@@ -84,7 +84,7 @@ func TestTakeSnapshotFromTreatsMissingFilesAsAbsent(t *testing.T) {
 	index := mustParseIndex(t, snapshotIndex)
 	open := memOpen(map[string]string{"mods/a.pw.toml": "name = \"A\"\nfilename = \"a-1.jar\"\n"})
 
-	snap, err := TakeSnapshotFrom(index, open)
+	snap, err := TakeSnapshotFrom(index, open, nil)
 	if err != nil {
 		t.Fatalf("TakeSnapshotFrom() returned error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestTakeSnapshotFromReportsProblemsNamingTheFile(t *testing.T) {
 			}
 			return memOpen(map[string]string{"mods/a.pw.toml": "name = \"A\"\n", "mods/b.pw.toml": "name = \"B\"\n"})(path)
 		}
-		_, err := TakeSnapshotFrom(index, open)
+		_, err := TakeSnapshotFrom(index, open, nil)
 		if err == nil || !strings.Contains(err.Error(), "config/c.json") || !strings.Contains(err.Error(), "permission denied") {
 			t.Errorf("error = %v, want one naming config/c.json and the cause", err)
 		}
@@ -111,7 +111,7 @@ func TestTakeSnapshotFromReportsProblemsNamingTheFile(t *testing.T) {
 
 	t.Run("invalid metadata", func(t *testing.T) {
 		open := memOpen(map[string]string{"mods/a.pw.toml": "this is [not toml", "mods/b.pw.toml": "name = \"B\"\n", "config/c.json": "x"})
-		_, err := TakeSnapshotFrom(index, open)
+		_, err := TakeSnapshotFrom(index, open, nil)
 		if err == nil || !strings.Contains(err.Error(), "mods/a.pw.toml") {
 			t.Errorf("error = %v, want one naming mods/a.pw.toml", err)
 		}
@@ -129,7 +129,7 @@ func TestTakeSnapshotFromClosesEveryFile(t *testing.T) {
 		return closeCounter{strings.NewReader(files[path]), &closed}, nil
 	}
 
-	if _, err := TakeSnapshotFrom(index, open); err != nil {
+	if _, err := TakeSnapshotFrom(index, open, nil); err != nil {
 		t.Fatalf("TakeSnapshotFrom() returned error: %v", err)
 	}
 	if opened != 3 || closed != opened {
@@ -168,14 +168,57 @@ func TestTakeSnapshotReadsFromDisk(t *testing.T) {
 		t.Fatalf("LoadIndex() returned error: %v", err)
 	}
 
-	snap, err := TakeSnapshot(index)
+	snap, err := TakeSnapshot(index, nil)
 	if err != nil {
 		t.Fatalf("TakeSnapshot() returned error: %v", err)
 	}
-	if got := snap.Mods["mods/a.pw.toml"]; got != (SnapshotMod{Name: "A", Side: core.ServerSide, Version: "1"}) {
+	if got := snap.Mods["mods/a.pw.toml"]; got != (SnapshotMod{Name: "A", Side: core.ServerSide, Version: "1", File: "a-1.jar"}) {
 		t.Errorf("Mods[mods/a.pw.toml] = %+v", got)
 	}
 	if len(snap.Mods) != 2 || len(snap.Files) != 1 {
 		t.Errorf("snapshot = %+v, want 2 mods and 1 file", snap)
+	}
+}
+
+func TestTakeSnapshotFromUsesLookedUpVersionsOnlyWhereThereIsNone(t *testing.T) {
+	index := mustParseIndex(t, snapshotIndex)
+	open := memOpen(map[string]string{
+		"mods/a.pw.toml": "name = \"A\"\nfilename = \"a-1.jar\"\nversion = \"1\"\n", // records its version
+		"mods/b.pw.toml": "name = \"B\"\nfilename = \"b-2.jar\"\n",                  // doesn't
+		"config/c.json":  "hello",
+	})
+	versions := map[string]string{
+		"mods/a.pw.toml": "9",   // must not override what the file says
+		"mods/b.pw.toml": "2.0", // found for the mod that lacked one
+		"config/c.json":  "7",   // not a mod, so nothing to do with it
+	}
+
+	snap, err := TakeSnapshotFrom(index, open, versions)
+	if err != nil {
+		t.Fatalf("TakeSnapshotFrom() returned error: %v", err)
+	}
+
+	if got := snap.Mods["mods/a.pw.toml"].Version; got != "1" {
+		t.Errorf("A's version = %q, want the 1 it records", got)
+	}
+	b := snap.Mods["mods/b.pw.toml"]
+	if b.Version != "2.0" || b.File != "b-2.jar" {
+		t.Errorf("B = %+v, want the looked-up version 2.0 and its file kept", b)
+	}
+	if len(snap.Files) != 1 {
+		t.Errorf("Files = %v, want the config file untouched", snap.Files)
+	}
+}
+
+func TestTakeSnapshotFromWithoutLookedUpVersionsUsesFileNames(t *testing.T) {
+	index := mustParseIndex(t, snapshotIndex)
+	open := memOpen(map[string]string{"mods/b.pw.toml": "name = \"B\"\nfilename = \"b-2.jar\"\n"})
+
+	snap, err := TakeSnapshotFrom(index, open, map[string]string{"mods/other.pw.toml": "1"})
+	if err != nil {
+		t.Fatalf("TakeSnapshotFrom() returned error: %v", err)
+	}
+	if got := snap.Mods["mods/b.pw.toml"].Version; got != "b-2.jar" {
+		t.Errorf("Version = %q, want the file name when nothing was found for the mod", got)
 	}
 }

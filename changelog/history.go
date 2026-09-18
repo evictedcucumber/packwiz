@@ -29,6 +29,11 @@ type Release struct {
 	Changes []Change `toml:"change"`
 }
 
+// IsInitial reports whether this was the pack's first release, which has nothing to bump from.
+func (r Release) IsInitial() bool {
+	return r.Bump == BumpNone
+}
+
 // History is the contents of the history file.
 type History struct {
 	// Releases are in the order they were made, oldest first
@@ -43,6 +48,40 @@ func (h History) Latest() (Release, bool) {
 		return Release{}, false
 	}
 	return h.Releases[len(h.Releases)-1], true
+}
+
+// UpgradeVersions replaces versions that were recorded as a file name, because the mod's version wasn't known at
+// the time, with the version the mod has in current. This is only done for a mod that is still on that file, where
+// the version is certain. The snapshot is upgraded too, but what is returned is how many lines of the releases
+// were, as those are what someone reading the changelog sees change.
+func (h *History) UpgradeVersions(current Snapshot) int {
+	upgraded := 0
+	for i := range h.Releases {
+		changes := h.Releases[i].Changes
+		for j := range changes {
+			c := &changes[j]
+			cur, ok := current.Mods[c.Path]
+			if !ok || !c.IsMod() || !knownVersion(cur) || c.To != cur.File {
+				continue
+			}
+			c.To = cur.Version
+			upgraded++
+		}
+	}
+	for path, old := range h.Snapshot.Mods {
+		cur, ok := current.Mods[path]
+		if !ok || !knownVersion(cur) || old.Version != cur.File {
+			continue
+		}
+		old.Version = cur.Version
+		h.Snapshot.Mods[path] = old
+	}
+	return upgraded
+}
+
+// knownVersion reports whether a mod in a snapshot has a real version, rather than being described by its file name.
+func knownVersion(m SnapshotMod) bool {
+	return m.File != "" && m.Version != m.File
 }
 
 // LoadHistory reads the history file. A file that doesn't exist yet isn't an error: it is a pack with no releases.

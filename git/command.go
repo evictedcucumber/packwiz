@@ -82,7 +82,9 @@ func indexFile(pack core.Pack) (string, error) {
 
 // runCommit commits every change under the pack root. With dryRun, it only prints the message it would commit with.
 func runCommit(dryRun bool) error {
-	pack, index, err := changelog.LoadRefreshed()
+	// Committing saves the versions looked up for mods that don't record one, so a failure to look them up mustn't
+	// be papered over; describing a commit that won't be made can carry on without them
+	w, err := changelog.LoadWorking(!dryRun)
 	if err != nil {
 		return err
 	}
@@ -90,7 +92,7 @@ func runCommit(dryRun bool) error {
 	if err != nil {
 		return err
 	}
-	current, err := changelog.TakeSnapshot(index)
+	current, err := w.Snapshot()
 	if err != nil {
 		return err
 	}
@@ -102,7 +104,7 @@ func runCommit(dryRun bool) error {
 	}
 	changed := hasCommits
 	if hasCommits {
-		indexPath, err := indexFile(pack)
+		indexPath, err := indexFile(w.Pack)
 		if err != nil {
 			return err
 		}
@@ -120,7 +122,8 @@ func runCommit(dryRun bool) error {
 		if err != nil {
 			return err
 		}
-		if !dirty && !changed {
+		// A real commit would also save any versions that were looked up
+		if !dirty && !changed && len(w.Versions) == 0 {
 			fmt.Println("Nothing to commit.")
 			return nil
 		}
@@ -129,13 +132,16 @@ func runCommit(dryRun bool) error {
 	}
 
 	// Commit the refreshed index too, so the pack that gets committed is one that is consistent
-	if err := index.Write(); err != nil {
+	if err := w.Index.RecordVersions(w.Versions); err != nil {
 		return err
 	}
-	if err := pack.UpdateIndexHash(); err != nil {
+	if err := w.Index.Write(); err != nil {
 		return err
 	}
-	if err := pack.Write(); err != nil {
+	if err := w.Pack.UpdateIndexHash(); err != nil {
+		return err
+	}
+	if err := w.Pack.Write(); err != nil {
 		return err
 	}
 	dirty, err := r.dirty()
@@ -176,8 +182,16 @@ func runRelease(versionOverride string) error {
 	}
 
 	release, released, err := changelog.RunRelease(versionOverride)
-	if err != nil || !released {
+	if err != nil {
 		return err
+	}
+	if !released {
+		// Nothing was released, but a release also saves what it looked up for mods that don't record a version,
+		// and this command isn't going to commit that
+		if dirty, err := r.dirty(); err == nil && dirty {
+			fmt.Println(`The pack changed; commit it with "packwiz git commit".`)
+		}
+		return nil
 	}
 
 	// From here the release is on disk, so failing to commit or tag it has to say how to finish the job by hand

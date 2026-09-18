@@ -3,6 +3,7 @@ package modrinth
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/evictedcucumber/packwiz/core"
 	modrinthApi "github.com/evictedcucumber/packwiz/modrinth/api"
@@ -25,6 +26,13 @@ func (u mrUpdateData) ToMap() (map[string]interface{}, error) {
 }
 
 type mrUpdater struct{}
+
+// mrUpdater can look up the readable version numbers of the mods it manages
+var _ core.VersionResolver = mrUpdater{}
+
+// versionLookupBatchSize is how many versions are looked up in one request. They are listed in the URL, so a pack
+// with a great many mods mustn't put them all in one.
+const versionLookupBatchSize = 100
 
 func (u mrUpdater) ParseUpdate(updateUnparsed map[string]interface{}) (interface{}, error) {
 	var updateData mrUpdateData
@@ -114,4 +122,46 @@ func (u mrUpdater) DoUpdate(mods []*core.Mod, cachedState []interface{}) error {
 	}
 
 	return nil
+}
+
+// ResolveVersions implements core.VersionResolver, looking up the version number of the version each mod has
+// installed.
+func (u mrUpdater) ResolveVersions(mods []*core.Mod) ([]string, error) {
+	installed := make([]string, len(mods))
+	var unique []string
+	seen := make(map[string]bool)
+	for i, mod := range mods {
+		rawData, ok := mod.GetParsedUpdateData("modrinth")
+		if !ok {
+			continue
+		}
+		data, ok := rawData.(mrUpdateData)
+		if !ok || data.InstalledVersion == "" {
+			continue
+		}
+		installed[i] = data.InstalledVersion
+		if !seen[data.InstalledVersion] {
+			seen[data.InstalledVersion] = true
+			unique = append(unique, data.InstalledVersion)
+		}
+	}
+
+	numbers := make(map[string]string, len(unique))
+	for batch := range slices.Chunk(unique, versionLookupBatchSize) {
+		versions, err := mrDefaultClient.Versions.GetMultiple(batch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to look up versions: %w", err)
+		}
+		for _, v := range versions {
+			if v != nil && v.ID != nil {
+				numbers[*v.ID] = versionNumberOf(v)
+			}
+		}
+	}
+
+	results := make([]string, len(mods))
+	for i, id := range installed {
+		results[i] = numbers[id]
+	}
+	return results, nil
 }

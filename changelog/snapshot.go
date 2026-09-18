@@ -26,8 +26,12 @@ type SnapshotMod struct {
 	Name string `toml:"name"`
 	// Side is always explicit here: metadata files with no side are recorded as core.UniversalSide
 	Side string `toml:"side"`
-	// Version is core.Mod.DisplayVersion, so it is never empty for a well-formed metadata file
+	// Version is core.Mod.DisplayVersion, so it is never empty for a well-formed metadata file. It is the mod's file
+	// name if its version isn't known, which Diff allows for.
 	Version string `toml:"version"`
+	// File is the name of the file the mod installs. It is only known for a snapshot of the pack as it is, not for
+	// one read back from the history, which doesn't store it.
+	File string `toml:"-"`
 }
 
 // NewSnapshotMod summarises a mod for a snapshot.
@@ -36,7 +40,7 @@ func NewSnapshotMod(mod core.Mod) SnapshotMod {
 	if side == core.EmptySide {
 		side = core.UniversalSide
 	}
-	return SnapshotMod{Name: mod.Name, Side: side, Version: mod.DisplayVersion()}
+	return SnapshotMod{Name: mod.Name, Side: side, Version: mod.DisplayVersion(), File: mod.FileName}
 }
 
 // OpenFunc opens a pack file for reading, given its path relative to the index. It must return an error wrapping
@@ -44,17 +48,18 @@ func NewSnapshotMod(mod core.Mod) SnapshotMod {
 type OpenFunc func(indexPath string) (io.ReadCloser, error)
 
 // TakeSnapshot reads every file tracked by the index from disk. The index should be up to date (see Index.Refresh),
-// as it decides which files exist and which of them are metadata files.
-func TakeSnapshot(index core.Index) (Snapshot, error) {
+// as it decides which files exist and which of them are metadata files. versions are versions found for mods that
+// don't record one (see Index.ResolveMissingVersions), by path relative to the index, and may be nil.
+func TakeSnapshot(index core.Index, versions map[string]string) (Snapshot, error) {
 	return TakeSnapshotFrom(index, func(path string) (io.ReadCloser, error) {
 		return os.Open(index.ResolveIndexPath(path))
-	})
+	}, versions)
 }
 
 // TakeSnapshotFrom is TakeSnapshot for a pack that isn't (only) on disk, such as an old version of it in version
 // control. Files listed by the index but missing from open are treated as not being part of the pack, as an index
 // can be out of date.
-func TakeSnapshotFrom(index core.Index, open OpenFunc) (Snapshot, error) {
+func TakeSnapshotFrom(index core.Index, open OpenFunc, versions map[string]string) (Snapshot, error) {
 	snap := Snapshot{
 		Mods:  make(map[string]SnapshotMod),
 		Files: make(map[string]string),
@@ -67,6 +72,9 @@ func TakeSnapshotFrom(index core.Index, open OpenFunc) (Snapshot, error) {
 			}
 			if err != nil {
 				return Snapshot{}, fmt.Errorf("failed to read metadata file %s: %w", path, err)
+			}
+			if version, ok := versions[path]; ok && mod.Version == "" {
+				mod.Version = version
 			}
 			snap.Mods[path] = NewSnapshotMod(mod)
 			continue

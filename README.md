@@ -50,7 +50,28 @@ The version is bumped by the most significant change since the last release:
 
 The first release keeps the version already in `pack.toml`. Pass `--version X.Y.Z` to `release` to choose a higher version than the one worked out. The release history is kept in `changelog.toml` next to `pack.toml`, and `CHANGELOG.md` is generated from it; neither is distributed as part of the pack. `packwiz git release` needs everything committed first (`packwiz git commit`), so the release commit contains only the release.
 
-Mods added before `version` was recorded are compared by file name until they are next updated.
+`CHANGELOG.md` lists what each release added, updated and removed, with what runs on the server first, and asks for a server update when the release is major:
+
+```markdown
+## 2.0.0 - 2026-09-18
+
+> **Server update required.** This release changes mods that run on the server.
+
+### Added
+
+- **Lithium** 0.12.0 (server)
+
+### Updated
+
+- **Fabric API** 0.100 → 0.101 (client + server)
+- **Iris** 1.7.0 → 1.7.1 (client)
+
+### Config
+
+- Changed `config/sodium.json`
+```
+
+Mods added before `version` was recorded have it looked up from Modrinth and saved to their `.pw.toml` the next time you run `packwiz changelog release` or `packwiz git commit` (`packwiz changelog` shows the versions but saves nothing), so that needs the network once. Releases made before then show file names, which are replaced with the versions too wherever the mod is still on that file.
 
 ## Installation
 This fork does not currently publish prebuilt binaries, so install from source:

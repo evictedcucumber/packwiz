@@ -53,7 +53,8 @@ func (r repo) snapshotAt(rev, indexFile string) (changelog.Snapshot, error) {
 		}
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}
-	return changelog.TakeSnapshotFrom(index, open)
+	// Old commits are read as they were committed: nothing is looked up for a mod that didn't record its version
+	return changelog.TakeSnapshotFrom(index, open, nil)
 }
 
 // show returns the contents of a file, given its path relative to the pack root, as it was at a commit.

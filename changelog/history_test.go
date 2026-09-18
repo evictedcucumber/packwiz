@@ -174,3 +174,130 @@ func TestWriteFileAtomicFailureLeavesNoTempFilesAndKeepsOriginal(t *testing.T) {
 		t.Errorf("dir = %v, want only the original target (temp file must be cleaned up)", entries)
 	}
 }
+
+func TestReleaseIsInitial(t *testing.T) {
+	for bump, want := range map[Bump]bool{BumpNone: true, BumpPatch: false, BumpMinor: false, BumpMajor: false} {
+		if got := (Release{Bump: bump}).IsInitial(); got != want {
+			t.Errorf("Release{Bump: %v}.IsInitial() = %v, want %v", bump, got, want)
+		}
+	}
+}
+
+// legacyHistory is a history written when versions weren't known, so the mods were recorded by their file names
+func legacyHistory() History {
+	return History{
+		Releases: []Release{
+			{Version: "1.0.0", Date: "2026-01-01", Bump: BumpNone, Changes: []Change{
+				{Kind: ModAdded, Path: "mods/a.pw.toml", Name: "A", Side: core.ClientSide, To: "a-1.0.jar"},
+				{Kind: ModAdded, Path: "mods/b.pw.toml", Name: "B", Side: core.ServerSide, To: "b-1.0.jar"},
+				{Kind: ModAdded, Path: "mods/c.pw.toml", Name: "C", Side: core.ClientSide, To: "c-1.0.jar"},
+				{Kind: FileAdded, Path: "config/a.json"},
+			}},
+			{Version: "2.0.0", Date: "2026-02-01", Bump: BumpMajor, Changes: []Change{
+				{Kind: ModUpdated, Path: "mods/b.pw.toml", Name: "B", Side: core.ServerSide, From: "b-1.0.jar", To: "b-2.0.jar"},
+				{Kind: ModRemoved, Path: "mods/c.pw.toml", Name: "C", Side: core.ClientSide, From: "c-1.0.jar"},
+			}},
+		},
+		Snapshot: Snapshot{Mods: map[string]SnapshotMod{
+			"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "a-1.0.jar"},
+			"mods/b.pw.toml": {Name: "B", Side: core.ServerSide, Version: "b-2.0.jar"},
+		}},
+	}
+}
+
+func TestUpgradeVersions(t *testing.T) {
+	h := legacyHistory()
+	current := Snapshot{Mods: map[string]SnapshotMod{
+		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "1.0", File: "a-1.0.jar"},
+		"mods/b.pw.toml": {Name: "B", Side: core.ServerSide, Version: "2.0", File: "b-2.0.jar"},
+	}}
+
+	upgraded := h.UpgradeVersions(current)
+
+	// A's addition and B's latest update are on the files the mods are still on
+	if upgraded != 2 {
+		t.Errorf("UpgradeVersions() = %d, want 2 lines upgraded", upgraded)
+	}
+	first, second := h.Releases[0].Changes, h.Releases[1].Changes
+	if first[0].To != "1.0" {
+		t.Errorf("A was added as %q, want the version 1.0 now that it is known", first[0].To)
+	}
+	if second[0].To != "2.0" {
+		t.Errorf("B was updated to %q, want 2.0", second[0].To)
+	}
+	// What can't be known stays as it was: B's first file is long gone, so nothing says which version it was
+	if first[1].To != "b-1.0.jar" || second[0].From != "b-1.0.jar" {
+		t.Errorf("B's older versions were changed to %q and %q; only a file the mod is still on is certain", first[1].To, second[0].From)
+	}
+	// ...and so does a mod that isn't there any more, and everything that isn't a mod
+	if first[2].To != "c-1.0.jar" || second[1].From != "c-1.0.jar" {
+		t.Errorf("C, which has been removed, was changed: %+v %+v", first[2], second[1])
+	}
+	if first[3] != (Change{Kind: FileAdded, Path: "config/a.json"}) {
+		t.Errorf("a config change was altered: %+v", first[3])
+	}
+	// The snapshot is brought into line as well, though it isn't counted as it isn't seen
+	if got := h.Snapshot.Mods["mods/a.pw.toml"].Version; got != "1.0" {
+		t.Errorf("snapshot has A as %q, want 1.0", got)
+	}
+	if got := h.Snapshot.Mods["mods/b.pw.toml"].Version; got != "2.0" {
+		t.Errorf("snapshot has B as %q, want 2.0", got)
+	}
+}
+
+func TestUpgradeVersionsIsIdempotent(t *testing.T) {
+	h := legacyHistory()
+	current := Snapshot{Mods: map[string]SnapshotMod{
+		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "1.0", File: "a-1.0.jar"},
+		"mods/b.pw.toml": {Name: "B", Side: core.ServerSide, Version: "2.0", File: "b-2.0.jar"},
+	}}
+	h.UpgradeVersions(current)
+	after := legacyHistory()
+	after.UpgradeVersions(current)
+
+	if again := h.UpgradeVersions(current); again != 0 {
+		t.Errorf("a second UpgradeVersions() = %d, want nothing left to upgrade", again)
+	}
+	if !reflect.DeepEqual(h, after) {
+		t.Error("upgrading twice gave a different history from upgrading once")
+	}
+}
+
+func TestUpgradeVersionsLeavesAModWhoseVersionIsStillUnknown(t *testing.T) {
+	h := legacyHistory()
+	// Looking the version up found nothing, so the mod is still described by its file name
+	current := Snapshot{Mods: map[string]SnapshotMod{
+		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "a-1.0.jar", File: "a-1.0.jar"},
+	}}
+
+	if upgraded := h.UpgradeVersions(current); upgraded != 0 {
+		t.Errorf("UpgradeVersions() = %d, want 0 when no real version is known", upgraded)
+	}
+	if !reflect.DeepEqual(h, legacyHistory()) {
+		t.Error("the history changed although no version was known")
+	}
+}
+
+func TestUpgradeVersionsNeedsTheModOnTheSameFile(t *testing.T) {
+	h := legacyHistory()
+	// A has been updated since; its current version says nothing about the file it was added as
+	current := Snapshot{Mods: map[string]SnapshotMod{
+		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "2.0", File: "a-2.0.jar"},
+	}}
+
+	if upgraded := h.UpgradeVersions(current); upgraded != 0 {
+		t.Errorf("UpgradeVersions() = %d, want 0; 2.0 isn't the version of a-1.0.jar", upgraded)
+	}
+	if got := h.Releases[0].Changes[0].To; got != "a-1.0.jar" {
+		t.Errorf("A was added as %q, want it left alone", got)
+	}
+}
+
+func TestUpgradeVersionsWithNoHistory(t *testing.T) {
+	var h History
+	current := Snapshot{Mods: map[string]SnapshotMod{"mods/a.pw.toml": {Version: "1.0", File: "a.jar"}}}
+
+	if upgraded := h.UpgradeVersions(current); upgraded != 0 {
+		t.Errorf("UpgradeVersions() = %d, want 0 for an empty history", upgraded)
+	}
+}

@@ -1,5 +1,5 @@
 // Package cmdtest provides small helpers shared by the CLI command packages'
-// tests (cmd, settings, utils, migrate). Those commands hold their logic
+// tests (cmd, settings, utils, migrate, changelog, git). Those commands hold their logic
 // directly in cobra Run closures that print via fmt.Println and exit via
 // os.Exit(1) on error, so tests invoke Run() directly in an isolated temp
 // directory and capture real stdout, rather than driving cobra's Execute().

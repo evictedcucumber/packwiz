@@ -82,7 +82,8 @@ func HighestBump(changes []Change) Bump {
 }
 
 // Diff describes how to get from the old snapshot to the new one, ordered by path. Changes to a mod's pin or
-// dependency flags aren't reported, as they don't change what the pack contains.
+// dependency flags aren't reported, as they don't change what the pack contains, and neither is a version that has
+// only just become known (see modUpdated).
 func Diff(oldSnap, newSnap Snapshot) []Change {
 	var changes []Change
 
@@ -91,7 +92,7 @@ func Diff(oldSnap, newSnap Snapshot) []Change {
 		switch {
 		case !existed:
 			changes = append(changes, Change{Kind: ModAdded, Path: path, Name: n.Name, Side: n.Side, To: n.Version})
-		case o.Version != n.Version:
+		case modUpdated(o, n):
 			changes = append(changes, Change{Kind: ModUpdated, Path: path, Name: n.Name, Side: n.Side, From: o.Version, To: n.Version})
 		}
 	}
@@ -119,4 +120,11 @@ func Diff(oldSnap, newSnap Snapshot) []Change {
 	// Map iteration order is random; sort so the same pack always produces the same changelog
 	slices.SortFunc(changes, func(a, b Change) int { return cmp.Compare(a.Path, b.Path) })
 	return changes
+}
+
+// modUpdated reports whether a mod has been updated since it was recorded as o. A mod whose version wasn't known is
+// recorded by its file name, so if that is all that has changed, because the mod is still on that file and its
+// version has since been looked up, the mod hasn't been updated.
+func modUpdated(o, n SnapshotMod) bool {
+	return o.Version != n.Version && o.Version != n.File
 }

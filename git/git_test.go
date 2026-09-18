@@ -105,6 +105,17 @@ func (p testPack) mod(t *testing.T, name, side, version string) {
 	})
 }
 
+// unversioned writes a mod as ones added before versions were recorded are: with no version, but with a source that
+// can look it up.
+func (p testPack) unversioned(t *testing.T, src *cmdtest.VersionSource, name, side, versionID string) {
+	t.Helper()
+	p.modFile(t, core.Mod{
+		Name: name, FileName: strings.ToLower(name) + "-" + versionID + ".jar", Side: side,
+		Download: core.ModDownload{HashFormat: "sha256", Hash: "hash-" + versionID},
+		Update:   src.UpdateData(versionID),
+	})
+}
+
 func (p testPack) modFile(t *testing.T, mod core.Mod) {
 	t.Helper()
 	mod.SetMetaPath(p.path("mods/" + strings.ToLower(mod.Name) + core.MetaExtension))
@@ -156,6 +167,15 @@ func requireClean(t *testing.T) {
 	if status := git(t, "status", "--porcelain"); status != "" {
 		t.Errorf("working tree isn't clean after committing:\n%s", status)
 	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+	return string(data)
 }
 
 func TestCommitDescribesEachKindOfChange(t *testing.T) {
@@ -350,11 +370,11 @@ func TestSnapshotAtAgreesWithTheWorkingTree(t *testing.T) {
 			commit(t)
 
 			// The same content read from disk and read from git must describe the pack identically...
-			_, index, err := changelog.LoadRefreshed()
+			w, err := changelog.LoadWorking(true)
 			if err != nil {
-				t.Fatalf("LoadRefreshed() returned error: %v", err)
+				t.Fatalf("LoadWorking() returned error: %v", err)
 			}
-			onDisk, err := changelog.TakeSnapshot(index)
+			onDisk, err := w.Snapshot()
 			if err != nil {
 				t.Fatalf("TakeSnapshot() returned error: %v", err)
 			}
@@ -611,5 +631,228 @@ func TestReleaseTellsYouHowToFinishWhenTheTagAlreadyExists(t *testing.T) {
 	}
 	if got := headMessage(t); got != "chore(release): 1.0.0" {
 		t.Errorf("HEAD message = %q, want the release to have been committed", got)
+	}
+}
+
+func TestCommitSavesLookedUpVersions(t *testing.T) {
+	setUpRepo(t)
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "0.5.7"})
+	p := setUpPack(t, "", "1.0.0")
+	p.unversioned(t, src, "Sodium", core.ClientSide, "id-a")
+
+	commit(t)
+
+	if committed := git(t, "show", "HEAD:mods/sodium.pw.toml"); !strings.Contains(committed, `version = "0.5.7"`) {
+		t.Errorf("the committed mod doesn't record its version:\n%s", committed)
+	}
+	// The committed index matches the committed mod, or a client checking the file against it would reject it
+	requireClean(t)
+	before := git(t, "show", "HEAD:index.toml")
+	commit(t)
+	if after := git(t, "show", "HEAD:index.toml"); after != before {
+		t.Errorf("committing again changed the index; it wasn't up to date with the mod:\n%s", after)
+	}
+}
+
+func TestCommitDescribesModsByVersionNotFileName(t *testing.T) {
+	setUpRepo(t)
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-b": "0.12.0"})
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+
+	p.unversioned(t, src, "Lithium", core.ServerSide, "id-b")
+	commit(t)
+
+	if got, want := headMessage(t), "feat(mods)!: add Lithium 0.12.0 (server)\n\n"+wantBreakingFooter; got != want {
+		t.Errorf("commit message =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestCommitDoesNotTakeRecordingAVersionForAnUpdate(t *testing.T) {
+	setUpRepo(t)
+	// The first commit can't find the version, so the mod goes in with only its file name to go by
+	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
+	p := setUpPack(t, "", "1.0.0")
+	p.unversioned(t, src, "Lithium", core.ServerSide, "id-b")
+	commit(t)
+	committed, err := core.DecodeMod([]byte(git(t, "show", "HEAD:mods/lithium.pw.toml")))
+	if err != nil || committed.Version != "" {
+		t.Fatalf("the fixture should start with a mod that records no version, got %q (%v)", committed.Version, err)
+	}
+	before := commitCount(t)
+
+	// Now it can. The mod hasn't changed, only what is known about it, so this isn't the "feat!" that a server mod
+	// being updated would be.
+	src.Versions = map[string]string{"id-b": "0.12.0"}
+	commit(t)
+
+	if got := headMessage(t); got != "chore(pack): update pack files" {
+		t.Errorf("commit message = %q, want a chore; nothing about the pack changed", got)
+	}
+	if got := commitCount(t); got != before+1 {
+		t.Errorf("commit count = %d, want %d", got, before+1)
+	}
+	if committed := git(t, "show", "HEAD:mods/lithium.pw.toml"); !strings.Contains(committed, `version = "0.12.0"`) {
+		t.Errorf("the version wasn't committed:\n%s", committed)
+	}
+}
+
+func TestCommitDryRunLooksUpVersionsButSavesNothing(t *testing.T) {
+	setUpRepo(t)
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-b": "0.12.0"})
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	p.unversioned(t, src, "Lithium", core.ServerSide, "id-b")
+	modBefore, indexBefore := readFile(t, "mods/lithium.pw.toml"), readFile(t, "index.toml")
+
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
+	if err != nil {
+		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+	}
+
+	if want := "feat(mods)!: add Lithium 0.12.0 (server)"; !strings.Contains(out, want) {
+		t.Errorf("dry run output = %q, want the looked-up version in %q", out, want)
+	}
+	if readFile(t, "mods/lithium.pw.toml") != modBefore || readFile(t, "index.toml") != indexBefore {
+		t.Error("a dry run modified the pack; it must only look versions up")
+	}
+}
+
+func TestCommitFailsWhenVersionsCannotBeLookedUp(t *testing.T) {
+	setUpRepo(t)
+	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	p.unversioned(t, src, "Lithium", core.ServerSide, "id-b")
+	src.Err = errors.New("network is down")
+	before := commitCount(t)
+	modBefore := readFile(t, "mods/lithium.pw.toml")
+
+	t.Run("commit", func(t *testing.T) {
+		var err error
+		cmdtest.CaptureStdout(t, func() { err = runCommit(false) })
+		// Committing a file name where a version belongs would leave it in the history
+		if err == nil || !strings.Contains(err.Error(), "network is down") {
+			t.Errorf("runCommit() error = %v, want one saying the versions couldn't be looked up", err)
+		}
+		if got := commitCount(t); got != before {
+			t.Errorf("commit count = %d, want %d", got, before)
+		}
+		if readFile(t, "mods/lithium.pw.toml") != modBefore {
+			t.Error("the mod was modified although the commit failed")
+		}
+	})
+
+	t.Run("dry run carries on", func(t *testing.T) {
+		var err error
+		out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
+		if err != nil {
+			t.Fatalf("runCommit(dryRun) returned error: %v", err)
+		}
+		for _, want := range []string{"Warning: couldn't look up the versions", "add Lithium lithium-id-b.jar (server)"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("dry run output missing %q:\n%s", want, out)
+			}
+		}
+	})
+}
+
+func TestReleaseCommitsTheVersionsItSaved(t *testing.T) {
+	setUpRepo(t)
+	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
+	p := setUpPack(t, "", "1.0.0")
+	p.unversioned(t, src, "Sodium", core.ClientSide, "id-a")
+	commit(t) // committed while its version couldn't be found
+	src.Versions = map[string]string{"id-a": "0.5.7"}
+
+	release(t, "")
+
+	if got := headMessage(t); got != "chore(release): 1.0.0" {
+		t.Errorf("release commit message = %q", got)
+	}
+	changed := git(t, "show", "--name-only", "--format=", "HEAD")
+	for _, want := range []string{"mods/sodium.pw.toml", "index.toml", "CHANGELOG.md", "changelog.toml"} {
+		if !strings.Contains(changed, want) {
+			t.Errorf("release commit doesn't include %s:\n%s", want, changed)
+		}
+	}
+	if changelogMD := git(t, "show", "HEAD:CHANGELOG.md"); !strings.Contains(changelogMD, "**Sodium** 0.5.7 (client)") {
+		t.Errorf("the committed changelog doesn't show the version:\n%s", changelogMD)
+	}
+	requireClean(t)
+}
+
+func TestCommitDryRunSaysWhenOnlyVersionsWouldBeCommitted(t *testing.T) {
+	setUpRepo(t)
+	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
+	p := setUpPack(t, "", "1.0.0")
+	p.unversioned(t, src, "Sodium", core.ClientSide, "id-a")
+	commit(t) // committed while its version couldn't be found
+	src.Versions = map[string]string{"id-a": "0.5.7"}
+	before := commitCount(t)
+
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
+	if err != nil {
+		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+	}
+
+	// The tree is clean and nothing has changed, but a real commit would save the version, so a dry run mustn't
+	// claim there is nothing to do
+	if strings.Contains(out, "Nothing to commit") || !strings.Contains(out, "chore(pack): update pack files") {
+		t.Errorf("dry run output = %q, want the message the real commit would use", out)
+	}
+	if got := commitCount(t); got != before {
+		t.Errorf("commit count = %d, want %d; a dry run mustn't commit", got, before)
+	}
+
+	commit(t)
+	if got := commitCount(t); got != before+1 {
+		t.Errorf("the real commit made %d new commits, want the 1 the dry run described", got-before)
+	}
+}
+
+func TestReleaseWithNothingNewToldToCommitWhatItSaved(t *testing.T) {
+	setUpRepo(t)
+	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
+	p := setUpPack(t, "", "1.0.0")
+	p.unversioned(t, src, "Sodium", core.ClientSide, "id-a")
+	commit(t)
+	release(t, "") // the first release, while the version couldn't be found
+	src.Versions = map[string]string{"id-a": "0.5.7"}
+	before := commitCount(t)
+
+	out := release(t, "")
+
+	// No release was made, but the pack changed, and the release commit is the only one this command makes
+	if !strings.Contains(out, "Recorded the versions of 1 mod") {
+		t.Errorf("output = %q, want it to say the versions were recorded", out)
+	}
+	if !strings.Contains(out, `packwiz git commit`) {
+		t.Errorf("output = %q, want it to say how to commit what changed", out)
+	}
+	if got := commitCount(t); got != before {
+		t.Errorf("commit count = %d, want %d; nothing was released", got, before)
+	}
+	if git(t, "status", "--porcelain") == "" {
+		t.Error("the tree is clean, but the versions were saved to files")
+	}
+}
+
+func TestReleaseWithNothingToDoDoesNotMentionCommitting(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	release(t, "")
+
+	out := release(t, "")
+
+	if strings.Contains(out, "packwiz git commit") {
+		t.Errorf("output = %q; there was nothing to commit, so it shouldn't say to", out)
 	}
 }

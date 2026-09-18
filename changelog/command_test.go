@@ -1,6 +1,7 @@
 package changelog
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -460,7 +461,7 @@ func TestReleaseCanBeRerunAfterInterruption(t *testing.T) {
 	release(t, "")
 	writeMod(t, "Lithium", core.ServerSide, "0.12.0")
 
-	p, err := loadPending()
+	p, err := loadPending(true)
 	if err != nil {
 		t.Fatalf("loadPending() returned error: %v", err)
 	}
@@ -548,5 +549,332 @@ func TestPlan(t *testing.T) {
 				t.Errorf("plan() has %d changes, want %d", len(got.Changes), len(tt.changes))
 			}
 		})
+	}
+}
+
+// writeUnversionedMod writes a mod as ones added before versions were recorded are: with no version, but with a
+// source that can look it up.
+func writeUnversionedMod(t *testing.T, src *cmdtest.VersionSource, name, side, versionID string) {
+	t.Helper()
+	writeModFile(t, core.Mod{
+		Name: name, FileName: strings.ToLower(name) + "-" + versionID + ".jar", Side: side,
+		Download: core.ModDownload{HashFormat: "sha256", Hash: "hash-" + versionID},
+		Update:   src.UpdateData(versionID),
+	})
+}
+
+// requireIndexUpToDate fails unless index.toml already describes every file as it is, which is what refreshing it
+// would otherwise change.
+func requireIndexUpToDate(t *testing.T) {
+	t.Helper()
+	before := readFile(t, "index.toml")
+	pack, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	index, err := pack.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex() returned error: %v", err)
+	}
+	cmdtest.CaptureStdout(t, func() { err = index.Refresh() })
+	if err != nil {
+		t.Fatalf("Refresh() returned error: %v", err)
+	}
+	if err := index.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	if after := readFile(t, "index.toml"); after != before {
+		t.Errorf("index.toml was out of date with the files:\n--- as left\n%s\n--- refreshed\n%s", before, after)
+	}
+}
+
+func modVersion(t *testing.T, path string) string {
+	t.Helper()
+	mod, err := core.LoadMod(path)
+	if err != nil {
+		t.Fatalf("LoadMod(%s) returned error: %v", path, err)
+	}
+	return mod.Version
+}
+
+func TestReleaseLooksUpAndSavesMissingVersions(t *testing.T) {
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "0.5.7", "id-b": "0.12.0"})
+	setUpPack(t, "1.0.0")
+	writeUnversionedMod(t, src, "Sodium", core.ClientSide, "id-a")
+	writeUnversionedMod(t, src, "Lithium", core.ServerSide, "id-b")
+
+	release(t, "")
+
+	// The changelog says which version, not which file
+	changelog := readFile(t, MarkdownFile)
+	for _, want := range []string{"**Sodium** 0.5.7 (client)", "**Lithium** 0.12.0 (server)"} {
+		if !strings.Contains(changelog, want) {
+			t.Errorf("CHANGELOG.md missing %q:\n%s", want, changelog)
+		}
+	}
+	for _, name := range []string{"sodium-id-a.jar", "lithium-id-b.jar"} {
+		if strings.Contains(changelog, name) {
+			t.Errorf("CHANGELOG.md shows the file name %s instead of a version:\n%s", name, changelog)
+		}
+	}
+
+	// ...and the version has been added to the mod's file, leaving the rest of it as it was
+	if got := modVersion(t, "mods/sodium.pw.toml"); got != "0.5.7" {
+		t.Errorf("sodium.pw.toml version = %q, want 0.5.7 saved", got)
+	}
+	if got := modVersion(t, "mods/lithium.pw.toml"); got != "0.12.0" {
+		t.Errorf("lithium.pw.toml version = %q, want 0.12.0 saved", got)
+	}
+	mod, err := core.LoadMod("mods/sodium.pw.toml")
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if mod.FileName != "sodium-id-a.jar" || mod.Side != core.ClientSide || mod.Download.Hash != "hash-id-a" {
+		t.Errorf("mod = %+v, want everything but the version kept", mod)
+	}
+	if data, ok := mod.GetParsedUpdateData("testsource"); !ok || data != "id-a" {
+		t.Errorf("update data = %v, %v, want the source's version ID kept", data, ok)
+	}
+
+	// The index describes the files as they are now, and the release remembers versions rather than file names
+	requireIndexUpToDate(t)
+	if got := loadHistory(t).Snapshot.Mods["mods/sodium.pw.toml"].Version; got != "0.5.7" {
+		t.Errorf("snapshot has Sodium as %q, want 0.5.7", got)
+	}
+	if src.Calls != 1 {
+		t.Errorf("source was called %d times, want the mods looked up together in one call", src.Calls)
+	}
+}
+
+func TestVersionsAreOnlyLookedUpOnce(t *testing.T) {
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "0.5.7"})
+	setUpPack(t, "1.0.0")
+	writeUnversionedMod(t, src, "Sodium", core.ClientSide, "id-a")
+	release(t, "")
+
+	writeConfig(t, "config/a.json", "{}")
+	release(t, "")
+	preview(t)
+
+	if src.Calls != 1 {
+		t.Errorf("source was called %d times, want the version not asked for again once it is saved", src.Calls)
+	}
+}
+
+func TestModsWithVersionsNeverAskTheSource(t *testing.T) {
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "should not be used"})
+	setUpPack(t, "1.0.0")
+	writeModFile(t, core.Mod{
+		Name: "Sodium", FileName: "sodium.jar", Version: "0.5.7", Side: core.ClientSide,
+		Download: core.ModDownload{HashFormat: "sha256", Hash: "h"}, Update: src.UpdateData("id-a"),
+	})
+
+	release(t, "")
+
+	if src.Calls != 0 {
+		t.Errorf("source was called %d times for a mod that records its version", src.Calls)
+	}
+	if !strings.Contains(readFile(t, MarkdownFile), "**Sodium** 0.5.7 (client)") {
+		t.Error("the recorded version wasn't used")
+	}
+}
+
+func TestPreviewShowsLookedUpVersionsButSavesNothing(t *testing.T) {
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "0.5.7"})
+	setUpPack(t, "1.0.0")
+	writeUnversionedMod(t, src, "Sodium", core.ClientSide, "id-a")
+	modBefore, indexBefore, packBefore := readFile(t, "mods/sodium.pw.toml"), readFile(t, "index.toml"), readFile(t, "pack.toml")
+
+	out := preview(t)
+
+	if !strings.Contains(out, "**Sodium** 0.5.7 (client)") || strings.Contains(out, "sodium-id-a.jar") {
+		t.Errorf("preview should show the looked-up version, not the file name:\n%s", out)
+	}
+	if !strings.Contains(out, `Note: the versions of 1 mod that don't record one were looked up and will be saved by "packwiz changelog release".`) {
+		t.Errorf("preview should say the versions aren't saved yet:\n%s", out)
+	}
+	for name, before := range map[string]string{"mods/sodium.pw.toml": modBefore, "index.toml": indexBefore, "pack.toml": packBefore} {
+		if after := readFile(t, name); after != before {
+			t.Errorf("preview modified %s:\n%s", name, after)
+		}
+	}
+	if _, err := os.Stat(HistoryFile); err == nil {
+		t.Error("preview wrote a history file")
+	}
+}
+
+func TestReleaseWritesNothingWhenVersionsCannotBeLookedUp(t *testing.T) {
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "0.5.7"})
+	src.Err = errors.New("network is down")
+	setUpPack(t, "1.0.0")
+	writeUnversionedMod(t, src, "Sodium", core.ClientSide, "id-a")
+	modBefore, packBefore := readFile(t, "mods/sodium.pw.toml"), readFile(t, "pack.toml")
+
+	var err error
+	cmdtest.CaptureStdout(t, func() { _, _, err = RunRelease("") })
+
+	// Releasing with file names would put them in the history for good
+	if err == nil || !strings.Contains(err.Error(), "couldn't look up") || !strings.Contains(err.Error(), "network is down") {
+		t.Errorf("RunRelease() error = %v, want one saying the versions couldn't be looked up and why", err)
+	}
+	for _, name := range []string{HistoryFile, MarkdownFile} {
+		if _, statErr := os.Stat(name); statErr == nil {
+			t.Errorf("%s was written although the release failed", name)
+		}
+	}
+	if readFile(t, "mods/sodium.pw.toml") != modBefore || readFile(t, "pack.toml") != packBefore {
+		t.Error("files were modified although the release failed")
+	}
+}
+
+func TestPreviewCarriesOnWhenVersionsCannotBeLookedUp(t *testing.T) {
+	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
+	src.Err = errors.New("network is down")
+	setUpPack(t, "1.0.0")
+	writeUnversionedMod(t, src, "Sodium", core.ClientSide, "id-a")
+
+	out := preview(t)
+
+	for _, want := range []string{"Warning: couldn't look up the versions of mods that don't record one", "network is down", "sodium-id-a.jar"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("preview output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestModsTheSourceDoesNotKnowKeepTheirFileName(t *testing.T) {
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "0.5.7"})
+	setUpPack(t, "1.0.0")
+	writeUnversionedMod(t, src, "Sodium", core.ClientSide, "id-a")
+	writeUnversionedMod(t, src, "Ghost", core.ClientSide, "id-gone") // the source has never heard of this one
+
+	release(t, "")
+
+	changelog := readFile(t, MarkdownFile)
+	if !strings.Contains(changelog, "**Sodium** 0.5.7 (client)") || !strings.Contains(changelog, "**Ghost** ghost-id-gone.jar (client)") {
+		t.Errorf("CHANGELOG.md should show a version where there is one and the file name where there isn't:\n%s", changelog)
+	}
+	if got := modVersion(t, "mods/ghost.pw.toml"); got != "" {
+		t.Errorf("ghost.pw.toml version = %q, want none saved for a mod nothing is known about", got)
+	}
+}
+
+// The state of a pack that was released before versions were looked up: mods with no version, recorded in the
+// history by file name. The mods now have a source that can say what version they are.
+func legacyPack(t *testing.T) *cmdtest.VersionSource {
+	t.Helper()
+	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
+	setUpPack(t, "1.0.0")
+	// With no source to ask, the first release can only record file names
+	for _, mod := range []core.Mod{
+		{Name: "Sodium", FileName: "sodium-id-a.jar", Side: core.ClientSide},
+		{Name: "Lithium", FileName: "lithium-id-b.jar", Side: core.ServerSide},
+	} {
+		mod.Download = core.ModDownload{HashFormat: "sha256", Hash: "h-" + mod.Name}
+		writeModFile(t, mod)
+	}
+	release(t, "")
+	if got := readFile(t, MarkdownFile); !strings.Contains(got, "sodium-id-a.jar") {
+		t.Fatalf("the fixture should start with file names in the changelog:\n%s", got)
+	}
+
+	// Now they have a source to look up, which knows their versions
+	src.Versions = map[string]string{"id-a": "0.5.7", "id-b": "0.12.0"}
+	for _, mod := range []core.Mod{
+		{Name: "Sodium", FileName: "sodium-id-a.jar", Side: core.ClientSide, Update: src.UpdateData("id-a")},
+		{Name: "Lithium", FileName: "lithium-id-b.jar", Side: core.ServerSide, Update: src.UpdateData("id-b")},
+	} {
+		mod.Download = core.ModDownload{HashFormat: "sha256", Hash: "h-" + mod.Name}
+		writeModFile(t, mod)
+	}
+	return src
+}
+
+func TestFillingInVersionsIsNotAnUpdate(t *testing.T) {
+	legacyPack(t)
+
+	// Nothing about the pack has changed. If looking up Lithium's version were taken for an update, this would want
+	// a major release.
+	out := preview(t)
+
+	if !strings.Contains(out, "No changes since the last release (1.0.0).") {
+		t.Errorf("preview should find nothing to release:\n%s", out)
+	}
+	if strings.Contains(out, "next version") {
+		t.Errorf("preview wants a release for versions that were only looked up:\n%s", out)
+	}
+}
+
+func TestReleaseWithNothingNewStillSavesVersionsAndFixesTheChangelog(t *testing.T) {
+	src := legacyPack(t)
+
+	out := release(t, "")
+
+	// No release is made, but the versions are saved and the changelog shows them
+	for _, want := range []string{
+		"No changes since the last release (1.0.0).",
+		"Recorded the versions of 2 mods and updated 2 lines in the changelog.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if got := len(loadHistory(t).Releases); got != 1 {
+		t.Errorf("history has %d releases, want still 1; nothing was released", got)
+	}
+	if got := packVersion(t); got != "1.0.0" {
+		t.Errorf("pack.toml version = %q, want it left at 1.0.0", got)
+	}
+	if got := modVersion(t, "mods/sodium.pw.toml"); got != "0.5.7" {
+		t.Errorf("sodium.pw.toml version = %q, want 0.5.7 saved", got)
+	}
+	changelog := readFile(t, MarkdownFile)
+	for _, want := range []string{"**Sodium** 0.5.7 (client)", "**Lithium** 0.12.0 (server)"} {
+		if !strings.Contains(changelog, want) {
+			t.Errorf("CHANGELOG.md missing %q:\n%s", want, changelog)
+		}
+	}
+	if strings.Contains(changelog, "sodium-id-a.jar") || strings.Contains(changelog, "lithium-id-b.jar") {
+		t.Errorf("CHANGELOG.md still shows file names:\n%s", changelog)
+	}
+	requireIndexUpToDate(t)
+
+	// It is done once: there's nothing left to fix, so the next run leaves everything as it is
+	before := readFile(t, HistoryFile)
+	again := release(t, "")
+	if strings.Contains(again, "Recorded") {
+		t.Errorf("a second release saved versions again:\n%s", again)
+	}
+	if readFile(t, HistoryFile) != before {
+		t.Error("the history changed on a run that had nothing to fix")
+	}
+	// The versions were asked for once, to record them, and not again now they are saved
+	if src.Calls != 1 {
+		t.Errorf("source was called %d times, want 1", src.Calls)
+	}
+}
+
+func TestOldChangelogLinesAreFixedAlongsideARealRelease(t *testing.T) {
+	legacyPack(t)
+	writeConfig(t, "config/sodium.json", "{}")
+
+	release(t, "")
+
+	// Only the config file changed since the last release: a patch, not the major release that a server mod
+	// "updating" from its file name to its version would have made
+	if got := packVersion(t); got != "1.0.1" {
+		t.Errorf("pack.toml version = %q, want 1.0.1", got)
+	}
+	changelog := readFile(t, MarkdownFile)
+	for _, want := range []string{"## 1.0.1", "`config/sodium.json`", "**Sodium** 0.5.7 (client)", "**Lithium** 0.12.0 (server)"} {
+		if !strings.Contains(changelog, want) {
+			t.Errorf("CHANGELOG.md missing %q:\n%s", want, changelog)
+		}
+	}
+	if strings.Contains(changelog, "sodium-id-a.jar") || strings.Contains(changelog, "lithium-id-b.jar") {
+		t.Errorf("the 1.0.0 entry still shows file names:\n%s", changelog)
+	}
+	if strings.Contains(changelog, "Server update required") {
+		t.Errorf("CHANGELOG.md asks for a server update that no release made:\n%s", changelog)
 	}
 }

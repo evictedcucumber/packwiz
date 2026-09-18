@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/evictedcucumber/packwiz/cmd"
@@ -50,32 +51,43 @@ var releaseCmd = &cobra.Command{
 
 // runPreview prints the release the pack's pending changes would make, without changing anything.
 func runPreview() error {
-	p, err := loadPending()
+	p, err := loadPending(false)
 	if err != nil {
 		return err
 	}
 	if len(p.changes) == 0 {
 		fmt.Println(p.noChangesMessage())
-		return nil
+	} else {
+		release, err := p.plan("")
+		if err != nil {
+			return err
+		}
+		p.printPlan(release)
 	}
-	release, err := p.plan("")
-	if err != nil {
-		return err
+	if note := p.unsavedNote(); note != "" {
+		fmt.Println(note)
 	}
-	p.printPlan(release)
 	return nil
 }
 
 // RunRelease records the release the pack's pending changes make, once the user confirms it. A non-empty
 // versionOverride replaces the version that would otherwise be worked out from the changes. It returns the release
 // and true, or false if no release was made because there was nothing to release or the user declined.
+//
+// Mods that don't record their version have it looked up and saved, whether or not there is anything to release.
 func RunRelease(versionOverride string) (Release, bool, error) {
-	p, err := loadPending()
+	p, err := loadPending(true)
 	if err != nil {
 		return Release{}, false, err
 	}
 	if len(p.changes) == 0 {
 		fmt.Println(p.noChangesMessage())
+		if p.unsaved() {
+			if err := p.saveWithoutRelease(); err != nil {
+				return Release{}, false, fmt.Errorf("failed to record versions: %w", err)
+			}
+			fmt.Println(p.savedMessage())
+		}
 		return Release{}, false, nil
 	}
 	release, err := p.plan(versionOverride)
@@ -122,28 +134,16 @@ type pending struct {
 	// current is the pack as it is now, which becomes the history's snapshot if it is released
 	current Snapshot
 	changes []Change
+	// versions are the versions found for mods that don't record one, which are saved along with a release
+	versions map[string]string
+	// upgraded is how many lines of past releases showed a file name that has been replaced by a real version
+	upgraded int
 }
 
-// LoadRefreshed loads the pack and its index, with the index refreshed in memory so files added or edited since the
-// last "packwiz refresh" are noticed. Nothing is written to disk.
-func LoadRefreshed() (core.Pack, core.Index, error) {
-	pack, err := core.LoadPack()
-	if err != nil {
-		return core.Pack{}, core.Index{}, err
-	}
-	index, err := pack.LoadIndex()
-	if err != nil {
-		return core.Pack{}, core.Index{}, err
-	}
-	if err := index.Refresh(); err != nil {
-		return core.Pack{}, core.Index{}, err
-	}
-	return pack, index, nil
-}
-
-// loadPending reads the pack and compares it to its last release.
-func loadPending() (pending, error) {
-	pack, index, err := LoadRefreshed()
+// loadPending reads the pack and compares it to its last release. strict is whether failing to look up the versions
+// of mods that don't record one is an error; see LoadWorking.
+func loadPending(strict bool) (pending, error) {
+	w, err := LoadWorking(strict)
 	if err != nil {
 		return pending{}, err
 	}
@@ -151,11 +151,14 @@ func loadPending() (pending, error) {
 	if err != nil {
 		return pending{}, fmt.Errorf("failed to read %s: %w", HistoryFile, err)
 	}
-	current, err := TakeSnapshot(index)
+	current, err := w.Snapshot()
 	if err != nil {
 		return pending{}, err
 	}
-	return pending{pack, index, history, current, Diff(history.Snapshot, current)}, nil
+	// Anything released before a mod's version was known was recorded by file name. That's only fixed in memory
+	// here; it is written if a release, or saveWithoutRelease, is.
+	upgraded := history.UpgradeVersions(current)
+	return pending{w.Pack, w.Index, history, current, Diff(history.Snapshot, current), w.Versions, upgraded}, nil
 }
 
 func (p pending) noChangesMessage() string {
@@ -235,19 +238,36 @@ func (p pending) printPlan(release Release) {
 	fmt.Println(RenderRelease(release))
 }
 
-// apply records the release. The history file is written last because it is what marks the release as made: if any
-// earlier step fails, running the release again works out and redoes the same release rather than skipping it.
+// apply records the release.
 func (p pending) apply(release Release) error {
 	history := p.history
 	history.Releases = append(slices.Clone(history.Releases), release)
 	history.Snapshot = p.current
+	p.pack.Version = release.Version
+	return p.save(history)
+}
 
+// saveWithoutRelease saves the versions that were looked up, and the history as upgraded with them, when there is
+// nothing to release.
+func (p pending) saveWithoutRelease() error {
+	history := p.history
+	// Nothing has changed since it was taken, other than versions that are now known
+	history.Snapshot = p.current
+	return p.save(history)
+}
+
+// save writes the pack and the release history. The history file is written last because it is what marks a release
+// as made: if any earlier step fails, running the release again works out and redoes the same release rather than
+// skipping it.
+func (p pending) save(history History) error {
+	if err := p.index.RecordVersions(p.versions); err != nil {
+		return err
+	}
 	// The index is written because it was refreshed to find the changes being released, and consumers of the
 	// pack (which see the pack.toml version) need it to match
 	if err := p.index.Write(); err != nil {
 		return err
 	}
-	p.pack.Version = release.Version
 	if err := p.pack.UpdateIndexHash(); err != nil {
 		return err
 	}
@@ -258,4 +278,38 @@ func (p pending) apply(release Release) error {
 		return err
 	}
 	return history.Write(historyPath())
+}
+
+// unsaved reports whether there is anything that a release would save other than the release itself: versions that
+// were looked up for mods that don't record one, and the history being upgraded with them.
+func (p pending) unsaved() bool {
+	return len(p.versions) > 0 || p.upgraded > 0
+}
+
+// savedMessage says what saveWithoutRelease did.
+func (p pending) savedMessage() string {
+	var parts []string
+	if n := len(p.versions); n > 0 {
+		parts = append(parts, fmt.Sprintf("recorded the versions of %d %s", n, plural(n, "mod")))
+	}
+	if p.upgraded > 0 {
+		parts = append(parts, fmt.Sprintf("updated %d %s in the changelog", p.upgraded, plural(p.upgraded, "line")))
+	}
+	s := strings.Join(parts, " and ")
+	return strings.ToUpper(s[:1]) + s[1:] + "."
+}
+
+// unsavedNote tells a command that only previews what a release would save, or "" if there is nothing.
+func (p pending) unsavedNote() string {
+	if !p.unsaved() {
+		return ""
+	}
+	var what string
+	switch n := len(p.versions); {
+	case n > 0:
+		what = fmt.Sprintf("the versions of %d %s that don't record one were looked up", n, plural(n, "mod"))
+	default:
+		what = "file names in the changelog can be replaced with versions"
+	}
+	return "Note: " + what + " and will be saved by \"packwiz changelog release\"."
 }

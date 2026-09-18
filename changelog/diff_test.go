@@ -192,7 +192,7 @@ func TestDiffIsDeterministic(t *testing.T) {
 
 func TestNewSnapshotModRecordsEmptySideAsBoth(t *testing.T) {
 	got := NewSnapshotMod(core.Mod{Name: "A", FileName: "a-1.0.jar", Version: "1.0"})
-	want := SnapshotMod{Name: "A", Side: core.UniversalSide, Version: "1.0"}
+	want := SnapshotMod{Name: "A", Side: core.UniversalSide, Version: "1.0", File: "a-1.0.jar"}
 	if got != want {
 		t.Errorf("NewSnapshotMod() = %+v, want %+v", got, want)
 	}
@@ -202,5 +202,91 @@ func TestNewSnapshotModFallsBackToFileName(t *testing.T) {
 	got := NewSnapshotMod(core.Mod{Name: "A", FileName: "a-1.0.jar", Side: core.ClientSide})
 	if got.Version != "a-1.0.jar" {
 		t.Errorf("Version = %q, want the file name when the mod has no version", got.Version)
+	}
+}
+
+func TestDiffDoesNotCallANewlyKnownVersionAnUpdate(t *testing.T) {
+	// The old snapshot recorded the mod by its file name, as happens when its version wasn't known. The version has
+	// since been looked up, but the mod is still on the same file, so nothing has been updated.
+	oldSnap := Snapshot{Mods: map[string]SnapshotMod{
+		"mods/lithium.pw.toml": {Name: "Lithium", Side: core.ServerSide, Version: "lithium-0.12.0.jar"},
+	}}
+	newSnap := Snapshot{Mods: map[string]SnapshotMod{
+		"mods/lithium.pw.toml": {Name: "Lithium", Side: core.ServerSide, Version: "0.12.0", File: "lithium-0.12.0.jar"},
+	}}
+
+	got := Diff(oldSnap, newSnap)
+
+	if len(got) != 0 {
+		t.Errorf("Diff() = %+v, want no changes; recording a version isn't an update", got)
+	}
+	// This matters most for a server mod, where a false update would force a major release
+	if bump := HighestBump(got); bump != BumpNone {
+		t.Errorf("HighestBump() = %v, want none", bump)
+	}
+}
+
+func TestModUpdated(t *testing.T) {
+	tests := []struct {
+		name string
+		old  SnapshotMod
+		new  SnapshotMod
+		want bool
+	}{
+		{
+			"same recorded version",
+			SnapshotMod{Version: "1.0"}, SnapshotMod{Version: "1.0", File: "a-1.0.jar"}, false,
+		},
+		{
+			"different recorded versions",
+			SnapshotMod{Version: "1.0"}, SnapshotMod{Version: "1.1", File: "a-1.1.jar"}, true,
+		},
+		{
+			// A publisher that names the file the same for every version is still caught by its version
+			"different versions in a file that kept its name",
+			SnapshotMod{Version: "1.0"}, SnapshotMod{Version: "1.1", File: "a.jar"}, true,
+		},
+		{
+			"old version was the file name, and the mod is still on it",
+			SnapshotMod{Version: "a-1.0.jar"}, SnapshotMod{Version: "1.0", File: "a-1.0.jar"}, false,
+		},
+		{
+			"old version was a file name, and the mod is on another now",
+			SnapshotMod{Version: "a-1.0.jar"}, SnapshotMod{Version: "1.1", File: "a-1.1.jar"}, true,
+		},
+		{
+			"neither version is known, and the file changed",
+			SnapshotMod{Version: "a-1.0.jar"}, SnapshotMod{Version: "a-1.1.jar", File: "a-1.1.jar"}, true,
+		},
+		{
+			"neither version is known, and the file didn't",
+			SnapshotMod{Version: "a-1.0.jar"}, SnapshotMod{Version: "a-1.0.jar", File: "a-1.0.jar"}, false,
+		},
+		{
+			// The mod at HEAD in git is read from a commit, so it knows its file too
+			"both know their files, and the version is newly known",
+			SnapshotMod{Version: "a-1.0.jar", File: "a-1.0.jar"}, SnapshotMod{Version: "1.0", File: "a-1.0.jar"}, false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := modUpdated(tt.old, tt.new); got != tt.want {
+				t.Errorf("modUpdated(%+v, %+v) = %v, want %v", tt.old, tt.new, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiffReportsUpdateFromAFileNameByTheFileNameItWas(t *testing.T) {
+	oldSnap := Snapshot{Mods: map[string]SnapshotMod{
+		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "a-1.0.jar"},
+	}}
+	newSnap := Snapshot{Mods: map[string]SnapshotMod{
+		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "1.1", File: "a-1.1.jar"},
+	}}
+
+	want := []Change{{Kind: ModUpdated, Path: "mods/a.pw.toml", Name: "A", Side: core.ClientSide, From: "a-1.0.jar", To: "1.1"}}
+	if got := Diff(oldSnap, newSnap); !reflect.DeepEqual(got, want) {
+		t.Errorf("Diff() = %+v, want %+v", got, want)
 	}
 }

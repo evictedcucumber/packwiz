@@ -33,6 +33,14 @@ type UpdateCheck struct {
 	Error error
 }
 
+// VersionResolver is optionally implemented by an Updater that can look up the human-readable version of the files it
+// manages, so that mods added before Mod.Version was recorded can have it filled in (see Index.ResolveMissingVersions).
+type VersionResolver interface {
+	// ResolveVersions returns the readable version of each mod's installed file, in the same order as the mods given,
+	// with "" for any it doesn't know. It is called for mods that this updater handles, and that have no Version.
+	ResolveVersions([]*Mod) ([]string, error)
+}
+
 // MetaDownloaders stores all the metadata-based installers that packwiz can use. Add your own downloaders to this map, keyed by the source name.
 var MetaDownloaders = make(map[string]MetaDownloader)
 
