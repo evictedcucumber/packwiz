@@ -78,3 +78,7 @@ Commands hold their logic directly in cobra `Run` closures that print via `fmt.P
 The `changelog` and `git` packages are the exception: their `Run` closures are thin wrappers that print and `os.Exit(1)` on an error returned by `runPreview`/`RunRelease`/`runCommit`/`runRelease`, and tests call those functions directly, so a failure reports through `t.Fatalf` instead of killing the test binary with its captured output.
 
 HTTP-calling code (Modrinth API client, downloads) is tested with `github.com/jarcoal/httpmock` rather than live network calls. The `git` package's tests run the real `git` binary in throwaway repositories isolated from the user's git config, and skip when it isn't installed (as in the Nix sandbox).
+
+## Git workflow
+
+Prefer a fast-forward when merging a branch into `main` (`git merge --ff-only <branch>`), and only make a merge commit if a fast-forward isn't possible.
