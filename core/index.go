@@ -33,21 +33,34 @@ type indexTomlRepresentation struct {
 
 // LoadIndex attempts to load the index file from a path
 func LoadIndex(indexFile string) (Index, error) {
+	data, err := os.ReadFile(indexFile)
+	if err != nil {
+		return Index{}, err
+	}
+	index, err := ParseIndex(data)
+	if err != nil {
+		return Index{}, err
+	}
+	index.indexFile = indexFile
+	index.packRoot = filepath.Dir(indexFile)
+	return index, nil
+}
+
+// ParseIndex parses the contents of an index file that isn't necessarily on disk (e.g. a committed version of it).
+// The Index it returns lists its files, but has no location, so it can't resolve them to paths on disk or be written.
+func ParseIndex(data []byte) (Index, error) {
 	// Decode as indexTomlRepresentation then convert to Index
 	var rep indexTomlRepresentation
-	if _, err := toml.DecodeFile(indexFile, &rep); err != nil {
+	if _, err := toml.Decode(string(data), &rep); err != nil {
 		return Index{}, err
 	}
 	if len(rep.HashFormat) == 0 {
 		rep.HashFormat = "sha256"
 	}
-	index := Index{
+	return Index{
 		HashFormat: rep.HashFormat,
 		Files:      rep.Files.toMemoryRep(),
-		indexFile:  indexFile,
-		packRoot:   filepath.Dir(indexFile),
-	}
-	return index, nil
+	}, nil
 }
 
 // RemoveFile removes a file from the index, given a file path
@@ -149,6 +162,9 @@ var ignoreDefaults = []string{
 	// Exclude repo metadata that commonly lives alongside a pack
 	"README.md",
 	"LICENSE",
+	// Exclude the pack's own release history (see the changelog package)
+	"CHANGELOG.md",
+	"changelog.toml",
 	".direnv/**",
 	".editorconfig",
 	".envrc",

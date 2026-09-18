@@ -346,6 +346,14 @@ func getSide(mod *modrinthApi.Project) string {
 	}
 }
 
+// versionNumberOf returns the human-readable version number of a Modrinth version, or "" if it doesn't have one
+func versionNumberOf(v *modrinthApi.Version) string {
+	if v == nil || v.VersionNumber == nil {
+		return ""
+	}
+	return *v.VersionNumber
+}
+
 func shouldDownloadOnSide(side string) bool {
 	return side == "required" || side == "optional"
 }

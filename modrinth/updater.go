@@ -102,6 +102,8 @@ func (u mrUpdater) DoUpdate(mods []*core.Mod, cachedState []interface{}) error {
 		}
 
 		mod.FileName = *file.Filename
+		// Overwrite rather than keep the old value, so a version without a number doesn't leave a stale one behind
+		mod.Version = versionNumberOf(version)
 		mod.Download = core.ModDownload{
 			URL:        *file.URL,
 			HashFormat: algorithm,

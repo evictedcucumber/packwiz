@@ -351,6 +351,7 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 	modMeta := core.Mod{
 		Name:     *project.Title,
 		FileName: *file.Filename,
+		Version:  versionNumberOf(version),
 		Side:     side,
 		Download: core.ModDownload{
 			URL:        *file.URL,

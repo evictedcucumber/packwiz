@@ -500,3 +500,81 @@ func TestIndexLoadAllModsMissingFile(t *testing.T) {
 		t.Error("expected an error when a metafile referenced by the index is missing, got nil")
 	}
 }
+
+func TestParseIndex(t *testing.T) {
+	idx, err := ParseIndex([]byte(`hash-format = "sha512"
+
+[[files]]
+file = "mods/foo.pw.toml"
+hash = "abc123"
+metafile = true
+
+[[files]]
+file = "config/bar.txt"
+hash = "def456"
+`))
+	if err != nil {
+		t.Fatalf("ParseIndex() returned error: %v", err)
+	}
+	if idx.HashFormat != "sha512" {
+		t.Errorf("HashFormat = %q, want %q", idx.HashFormat, "sha512")
+	}
+	if len(idx.Files) != 2 {
+		t.Fatalf("Files has %d entries, want 2: %v", len(idx.Files), idx.Files)
+	}
+	if !idx.Files["mods/foo.pw.toml"].IsMetaFile() {
+		t.Error("mods/foo.pw.toml should be a metafile")
+	}
+	if idx.Files["config/bar.txt"].IsMetaFile() {
+		t.Error("config/bar.txt should not be a metafile")
+	}
+}
+
+func TestParseIndexDefaultsHashFormat(t *testing.T) {
+	idx, err := ParseIndex([]byte(""))
+	if err != nil {
+		t.Fatalf("ParseIndex() returned error: %v", err)
+	}
+	if idx.HashFormat != "sha256" {
+		t.Errorf("HashFormat = %q, want the sha256 default", idx.HashFormat)
+	}
+}
+
+func TestParseIndexRejectsInvalidTOML(t *testing.T) {
+	if _, err := ParseIndex([]byte("this is [not toml")); err == nil {
+		t.Error("ParseIndex() accepted invalid TOML")
+	}
+}
+
+func TestParseIndexAgreesWithLoadIndex(t *testing.T) {
+	content := []byte(`hash-format = "sha256"
+
+[[files]]
+file = "mods/foo.pw.toml"
+metafile = true
+
+[[files]]
+file = "config/bar.txt"
+`)
+	path := filepath.Join(t.TempDir(), "index.toml")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	loaded, err := LoadIndex(path)
+	if err != nil {
+		t.Fatalf("LoadIndex() returned error: %v", err)
+	}
+	parsed, err := ParseIndex(content)
+	if err != nil {
+		t.Fatalf("ParseIndex() returned error: %v", err)
+	}
+	if len(loaded.Files) != len(parsed.Files) {
+		t.Fatalf("LoadIndex() found %d files, ParseIndex() %d", len(loaded.Files), len(parsed.Files))
+	}
+	for p, f := range loaded.Files {
+		if other, ok := parsed.Files[p]; !ok || other.IsMetaFile() != f.IsMetaFile() {
+			t.Errorf("%s differs between LoadIndex() and ParseIndex()", p)
+		}
+	}
+}

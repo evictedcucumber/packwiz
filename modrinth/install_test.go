@@ -65,7 +65,7 @@ func testProjectAndFile() (*modrinthApi.Project, *modrinthApi.Version, *modrinth
 		ID: strPtr("p1"), Title: strPtr("Test Project"), Slug: strPtr("test-project"),
 		ProjectType: strPtr("mod"), ClientSide: strPtr("required"), ServerSide: strPtr("required"),
 	}
-	version := &modrinthApi.Version{ID: strPtr("v1")}
+	version := &modrinthApi.Version{ID: strPtr("v1"), VersionNumber: strPtr("1.2.3")}
 	file := &modrinthApi.File{
 		URL: strPtr("https://example.com/test.jar"), Filename: strPtr("test.jar"), Primary: boolPtr(true),
 		Hashes: map[string]string{"sha512": "deadbeef"},
@@ -94,6 +94,9 @@ func TestCreateFileMetaWritesModAndUpdatesIndex(t *testing.T) {
 	if mod.FileName != "test.jar" {
 		t.Errorf("FileName = %q, want %q", mod.FileName, "test.jar")
 	}
+	if mod.Version != "1.2.3" {
+		t.Errorf("Version = %q, want %q", mod.Version, "1.2.3")
+	}
 	if mod.Side != core.UniversalSide {
 		t.Errorf("Side = %q, want %q", mod.Side, core.UniversalSide)
 	}
@@ -110,6 +113,25 @@ func TestCreateFileMetaWritesModAndUpdatesIndex(t *testing.T) {
 	}
 	if _, ok := index.Files[relPath]; !ok {
 		t.Errorf("expected %q to be tracked in the index after createFileMeta, got %v", relPath, index.Files)
+	}
+}
+
+func TestCreateFileMetaWithoutVersionNumber(t *testing.T) {
+	pack, index := setupPackFixture(t)
+	project, version, file := testProjectAndFile()
+	version.VersionNumber = nil
+
+	if err := createFileMeta(project, version, file, pack, &index, "", false); err != nil {
+		t.Fatalf("createFileMeta() returned error: %v", err)
+	}
+
+	dir := filepath.Dir(viper.GetString("pack-file"))
+	mod, err := core.LoadMod(filepath.Join(dir, "mods", "test-project"+core.MetaExtension))
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if mod.Version != "" {
+		t.Errorf("Version = %q, want empty when Modrinth reports no version number", mod.Version)
 	}
 }
 

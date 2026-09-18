@@ -13,9 +13,12 @@ import (
 
 // Mod stores metadata about a mod. This is written to a TOML file for each mod.
 type Mod struct {
-	metaFile string      // The file for the metadata file, used as an ID
-	Name     string      `toml:"name"`
-	FileName string      `toml:"filename"`
+	metaFile string // The file for the metadata file, used as an ID
+	Name     string `toml:"name"`
+	FileName string `toml:"filename"`
+	// Version is the human-readable version of the installed file (e.g. "0.5.8+mc1.21"), as reported by its source.
+	// This is metadata for reporting purposes (e.g. changelogs) only; updaters identify versions by their own IDs.
+	Version  string      `toml:"version,omitempty"`
 	Side     string      `toml:"side,omitempty"`
 	Pin      bool        `toml:"pin,omitempty"`
 	Download ModDownload `toml:"download"`
@@ -73,8 +76,23 @@ const (
 
 // LoadMod attempts to load a mod file from a path
 func LoadMod(modFile string) (Mod, error) {
+	data, err := os.ReadFile(modFile)
+	if err != nil {
+		return Mod{}, err
+	}
+	mod, err := DecodeMod(data)
+	if err != nil {
+		return mod, err
+	}
+	mod.metaFile = modFile
+	return mod, nil
+}
+
+// DecodeMod parses the contents of a mod file that isn't necessarily on disk (e.g. a committed version of it).
+// The Mod it returns has no file path, so it can't be written or resolve its destination file.
+func DecodeMod(data []byte) (Mod, error) {
 	var mod Mod
-	if _, err := toml.DecodeFile(modFile, &mod); err != nil {
+	if _, err := toml.Decode(string(data), &mod); err != nil {
 		return Mod{}, err
 	}
 	mod.updateData = make(map[string]interface{})
@@ -91,7 +109,6 @@ func LoadMod(modFile string) (Mod, error) {
 			return mod, errors.New("Update plugin " + k + " not found!")
 		}
 	}
-	mod.metaFile = modFile
 	return mod, nil
 }
 
@@ -138,6 +155,15 @@ func (m Mod) Write() (string, string, error) {
 func (m Mod) GetParsedUpdateData(updaterName string) (interface{}, bool) {
 	upd, ok := m.updateData[updaterName]
 	return upd, ok
+}
+
+// DisplayVersion returns the version to show for this mod in reports: its Version, falling back to its FileName
+// for metadata written before Version was recorded (the file name usually embeds the version).
+func (m Mod) DisplayVersion() string {
+	if m.Version != "" {
+		return m.Version
+	}
+	return m.FileName
 }
 
 // GetFilePath is a clumsy hack that I made because Mod already stores it's path anyway

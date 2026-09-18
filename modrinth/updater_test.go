@@ -2,7 +2,58 @@ package modrinth
 
 import (
 	"testing"
+
+	"github.com/evictedcucumber/packwiz/core"
+	modrinthApi "github.com/evictedcucumber/packwiz/modrinth/api"
 )
+
+func TestMrUpdaterDoUpdateRecordsVersionNumber(t *testing.T) {
+	newVersion := &modrinthApi.Version{
+		ID:            strPtr("v2"),
+		VersionNumber: strPtr("2.0.0"),
+		Files: []*modrinthApi.File{{
+			URL: strPtr("https://example.com/test-2.0.0.jar"), Filename: strPtr("test-2.0.0.jar"), Primary: boolPtr(true),
+			Hashes: map[string]string{"sha512": "cafe"},
+		}},
+	}
+	mod := &core.Mod{
+		Name: "Test", FileName: "test-1.0.0.jar", Version: "1.0.0",
+		Update: map[string]map[string]interface{}{"modrinth": {"mod-id": "p1", "version": "v1"}},
+	}
+
+	err := mrUpdater{}.DoUpdate([]*core.Mod{mod}, []interface{}{cachedStateStore{ProjectID: "p1", Version: newVersion}})
+	if err != nil {
+		t.Fatalf("DoUpdate() returned error: %v", err)
+	}
+	if mod.Version != "2.0.0" {
+		t.Errorf("Version = %q, want %q", mod.Version, "2.0.0")
+	}
+	if mod.FileName != "test-2.0.0.jar" {
+		t.Errorf("FileName = %q, want %q", mod.FileName, "test-2.0.0.jar")
+	}
+}
+
+func TestMrUpdaterDoUpdateClearsStaleVersionNumber(t *testing.T) {
+	newVersion := &modrinthApi.Version{
+		ID: strPtr("v2"), // no VersionNumber
+		Files: []*modrinthApi.File{{
+			URL: strPtr("https://example.com/test-2.jar"), Filename: strPtr("test-2.jar"), Primary: boolPtr(true),
+			Hashes: map[string]string{"sha512": "cafe"},
+		}},
+	}
+	mod := &core.Mod{
+		Name: "Test", FileName: "test-1.jar", Version: "1.0.0",
+		Update: map[string]map[string]interface{}{"modrinth": {"mod-id": "p1", "version": "v1"}},
+	}
+
+	err := mrUpdater{}.DoUpdate([]*core.Mod{mod}, []interface{}{cachedStateStore{ProjectID: "p1", Version: newVersion}})
+	if err != nil {
+		t.Fatalf("DoUpdate() returned error: %v", err)
+	}
+	if mod.Version != "" {
+		t.Errorf("Version = %q, want it cleared rather than left as the previous release's number", mod.Version)
+	}
+}
 
 func TestMrUpdateDataToMap(t *testing.T) {
 	u := mrUpdateData{ProjectID: "abc123", InstalledVersion: "def456"}

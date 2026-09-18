@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -112,6 +113,62 @@ func TestModWriteLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestModVersionRoundTrip(t *testing.T) {
+	metaPath := filepath.Join(t.TempDir(), "test-mod.pw.toml")
+
+	mod := Mod{Name: "Test Mod", FileName: "test-mod-1.2.3.jar", Version: "1.2.3"}
+	mod.SetMetaPath(metaPath)
+	if _, _, err := mod.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
+	loaded, err := LoadMod(metaPath)
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if loaded.Version != "1.2.3" {
+		t.Errorf("loaded.Version = %q, want %q", loaded.Version, "1.2.3")
+	}
+}
+
+func TestModVersionOmittedWhenEmpty(t *testing.T) {
+	metaPath := filepath.Join(t.TempDir(), "test-mod.pw.toml")
+
+	mod := Mod{Name: "Test Mod", FileName: "test-mod.jar"}
+	mod.SetMetaPath(metaPath)
+	if _, _, err := mod.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("failed to read mod file: %v", err)
+	}
+	// Packs written before Version existed must stay byte-identical
+	if strings.Contains(string(data), "version") {
+		t.Errorf("expected no version key when Version is empty, got:\n%s", data)
+	}
+}
+
+func TestModDisplayVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		mod  Mod
+		want string
+	}{
+		{"prefers Version", Mod{FileName: "sodium-0.5.8.jar", Version: "0.5.8"}, "0.5.8"},
+		{"falls back to FileName", Mod{FileName: "sodium-0.5.8.jar"}, "sodium-0.5.8.jar"},
+		{"both empty", Mod{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.mod.DisplayVersion(); got != tt.want {
+				t.Errorf("DisplayVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestModGetDestFilePath(t *testing.T) {
 	dir := t.TempDir()
 	metaPath := filepath.Join(dir, "mods", "test-mod.pw.toml")
@@ -197,6 +254,62 @@ version = "1.2.3"
 
 	if _, err := LoadMod(metaPath); err == nil {
 		t.Error("expected an error for an unregistered update plugin, got nil")
+	}
+}
+
+func TestDecodeMod(t *testing.T) {
+	Updaters["stub"] = stubUpdater{}
+	t.Cleanup(func() { delete(Updaters, "stub") })
+
+	mod, err := DecodeMod([]byte(`name = "Test Mod"
+filename = "test-mod-1.2.3.jar"
+version = "1.2.3"
+side = "client"
+
+[download]
+hash-format = "sha256"
+hash = "deadbeef"
+
+[update.stub]
+version = "abc"
+`))
+	if err != nil {
+		t.Fatalf("DecodeMod() returned error: %v", err)
+	}
+	if mod.Name != "Test Mod" || mod.Version != "1.2.3" || mod.Side != ClientSide || mod.FileName != "test-mod-1.2.3.jar" {
+		t.Errorf("DecodeMod() = %+v, want the fields from the file", mod)
+	}
+	// Updaters are still resolved, as they are when loading from disk
+	if data, ok := mod.GetParsedUpdateData("stub"); !ok || data != "abc" {
+		t.Errorf("GetParsedUpdateData(\"stub\") = %v, %v, want abc, true", data, ok)
+	}
+	// ...but there is no file behind it
+	if got := mod.GetFilePath(); got != "" {
+		t.Errorf("GetFilePath() = %q, want empty for a mod that didn't come from a file", got)
+	}
+}
+
+func TestDecodeModRejectsBadInput(t *testing.T) {
+	if _, err := DecodeMod([]byte("this is [not toml")); err == nil {
+		t.Error("DecodeMod() accepted invalid TOML")
+	}
+	if _, err := DecodeMod([]byte("name = \"x\"\n\n[update.doesnotexist]\nversion = \"1\"\n")); err == nil {
+		t.Error("DecodeMod() accepted an unregistered update plugin")
+	}
+}
+
+func TestLoadModSetsMetaPathButDecodeModDoesNot(t *testing.T) {
+	metaPath := filepath.Join(t.TempDir(), "test-mod.pw.toml")
+	if err := os.WriteFile(metaPath, []byte("name = \"Test Mod\"\nfilename = \"test-mod.jar\"\n"), 0644); err != nil {
+		t.Fatalf("failed to write mod fixture: %v", err)
+	}
+
+	loaded, err := LoadMod(metaPath)
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if loaded.GetFilePath() != metaPath {
+		t.Errorf("LoadMod().GetFilePath() = %q, want %q", loaded.GetFilePath(), metaPath)
 	}
 }
 
