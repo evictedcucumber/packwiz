@@ -12,33 +12,57 @@ import (
 	"github.com/evictedcucumber/packwiz/core"
 )
 
-// snapshotAt describes the pack as it was at a commit, in the same terms as changelog.TakeSnapshot describes it now,
-// so the two can be compared with changelog.Diff. indexFile is the path of the index relative to the pack root.
+// committedPack is a pack as it was at a commit.
+type committedPack struct {
+	// Snapshot describes its contents in the same terms as changelog.TakeSnapshot describes them now, so the two can be
+	// compared with changelog.Diff. It is empty for a commit from before the pack existed.
+	Snapshot changelog.Snapshot
+	// Index is the index as it was committed, with no files if the commit had none.
+	Index core.Index
+	// Pack is the pack file as it was committed, if the commit had one.
+	Pack *core.Pack
+}
+
+// packAt reads the pack as it was at a commit. indexFile and packFile are the paths of the index and of pack.toml
+// relative to the pack root.
 //
-// Nothing is checked out: the index and each file it lists are read straight out of the commit. A commit from before
-// the pack existed gives an empty snapshot.
-func (r repo) snapshotAt(rev, indexFile string) (changelog.Snapshot, error) {
+// Nothing is checked out: the pack file, the index and each file the index lists are read straight out of the commit.
+func (r repo) packAt(rev, indexFile, packFile string) (committedPack, error) {
 	// With no --full-name these are relative to the pack root, which is where every other path here is from
 	out, err := r.run("", "ls-tree", "-r", "--name-only", "-z", rev)
 	if err != nil {
-		return changelog.Snapshot{}, err
+		return committedPack{}, err
 	}
 	present := make(map[string]bool)
 	for _, name := range strings.Split(string(out), "\x00") {
 		present[name] = true
 	}
+
+	var committed committedPack
+	if present[packFile] {
+		data, err := r.show(rev, packFile)
+		if err != nil {
+			return committedPack{}, err
+		}
+		pack, err := core.ParsePack(data)
+		if err != nil {
+			return committedPack{}, fmt.Errorf("failed to read %s at %s: %w", packFile, rev, err)
+		}
+		committed.Pack = &pack
+	}
 	if !present[indexFile] {
-		return changelog.Snapshot{}, nil
+		return committed, nil
 	}
 
 	indexData, err := r.show(rev, indexFile)
 	if err != nil {
-		return changelog.Snapshot{}, err
+		return committedPack{}, err
 	}
 	index, err := core.ParseIndex(indexData)
 	if err != nil {
-		return changelog.Snapshot{}, fmt.Errorf("failed to read %s at %s: %w", indexFile, rev, err)
+		return committedPack{}, fmt.Errorf("failed to read %s at %s: %w", indexFile, rev, err)
 	}
+	committed.Index = index
 
 	// Paths in the index are relative to the index file, which needn't be in the pack root
 	base := path.Dir(indexFile)
@@ -54,7 +78,11 @@ func (r repo) snapshotAt(rev, indexFile string) (changelog.Snapshot, error) {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}
 	// Old commits are read as they were committed: nothing is looked up for a mod that didn't record its version
-	return changelog.TakeSnapshotFrom(index, open, nil)
+	committed.Snapshot, err = changelog.TakeSnapshotFrom(index, open, nil)
+	if err != nil {
+		return committedPack{}, err
+	}
+	return committed, nil
 }
 
 // show returns the contents of a file, given its path relative to the pack root, as it was at a commit.

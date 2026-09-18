@@ -1,13 +1,21 @@
 package git
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 
 	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/core"
@@ -221,15 +229,6 @@ func TestCommitDescribesEachKindOfChange(t *testing.T) {
 			},
 			"chore(pack): update pack files",
 		},
-		{
-			"mods and config together",
-			func() {
-				p.mod(t, "Zoom", core.ClientSide, "2.0")
-				p.write(t, "config/zoom.json", "{}")
-			},
-			// Listed in path order, as changes always are
-			"feat(pack): add 1 mod, update 1 config file\n\n- add config/zoom.json\n- add Zoom 2.0 (client)",
-		},
 	}
 	for _, step := range steps {
 		t.Run(step.name, func(t *testing.T) {
@@ -382,10 +381,11 @@ func TestSnapshotAtAgreesWithTheWorkingTree(t *testing.T) {
 			if err != nil {
 				t.Fatalf("openRepo() returned error: %v", err)
 			}
-			fromGit, err := r.snapshotAt("HEAD", "index.toml")
+			fromGitPack, err := r.packAt("HEAD", "index.toml", "pack.toml")
 			if err != nil {
-				t.Fatalf("snapshotAt() returned error: %v", err)
+				t.Fatalf("packAt() returned error: %v", err)
 			}
+			fromGit := fromGitPack.Snapshot
 			if !reflect.DeepEqual(fromGit, onDisk) {
 				t.Errorf("snapshot from git =\n%+v\nsnapshot from disk =\n%+v", fromGit, onDisk)
 			}
@@ -396,10 +396,11 @@ func TestSnapshotAtAgreesWithTheWorkingTree(t *testing.T) {
 			// ...and HEAD keeps describing what was committed, whatever has happened to the files since
 			p.mod(t, "Sodium", core.ClientSide, "0.6.0")
 			p.remove(t, "config/nested/sodium.json")
-			again, err := r.snapshotAt("HEAD", "index.toml")
+			againPack, err := r.packAt("HEAD", "index.toml", "pack.toml")
 			if err != nil {
-				t.Fatalf("snapshotAt() returned error: %v", err)
+				t.Fatalf("packAt() returned error: %v", err)
 			}
+			again := againPack.Snapshot
 			if !reflect.DeepEqual(again, fromGit) {
 				t.Errorf("snapshot of HEAD changed with the working tree:\n%+v\nwant\n%+v", again, fromGit)
 			}
@@ -420,10 +421,11 @@ func TestSnapshotAtBeforeThePackExisted(t *testing.T) {
 		t.Fatalf("openRepo() returned error: %v", err)
 	}
 
-	snap, err := r.snapshotAt("HEAD", "index.toml")
+	snapPack, err := r.packAt("HEAD", "index.toml", "pack.toml")
 	if err != nil {
-		t.Fatalf("snapshotAt() returned error: %v", err)
+		t.Fatalf("packAt() returned error: %v", err)
 	}
+	snap := snapPack.Snapshot
 	if len(snap.Mods) != 0 || len(snap.Files) != 0 {
 		t.Errorf("snapshot = %+v, want empty for a commit without a pack", snap)
 	}
@@ -451,10 +453,11 @@ func TestSnapshotAtToleratesAStaleIndex(t *testing.T) {
 		t.Fatalf("openRepo() returned error: %v", err)
 	}
 
-	snap, err := r.snapshotAt("HEAD", "index.toml")
+	snapPack, err := r.packAt("HEAD", "index.toml", "pack.toml")
 	if err != nil {
-		t.Fatalf("snapshotAt() returned error: %v", err)
+		t.Fatalf("packAt() returned error: %v", err)
 	}
+	snap := snapPack.Snapshot
 	if len(snap.Files) != 0 {
 		t.Errorf("Files = %v, want the missing file left out", snap.Files)
 	}
@@ -855,4 +858,636 @@ func TestReleaseWithNothingToDoDoesNotMentionCommitting(t *testing.T) {
 	if strings.Contains(out, "packwiz git commit") {
 		t.Errorf("output = %q; there was nothing to commit, so it shouldn't say to", out)
 	}
+}
+
+// gitBytes is git for output that must be kept exactly, such as a file's contents.
+func gitBytes(t *testing.T, args ...string) []byte {
+	t.Helper()
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		t.Fatalf("git %s failed: %v", strings.Join(args, " "), err)
+	}
+	return out
+}
+
+// lastMessages returns the messages of the last n commits, oldest first.
+func lastMessages(t *testing.T, n int) []string {
+	t.Helper()
+	out := git(t, "log", "-n", strconv.Itoa(n), "--reverse", "--format=%B%x1e")
+	var messages []string
+	for _, m := range strings.Split(out, "\x1e") {
+		if m = strings.TrimSpace(m); m != "" {
+			messages = append(messages, m)
+		}
+	}
+	return messages
+}
+
+// lastCommits returns the last n commits, oldest first.
+func lastCommits(t *testing.T, n int) []string {
+	t.Helper()
+	return strings.Fields(git(t, "log", "-n", strconv.Itoa(n), "--reverse", "--format=%H"))
+}
+
+// commitFiles lists the files a commit changed, sorted.
+func commitFiles(t *testing.T, rev string) []string {
+	t.Helper()
+	files := strings.Fields(git(t, "show", "--name-only", "--format=", rev))
+	slices.Sort(files)
+	return files
+}
+
+// withoutProgress removes the progress bar that refreshing the index draws, from output that is compared exactly.
+func withoutProgress(out string) string {
+	var kept []string
+	for _, line := range strings.SplitAfter(out, "\n") {
+		if !strings.Contains(line, "Refreshing index") {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "")
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// requireConsistentPack fails unless the pack in a commit can be used by itself: its index lists the metadata files in
+// the commit, and nothing else in the pack, with the hashes they have there, and pack.toml has the hash of that index.
+// root is where the pack is in the repository.
+func requireConsistentPack(t *testing.T, root, rev string) {
+	t.Helper()
+	at := func(rel string) string { return path.Join(root, rel) }
+
+	indexText := gitBytes(t, "show", rev+":"+at("index.toml"))
+	var index struct {
+		Files []struct {
+			File     string `toml:"file"`
+			Hash     string `toml:"hash"`
+			MetaFile bool   `toml:"metafile"`
+		} `toml:"files"`
+	}
+	if _, err := toml.Decode(string(indexText), &index); err != nil {
+		t.Fatalf("index.toml at %s isn't valid: %v", rev[:8], err)
+	}
+
+	listed := make(map[string]bool)
+	for _, f := range index.Files {
+		listed[f.File] = true
+		// git show fails, failing the test, for a file the index lists that isn't in the commit
+		if got := sha256Hex(gitBytes(t, "show", rev+":"+at(f.File))); f.Hash != got {
+			t.Errorf("at %s the index has %s as %s, but the file hashes to %s", rev[:8], f.File, f.Hash, got)
+		}
+	}
+	dir := root
+	if dir == "" {
+		dir = "." // git wants a real pathspec, and this is all of the repository
+	}
+	for _, name := range strings.Fields(git(t, "ls-tree", "-r", "--name-only", rev, "--", dir)) {
+		rel := strings.TrimPrefix(strings.TrimPrefix(name, root), "/")
+		if strings.HasSuffix(rel, core.MetaExtension) && !listed[rel] {
+			t.Errorf("at %s the index doesn't list %s, which is in the commit", rev[:8], rel)
+		}
+	}
+
+	var pack struct {
+		Index struct {
+			Hash string `toml:"hash"`
+		} `toml:"index"`
+	}
+	if _, err := toml.Decode(string(gitBytes(t, "show", rev+":"+at("pack.toml"))), &pack); err != nil {
+		t.Fatalf("pack.toml at %s isn't valid: %v", rev[:8], err)
+	}
+	if want := sha256Hex(indexText); pack.Index.Hash != want {
+		t.Errorf("at %s pack.toml has the index as %s, but it hashes to %s", rev[:8], pack.Index.Hash, want)
+	}
+}
+
+// rejectCommitsMentioning makes git refuse any commit whose message contains word, as a commit-msg hook can.
+func rejectCommitsMentioning(t *testing.T, word string) (remove func()) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("hooks are shell scripts")
+	}
+	hook := filepath.Join(".git", "hooks", "commit-msg")
+	script := "#!/bin/sh\nif grep -q " + word + " \"$1\"; then echo 'rejected by test hook' >&2; exit 1; fi\n"
+	if err := os.WriteFile(hook, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write hook: %v", err)
+	}
+	return func() {
+		if err := os.Remove(hook); err != nil {
+			t.Fatalf("failed to remove hook: %v", err)
+		}
+	}
+}
+
+func TestCommitMakesOneCommitPerMod(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	commit(t)
+	before := commitCount(t)
+
+	p.mod(t, "Sodium", core.ClientSide, "0.5.8")    // updated
+	p.remove(t, "mods/iris.pw.toml")                // removed
+	p.mod(t, "Lithium", core.ServerSide, "0.12.0")  // added
+	p.mod(t, "Fabric", core.UniversalSide, "0.100") // added
+	out := commit(t)
+
+	// Each mod on its own, in path order, each with the type its change deserves
+	want := []string{
+		"feat(mods)!: add Fabric 0.100 (both)\n\n" + wantBreakingFooter,
+		"feat(mods): remove Iris 1.0 (client)",
+		"feat(mods)!: add Lithium 0.12.0 (server)\n\n" + wantBreakingFooter,
+		"fix(mods): update Sodium 0.5.7 -> 0.5.8 (client)",
+	}
+	if got := commitCount(t); got != before+4 {
+		t.Fatalf("commit count = %d, want %d: one for each mod", got, before+4)
+	}
+	if got := lastMessages(t, 4); !reflect.DeepEqual(got, want) {
+		t.Errorf("commit messages =\n%q\nwant\n%q", got, want)
+	}
+	for _, m := range want {
+		if line := "Committed: " + strings.SplitN(m, "\n", 2)[0]; !strings.Contains(out, line) {
+			t.Errorf("output = %q, want it to report %q", out, line)
+		}
+	}
+
+	// Each commit is that mod's file, and the index and pack.toml that go with it, and nothing else
+	files := [][]string{
+		{"index.toml", "mods/fabric.pw.toml", "pack.toml"},
+		{"index.toml", "mods/iris.pw.toml", "pack.toml"},
+		{"index.toml", "mods/lithium.pw.toml", "pack.toml"},
+		{"index.toml", "mods/sodium.pw.toml", "pack.toml"},
+	}
+	for i, rev := range lastCommits(t, 4) {
+		if got := commitFiles(t, rev); !reflect.DeepEqual(got, files[i]) {
+			t.Errorf("commit %d changed %v, want %v", i+1, got, files[i])
+		}
+		requireConsistentPack(t, "", rev)
+	}
+	requireClean(t)
+}
+
+func TestModCommitsComeBeforeTheCommitForEverythingElse(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, "config/sodium.json", "{}")
+	commit(t)
+	before := commitCount(t)
+
+	p.write(t, "config/sodium.json", `{"a": 1}`) // a config change...
+	p.write(t, "config/new.json", "{}")          // ...another...
+	p.mod(t, "Zoom", core.ClientSide, "2.0")     // ...and a mod
+	p.modFile(t, core.Mod{                       // ...and pinning one, which is neither
+		Name: "Sodium", FileName: "sodium-0.5.7.jar", Version: "0.5.7", Side: core.ClientSide, Pin: true,
+		Download: core.ModDownload{HashFormat: "sha256", Hash: "hash-0.5.7"},
+	})
+	commit(t)
+
+	want := []string{
+		"feat(mods): add Zoom 2.0 (client)",
+		// The mod first, then everything that isn't a mod change together, however small
+		"fix(config): update 2 config files\n\n- add config/new.json\n- change config/sodium.json",
+	}
+	if got := commitCount(t); got != before+2 {
+		t.Fatalf("commit count = %d, want %d", got, before+2)
+	}
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, want) {
+		t.Errorf("commit messages =\n%q\nwant\n%q", got, want)
+	}
+	mods, rest := lastCommits(t, 2)[0], lastCommits(t, 2)[1]
+	if got := commitFiles(t, mods); !reflect.DeepEqual(got, []string{"index.toml", "mods/zoom.pw.toml", "pack.toml"}) {
+		t.Errorf("the mod's commit changed %v; the config and the pin are not part of it", got)
+	}
+	// The pin, a change to a mod that isn't an add, update or removal, goes in the last commit
+	if got := commitFiles(t, rest); !slices.Contains(got, "mods/sodium.pw.toml") || !slices.Contains(got, "config/new.json") {
+		t.Errorf("the last commit changed %v, want the config files and the pinned mod", got)
+	}
+	requireConsistentPack(t, "", mods)
+	requireConsistentPack(t, "", rest)
+	requireClean(t)
+}
+
+func TestPinningAModAlongsideAModChangeIsItsOwnChoreCommit(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	before := commitCount(t)
+
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	p.modFile(t, core.Mod{
+		Name: "Sodium", FileName: "sodium-0.5.7.jar", Version: "0.5.7", Side: core.ClientSide, Pin: true,
+		Download: core.ModDownload{HashFormat: "sha256", Hash: "hash-0.5.7"},
+	})
+	commit(t)
+
+	want := []string{"feat(mods): add Iris 1.0 (client)", "chore(pack): update pack files"}
+	if got := commitCount(t); got != before+2 {
+		t.Fatalf("commit count = %d, want %d", got, before+2)
+	}
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, want) {
+		t.Errorf("commit messages = %q, want %q", got, want)
+	}
+	requireClean(t)
+}
+
+func TestPackTomlEditsAreNotBlamedOnAMod(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+
+	pack, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	pack.Description = "A description that isn't about any one mod"
+	if err := pack.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	commit(t)
+
+	want := []string{"feat(mods): add Iris 1.0 (client)", "chore(pack): update pack files"}
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, want) {
+		t.Fatalf("commit messages = %q, want %q", got, want)
+	}
+	revs := lastCommits(t, 2)
+	if modsPack := git(t, "show", revs[0]+":pack.toml"); strings.Contains(modsPack, "A description") {
+		t.Errorf("the mod's commit has the description in pack.toml:\n%s", modsPack)
+	}
+	if lastPack := git(t, "show", revs[1]+":pack.toml"); !strings.Contains(lastPack, "A description") {
+		t.Errorf("the last commit doesn't have the description in pack.toml:\n%s", lastPack)
+	}
+	requireConsistentPack(t, "", revs[0])
+	requireConsistentPack(t, "", revs[1])
+}
+
+func TestFirstCommitOfARepositoryIsASingleCommit(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	p.mod(t, "Lithium", core.ServerSide, "0.12.0")
+	p.write(t, "config/sodium.json", "{}")
+
+	commit(t)
+
+	// There is nothing before it to be a change to, so the pack goes in as it is
+	if got := commitCount(t); got != 1 {
+		t.Errorf("commit count = %d, want the pack in one initial commit", got)
+	}
+	if got := headMessage(t); got != "chore(pack): initial commit" {
+		t.Errorf("commit message = %q", got)
+	}
+	requireConsistentPack(t, "", "HEAD")
+	requireClean(t)
+}
+
+func TestPackAddedToAnExistingRepositoryCommitsEachMod(t *testing.T) {
+	setUpRepo(t)
+	if err := os.WriteFile("notes.txt", []byte("not the pack"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	// A commit from before the pack, in a directory of its own so the pack doesn't pick the file up
+	if err := os.MkdirAll("docs", 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	if err := os.Rename("notes.txt", filepath.Join("docs", "notes.txt")); err != nil {
+		t.Fatalf("failed to move file: %v", err)
+	}
+	git(t, "add", "docs")
+	git(t, "commit", "-q", "-m", "before the pack")
+	p := setUpPack(t, "pack", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+
+	commit(t)
+
+	want := []string{"feat(mods): add Iris 1.0 (client)", "feat(mods): add Sodium 0.5.7 (client)"}
+	if got := commitCount(t); got != 3 {
+		t.Fatalf("commit count = %d, want the existing commit and one for each mod", got)
+	}
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, want) {
+		t.Errorf("commit messages = %q, want %q", got, want)
+	}
+	revs := lastCommits(t, 2)
+	// The pack file and the index come into being with the first of them
+	if got := commitFiles(t, revs[0]); !reflect.DeepEqual(got, []string{"pack/index.toml", "pack/mods/iris.pw.toml", "pack/pack.toml"}) {
+		t.Errorf("the first mod's commit changed %v", got)
+	}
+	for _, rev := range revs {
+		requireConsistentPack(t, "pack", rev)
+	}
+	requireClean(t)
+}
+
+func TestPerModCommitsInAPackInASubdirectory(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "pack", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	// Staged files elsewhere in the repository aren't the pack's, and aren't swept into its commits
+	if err := os.WriteFile("README.md", []byte("hello"), 0o644); err != nil {
+		t.Fatalf("failed to write README: %v", err)
+	}
+	git(t, "add", "README.md")
+	before := commitCount(t)
+
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	p.mod(t, "Lithium", core.ServerSide, "0.12.0")
+	commit(t)
+
+	if got := commitCount(t); got != before+2 {
+		t.Fatalf("commit count = %d, want %d", got, before+2)
+	}
+	for i, rev := range lastCommits(t, 2) {
+		mod := []string{"pack/mods/iris.pw.toml", "pack/mods/lithium.pw.toml"}[i]
+		if got := commitFiles(t, rev); !reflect.DeepEqual(got, []string{"pack/index.toml", mod, "pack/pack.toml"}) {
+			t.Errorf("commit %d changed %v", i+1, got)
+		}
+		requireConsistentPack(t, "pack", rev)
+	}
+	if staged := git(t, "diff", "--cached", "--name-only"); staged != "README.md" {
+		t.Errorf("staged files = %q, want the README left for the user's own commit", staged)
+	}
+}
+
+func TestVersionsRecordedForUnchangedModsAreOneCommitNotOnePerMod(t *testing.T) {
+	setUpRepo(t)
+	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
+	p := setUpPack(t, "", "1.0.0")
+	for _, name := range []string{"Sodium", "Iris", "Zoom"} {
+		p.unversioned(t, src, name, core.ClientSide, "id-"+strings.ToLower(name))
+	}
+	commit(t) // committed while none of their versions could be found
+	src.Versions = map[string]string{"id-sodium": "0.5.7", "id-iris": "1.0", "id-zoom": "2.0"}
+	before := commitCount(t)
+
+	commit(t)
+
+	// None of the mods changed, so recording what is known about them isn't a commit for each
+	if got := commitCount(t); got != before+1 {
+		t.Errorf("commit count = %d, want %d: one commit for all of them", got, before+1)
+	}
+	if got := headMessage(t); got != "chore(pack): update pack files" {
+		t.Errorf("commit message = %q", got)
+	}
+	requireConsistentPack(t, "", "HEAD")
+	requireClean(t)
+}
+
+func TestAModsLookedUpVersionIsInItsOwnCommit(t *testing.T) {
+	setUpRepo(t)
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-b": "0.12.0"})
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+
+	p.unversioned(t, src, "Lithium", core.ServerSide, "id-b")
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	commit(t)
+
+	revs := lastCommits(t, 2)
+	if got := lastMessages(t, 2)[0]; got != "feat(mods)!: add Lithium 0.12.0 (server)\n\n"+wantBreakingFooter {
+		t.Errorf("first commit message = %q", got)
+	}
+	if committed := git(t, "show", revs[0]+":mods/lithium.pw.toml"); !strings.Contains(committed, `version = "0.12.0"`) {
+		t.Errorf("the mod's own commit doesn't record its version:\n%s", committed)
+	}
+	for _, rev := range revs {
+		requireConsistentPack(t, "", rev)
+	}
+}
+
+func TestCommitDryRunListsEveryCommit(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	before := commitCount(t)
+
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	p.mod(t, "Lithium", core.ServerSide, "0.12.0")
+	p.write(t, "config/new.json", "{}")
+
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
+	if err != nil {
+		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+	}
+
+	want := "feat(mods)!: add Lithium 0.12.0 (server)\n\n" + wantBreakingFooter + "\n---\n" +
+		"feat(mods): add Zoom 2.0 (client)\n---\n" +
+		"fix(config): add config/new.json\n"
+	if out = withoutProgress(out); out != want {
+		t.Errorf("dry run output =\n%q\nwant\n%q", out, want)
+	}
+	if got := commitCount(t); got != before {
+		t.Errorf("commit count = %d, want %d; a dry run must not commit", got, before)
+	}
+}
+
+func TestCommitDryRunForASingleCommitPrintsJustItsMessage(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
+	if err != nil {
+		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+	}
+	if out = withoutProgress(out); out != "feat(mods): add Zoom 2.0 (client)\n" {
+		t.Errorf("dry run output = %q, want only the message", out)
+	}
+}
+
+func TestCommitDryRunPredictsTheCommitForAPin(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	p.modFile(t, core.Mod{
+		Name: "Sodium", FileName: "sodium-0.5.7.jar", Version: "0.5.7", Side: core.ClientSide, Pin: true,
+		Download: core.ModDownload{HashFormat: "sha256", Hash: "hash-0.5.7"},
+	})
+
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
+	if err != nil {
+		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+	}
+
+	if want := "feat(mods): add Iris 1.0 (client)\n---\nchore(pack): update pack files\n"; withoutProgress(out) != want {
+		t.Errorf("dry run output = %q, want %q", withoutProgress(out), want)
+	}
+}
+
+func TestCommitCanBeRunAgainAfterOneOfTheCommitsFails(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	before := commitCount(t)
+
+	p.mod(t, "Alpha", core.ClientSide, "1.0")
+	p.mod(t, "Lithium", core.ServerSide, "0.12.0") // the second of three, and the one that will be refused
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	removeHook := rejectCommitsMentioning(t, "Lithium")
+
+	var err error
+	cmdtest.CaptureStdout(t, func() { err = runCommit(false) })
+
+	if err == nil {
+		t.Fatal("runCommit() succeeded although a commit was refused")
+	}
+	for _, want := range []string{"committed 1 of 3 commits", "Lithium", "rejected by test hook", `run "packwiz git commit" again`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
+	}
+	if got := commitCount(t); got != before+1 {
+		t.Errorf("commit count = %d, want %d: only the mod before the refused one", got, before+1)
+	}
+	// The files are left as they should end up, not as they were for the commit that failed...
+	index := readFile(t, "index.toml")
+	for _, mod := range []string{"alpha", "lithium", "zoom"} {
+		if !strings.Contains(index, "mods/"+mod+".pw.toml") {
+			t.Errorf("index.toml doesn't list %s after the failure; it was left as it was for one commit:\n%s", mod, index)
+		}
+	}
+	// ...and nothing is left staged for someone else's commit to pick up
+	if staged := git(t, "diff", "--cached", "--name-only"); staged != "" {
+		t.Errorf("files were left staged: %q", staged)
+	}
+
+	// Once the problem is gone, running it again picks up where it stopped
+	removeHook()
+	commit(t)
+
+	want := []string{
+		"feat(mods): add Alpha 1.0 (client)",
+		"feat(mods)!: add Lithium 0.12.0 (server)\n\n" + wantBreakingFooter,
+		"feat(mods): add Zoom 2.0 (client)",
+	}
+	if got := commitCount(t); got != before+3 {
+		t.Errorf("commit count = %d, want %d", got, before+3)
+	}
+	if got := lastMessages(t, 3); !reflect.DeepEqual(got, want) {
+		t.Errorf("commit messages =\n%q\nwant\n%q", got, want)
+	}
+	for _, rev := range lastCommits(t, 3) {
+		requireConsistentPack(t, "", rev)
+	}
+	requireClean(t)
+}
+
+func TestCommitForEverythingElseFailingLeavesTheModCommitsMade(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	before := commitCount(t)
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	p.write(t, "config/new.json", "{}")
+	removeHook := rejectCommitsMentioning(t, "config")
+
+	var err error
+	cmdtest.CaptureStdout(t, func() { err = runCommit(false) })
+
+	if err == nil || !strings.Contains(err.Error(), "committed 1 of 2 commits") {
+		t.Errorf("error = %v, want one saying the mod was committed and the rest wasn't", err)
+	}
+	if got := commitCount(t); got != before+1 {
+		t.Errorf("commit count = %d, want %d", got, before+1)
+	}
+	removeHook()
+	commit(t)
+	if got := headMessage(t); got != "fix(config): add config/new.json" {
+		t.Errorf("commit message = %q, want the config committed when run again", got)
+	}
+	requireClean(t)
+}
+
+func TestPlanCommits(t *testing.T) {
+	add := func(name string) changelog.Change {
+		return changelog.Change{Kind: changelog.ModAdded, Path: "mods/" + name + ".pw.toml", Name: name, Side: core.ClientSide, To: "1"}
+	}
+	config := changelog.Change{Kind: changelog.FileChanged, Path: "config/a.json"}
+	messages := func(steps []commitStep) []string {
+		var out []string
+		for _, s := range steps {
+			out = append(out, s.message)
+		}
+		return out
+	}
+
+	t.Run("one commit for each mod, in the order given", func(t *testing.T) {
+		steps := planCommits([]changelog.Change{add("a"), add("b"), add("c")}, false)
+		if want := []string{"feat(mods): add a 1 (client)", "feat(mods): add b 1 (client)", "feat(mods): add c 1 (client)"}; !reflect.DeepEqual(messages(steps), want) {
+			t.Errorf("messages = %q, want %q", messages(steps), want)
+		}
+		for i, s := range steps {
+			if s.change == nil || s.change.Name != []string{"a", "b", "c"}[i] {
+				t.Errorf("step %d is for %+v, want its own mod's change (not the loop's last)", i, s.change)
+			}
+		}
+	})
+	t.Run("other files come last, together", func(t *testing.T) {
+		steps := planCommits([]changelog.Change{config, add("a")}, false)
+		if want := []string{"feat(mods): add a 1 (client)", "fix(config): change config/a.json"}; !reflect.DeepEqual(messages(steps), want) {
+			t.Errorf("messages = %q, want %q", messages(steps), want)
+		}
+		if steps[1].change != nil {
+			t.Error("the last step is for a mod, but it takes everything else")
+		}
+	})
+	t.Run("nothing to commit", func(t *testing.T) {
+		if steps := planCommits(nil, false); len(steps) != 0 {
+			t.Errorf("steps = %+v, want none", steps)
+		}
+	})
+	t.Run("something else changed that isn't a change", func(t *testing.T) {
+		steps := planCommits(nil, true)
+		if want := []string{"chore(pack): update pack files"}; !reflect.DeepEqual(messages(steps), want) {
+			t.Errorf("messages = %q, want %q", messages(steps), want)
+		}
+	})
+}
+
+func TestCommitFixesAStaleCommittedIndex(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, "config/sodium.json", "{}")
+	commit(t)
+
+	// A config edit committed with plain git, without "packwiz refresh": the tree is clean, but the committed index
+	// no longer describes the file
+	p.write(t, "config/sodium.json", `{"edited": "by hand"}`)
+	git(t, "add", "-A")
+	git(t, "commit", "-q", "-m", "edit config by hand")
+	requireClean(t)
+	before := commitCount(t)
+
+	// Nothing has changed since the last commit, so there are no changes to describe, but the index is wrong
+	commit(t)
+
+	if got := commitCount(t); got != before+1 {
+		t.Fatalf("commit count = %d, want %d: one commit to fix the index", got, before+1)
+	}
+	if got := headMessage(t); got != "chore(pack): update pack files" {
+		t.Errorf("commit message = %q", got)
+	}
+	requireConsistentPack(t, "", "HEAD")
+	requireClean(t)
 }

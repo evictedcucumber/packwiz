@@ -83,13 +83,49 @@ func (r repo) dirty() (bool, error) {
 	return len(bytes.TrimSpace(out)) > 0, nil
 }
 
+// dirtyPaths lists the files under the pack root that differ from HEAD, or are new and not ignored by git, relative to
+// the pack root. It needs a commit to compare with.
+func (r repo) dirtyPaths() ([]string, error) {
+	changed, err := r.run("", "diff", "--name-only", "--relative", "-z", "HEAD", "--", ".")
+	if err != nil {
+		return nil, err
+	}
+	untracked, err := r.run("", "ls-files", "--others", "--exclude-standard", "-z", "--", ".")
+	if err != nil {
+		return nil, err
+	}
+
+	var paths []string
+	for _, name := range strings.Split(string(changed)+string(untracked), "\x00") {
+		if name != "" {
+			paths = append(paths, name)
+		}
+	}
+	return paths, nil
+}
+
 // commitAll commits every change under the pack root, and nothing outside it, even if something else was staged.
 func (r repo) commitAll(message string) error {
-	if _, err := r.run("", "add", "--all", "--", "."); err != nil {
+	return r.commit(message, ".")
+}
+
+// commitPaths commits the given files, given relative to the pack root, as they are on disk, and nothing else, even
+// if something else was staged. A file that has been deleted is committed as deleted.
+func (r repo) commitPaths(message string, paths ...string) error {
+	if err := r.commit(message, paths...); err != nil {
+		// Don't leave what was staged for a commit that didn't happen for someone else's commit to pick up
+		_, _ = r.run("", append([]string{"reset", "--quiet", "--"}, paths...)...)
+		return err
+	}
+	return nil
+}
+
+func (r repo) commit(message string, paths ...string) error {
+	if _, err := r.run("", append([]string{"add", "--all", "--"}, paths...)...); err != nil {
 		return err
 	}
 	// The message goes in on stdin so it can't be mistaken for an option, whatever it contains
-	_, err := r.run(message, "commit", "--file=-", "--", ".")
+	_, err := r.run(message, append([]string{"commit", "--file=-", "--"}, paths...)...)
 	return err
 }
 

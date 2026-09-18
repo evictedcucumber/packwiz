@@ -385,3 +385,60 @@ func slicesEqual(a, b []string) bool {
 	}
 	return true
 }
+
+func TestParsePack(t *testing.T) {
+	pack, err := ParsePack([]byte(`name = "Test"
+version = "1.2.3"
+pack-format = "some-other-format:9"
+
+[index]
+file = "sub/index.toml"
+hash = "abc"
+
+[versions]
+minecraft = "1.21"
+
+[options]
+acceptable-game-versions = ["1.20"]
+`))
+	if err != nil {
+		t.Fatalf("ParsePack() returned error: %v", err)
+	}
+	if pack.Name != "Test" || pack.Version != "1.2.3" || pack.Index.File != "sub/index.toml" || pack.Index.Hash != "abc" {
+		t.Errorf("ParsePack() = %+v, want the fields from the file", pack)
+	}
+	if pack.Versions["minecraft"] != "1.21" {
+		t.Errorf("Versions = %v, want minecraft = 1.21", pack.Versions)
+	}
+	// It is only a reader: whether the format is one this fork can use is for LoadPack to say
+	if pack.PackFormat != "some-other-format:9" {
+		t.Errorf("PackFormat = %q, want it read as it is", pack.PackFormat)
+	}
+}
+
+func TestParsePackDefaultsIndexFile(t *testing.T) {
+	pack, err := ParsePack([]byte(`name = "Test"`))
+	if err != nil {
+		t.Fatalf("ParsePack() returned error: %v", err)
+	}
+	if pack.Index.File != "index.toml" {
+		t.Errorf("Index.File = %q, want the index.toml default", pack.Index.File)
+	}
+}
+
+func TestParsePackRejectsInvalidTOML(t *testing.T) {
+	if _, err := ParsePack([]byte("this is [not toml")); err == nil {
+		t.Error("ParsePack() accepted invalid TOML")
+	}
+}
+
+func TestParsePackDoesNotTouchTheGlobalConfiguration(t *testing.T) {
+	// LoadPack merges a pack's options into viper, which can't be undone; reading a committed copy of a pack must not
+	const key = "parse-pack-test-option"
+	if _, err := ParsePack([]byte("name = \"x\"\n\n[options]\n" + key + " = \"leaked\"\n")); err != nil {
+		t.Fatalf("ParsePack() returned error: %v", err)
+	}
+	if got := viper.GetString(key); got != "" {
+		t.Errorf("viper %q = %q after ParsePack(), want it left alone", key, got)
+	}
+}

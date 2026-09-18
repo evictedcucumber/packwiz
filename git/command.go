@@ -28,11 +28,13 @@ var gitCmd = &cobra.Command{
 // commitCmd represents the git commit command
 var commitCmd = &cobra.Command{
 	Use:   "commit",
-	Short: "Commit every change to the pack, with a conventional commit message describing what changed",
-	Long: `Refreshes the index, then commits every change under the pack's directory (except what git ignores) with a
-generated message. The message's type follows how far the changes raise the pack's version: feat! for changes to
-mods that run on the server, feat for client-only mods being added or removed, and fix for config changes and
-client-only mod updates.`,
+	Short: "Commit each mod that changed on its own, then everything else, with conventional commit messages",
+	Long: `Refreshes the index, then commits every change under the pack's directory (except what git ignores), making one
+commit for each mod that was added, updated or removed, and one for everything else. Each commit has a conventional
+commit message, whose type follows how far the change raises the pack's version: feat! for a change to a mod that
+runs on the server, feat for adding or removing a client-only mod, and fix for a client-only mod update or a config
+change. Every commit also holds an index and pack.toml that describe the pack as it is in that commit, so each one is a
+valid pack (though mods go in alphabetical order, so one can come before a mod it depends on).`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runCommit(dryRunFlag); err != nil {
@@ -62,7 +64,7 @@ func init() {
 	gitCmd.AddCommand(commitCmd)
 	gitCmd.AddCommand(releaseCmd)
 
-	commitCmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Print the commit message without committing")
+	commitCmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Print the commit messages without committing")
 	releaseCmd.Flags().StringVar(&releaseVersionFlag, "version", "", "Release this version instead of the one worked out from the changes; it must be greater than the last release")
 
 	cmd.Add(gitCmd)
@@ -78,85 +80,6 @@ func indexFile(pack core.Pack) (string, error) {
 		return "", fmt.Errorf("the index file %s is given as an absolute path, so it can't be looked up in git", pack.Index.File)
 	}
 	return filepath.ToSlash(filepath.Clean(pack.Index.File)), nil
-}
-
-// runCommit commits every change under the pack root. With dryRun, it only prints the message it would commit with.
-func runCommit(dryRun bool) error {
-	// Committing saves the versions looked up for mods that don't record one, so a failure to look them up mustn't
-	// be papered over; describing a commit that won't be made can carry on without them
-	w, err := changelog.LoadWorking(!dryRun)
-	if err != nil {
-		return err
-	}
-	r, err := openRepo(packRoot())
-	if err != nil {
-		return err
-	}
-	current, err := w.Snapshot()
-	if err != nil {
-		return err
-	}
-
-	message := InitialMessage
-	hasCommits, err := r.hasCommits()
-	if err != nil {
-		return err
-	}
-	changed := hasCommits
-	if hasCommits {
-		indexPath, err := indexFile(w.Pack)
-		if err != nil {
-			return err
-		}
-		previous, err := r.snapshotAt("HEAD", indexPath)
-		if err != nil {
-			return fmt.Errorf("failed to read the pack as of the last commit: %w", err)
-		}
-		changes := changelog.Diff(previous, current)
-		message = Message(changes)
-		changed = len(changes) > 0
-	}
-
-	if dryRun {
-		dirty, err := r.dirty()
-		if err != nil {
-			return err
-		}
-		// A real commit would also save any versions that were looked up
-		if !dirty && !changed && len(w.Versions) == 0 {
-			fmt.Println("Nothing to commit.")
-			return nil
-		}
-		fmt.Println(message)
-		return nil
-	}
-
-	// Commit the refreshed index too, so the pack that gets committed is one that is consistent
-	if err := w.Index.RecordVersions(w.Versions); err != nil {
-		return err
-	}
-	if err := w.Index.Write(); err != nil {
-		return err
-	}
-	if err := w.Pack.UpdateIndexHash(); err != nil {
-		return err
-	}
-	if err := w.Pack.Write(); err != nil {
-		return err
-	}
-	dirty, err := r.dirty()
-	if err != nil {
-		return err
-	}
-	if !dirty {
-		fmt.Println("Nothing to commit.")
-		return nil
-	}
-	if err := r.commitAll(message); err != nil {
-		return err
-	}
-	fmt.Println("Committed: " + firstLine(message))
-	return nil
 }
 
 // runRelease records a release, commits it and tags it. A non-empty versionOverride replaces the version that would

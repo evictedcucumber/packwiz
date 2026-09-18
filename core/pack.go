@@ -37,8 +37,12 @@ const CurrentPackFormat = "evictedcucumber-packwiz:1.0.0"
 
 // LoadPack loads the modpack metadata to a Pack struct
 func LoadPack() (Pack, error) {
-	var modpack Pack
-	if _, err := toml.DecodeFile(viper.GetString("pack-file"), &modpack); err != nil {
+	data, err := os.ReadFile(viper.GetString("pack-file"))
+	if err != nil {
+		return Pack{}, err
+	}
+	modpack, err := ParsePack(data)
+	if err != nil {
 		return Pack{}, err
 	}
 
@@ -53,7 +57,16 @@ func LoadPack() (Pack, error) {
 			return Pack{}, err
 		}
 	}
+	return modpack, nil
+}
 
+// ParsePack parses the contents of a pack file that isn't necessarily the one in use (e.g. a committed version of it).
+// Unlike LoadPack it doesn't check the pack's format, and doesn't merge its options into the global configuration.
+func ParsePack(data []byte) (Pack, error) {
+	var modpack Pack
+	if _, err := toml.Decode(string(data), &modpack); err != nil {
+		return Pack{}, err
+	}
 	if len(modpack.Index.File) == 0 {
 		modpack.Index.File = "index.toml"
 	}
