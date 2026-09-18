@@ -29,16 +29,16 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 
 ## Changelog and releases
 
-A pack manages its own release history. Each mod's `.pw.toml` records its readable `version` when it is added or updated, and a release remembers what the pack contained, so the next release can describe exactly what changed.
+A pack manages its own release history, from its git history. `packwiz git commit` turns changes to the pack into conventional commits, and a release is made from the commits since the last one: the changelog is what they say, and the version is what they add up to.
 
 ```
-packwiz changelog          # preview what changed since the last release, and the version it would make
-packwiz changelog release  # bump pack.toml's version, update CHANGELOG.md, and remember the pack's contents
+packwiz changelog          # preview the release the commits since the last one would make, including changes not committed yet
+packwiz changelog release  # commit any changes, then record a release: bump pack.toml's version and update CHANGELOG.md
 packwiz git commit         # commit each mod that was added, updated or removed on its own, then everything else
 packwiz git release        # changelog release, then commit it as "chore(release): X.Y.Z" and tag it "vX.Y.Z"
 ```
 
-The version is bumped by the most significant change since the last release:
+So after adding, updating and removing mods, `packwiz changelog release` is all that's needed: it runs `packwiz git commit` first, so the log is up to date, then releases what is in it. The version is bumped by the most significant commit since the last release:
 
 | Change | Version | Commit |
 | --- | --- | --- |
@@ -59,7 +59,14 @@ fix(config): change config/sodium.json
 
 Mods come first, in alphabetical order of their files, then one commit for everything else that changed: config files, a mod being pinned, edits to `pack.toml`. Every commit holds an `index.toml` and `pack.toml` that describe the pack as it is in that commit, not just as it ends up, so each one is a valid pack whose files match its index, and `git bisect` can be used to find the mod that broke something. Because mods go in alphabetical order, a mod can be committed before one it depends on. If a commit fails (a hook refused it, say), the ones before it stay made, and running the command again carries on with the rest. The first commit in a new repository is a single `chore(pack): initial commit` of the whole pack. `--dry-run` prints the commits it would make.
 
-The first release keeps the version already in `pack.toml`. Pass `--version X.Y.Z` to `release` to choose a higher version than the one worked out. The release history is kept in `changelog.toml` next to `pack.toml`, and `CHANGELOG.md` is generated from it; neither is distributed as part of the pack. `packwiz git release` needs everything committed first (`packwiz git commit`), so the release commit contains only the release.
+**How a release reads the log.** A release covers the commits made after the one the last release was made at, which `changelog.toml` records (`--since <commit, tag or branch>` reads from somewhere else instead). What `packwiz git commit` writes is read back as the change it describes. Several commits to the same mod are reduced to what they add up to, so a mod that was added and then updated is just added, and one added and then removed isn't mentioned, and doesn't make the release major. Other conventional commits count too, written by hand with plain git and shown in their own words: a `feat` is minor, a `fix` or `perf` is patch, and anything marked breaking (`feat!:` or a `BREAKING CHANGE:` footer) is major. Chores, documentation and commits that aren't conventional are left out.
+
+```
+fix(config): lower the particle count
+feat!: update to Minecraft 1.21.4
+```
+
+The first release has no log to read, so it describes the pack as it is, and keeps the version already in `pack.toml`. Pass `--version X.Y.Z` to `release` to choose a higher version than the one worked out. The release history is kept in `changelog.toml` next to `pack.toml`, and `CHANGELOG.md` is generated from it; neither is distributed as part of the pack.
 
 `CHANGELOG.md` lists what each release added, updated and removed, with what runs on the server first, and asks for a server update when the release is major:
 
@@ -80,6 +87,11 @@ The first release keeps the version already in `pack.toml`. Pass `--version X.Y.
 ### Config
 
 - Changed `config/sodium.json`
+- lower the particle count
+
+### Changes
+
+- **Breaking:** update to Minecraft 1.21.4
 ```
 
 Mods added before `version` was recorded have it looked up from Modrinth and saved to their `.pw.toml` the next time you run `packwiz changelog release` or `packwiz git commit` (`packwiz changelog` shows the versions but saves nothing), so that needs the network once. Releases made before then show file names, which are replaced with the versions too wherever the mod is still on that file.

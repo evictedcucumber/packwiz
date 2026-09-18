@@ -9,17 +9,28 @@ import (
 	"github.com/evictedcucumber/packwiz/core"
 )
 
-// section is a heading in a release, and the kinds of change listed under it
+// section is a heading in a release, and the changes listed under it
 type section struct {
 	title string
-	kinds []Kind
+	has   func(Change) bool
+}
+
+func isKind(kinds ...Kind) func(Change) bool {
+	return func(c Change) bool { return slices.Contains(kinds, c.Kind) }
+}
+
+// isConfig is a change to a config file, or a note about config
+func isConfig(c Change) bool {
+	return isKind(FileAdded, FileChanged, FileRemoved)(c) || (c.Kind == Note && c.Scope == "config")
 }
 
 var sections = []section{
-	{"Added", []Kind{ModAdded}},
-	{"Updated", []Kind{ModUpdated}},
-	{"Removed", []Kind{ModRemoved}},
-	{"Config", []Kind{FileAdded, FileChanged, FileRemoved}},
+	{"Added", isKind(ModAdded)},
+	{"Updated", isKind(ModUpdated)},
+	{"Removed", isKind(ModRemoved)},
+	{"Config", isConfig},
+	// Notes are what someone wrote about a change in their own words: whatever isn't about a mod or config
+	{"Changes", func(c Change) bool { return c.Kind == Note && c.Scope != "config" }},
 }
 
 // RenderMarkdown renders the changelog for a list of releases (oldest first), with the newest release at the top.
@@ -45,21 +56,21 @@ func RenderRelease(r Release) string {
 			blocks = append(blocks, "Initial release with "+summary+".")
 		}
 	}
-	if r.Bump == BumpMajor {
+	if !r.IsInitial() && changesServer(r.Changes) {
 		blocks = append(blocks, "> **Server update required.** This release changes mods that run on the server.")
 	}
 
 	for _, s := range sections {
 		var changes []Change
 		for _, c := range r.Changes {
-			if slices.Contains(s.kinds, c.Kind) {
+			if s.has(c) {
 				changes = append(changes, c)
 			}
 		}
 		if len(changes) == 0 {
 			continue
 		}
-		slices.SortFunc(changes, compareChanges)
+		slices.SortStableFunc(changes, compareChanges)
 
 		lines := make([]string, len(changes))
 		for i, c := range changes {
@@ -70,8 +81,29 @@ func RenderRelease(r Release) string {
 	return strings.Join(blocks, "\n\n") + "\n"
 }
 
-// compareChanges orders changes within a heading: mods that run on the server first, then by name, then by path.
+// changesServer reports whether any of the changes is to a mod that runs on the server.
+func changesServer(changes []Change) bool {
+	for _, c := range changes {
+		if c.IsMod() && RunsOnServer(c.Side) {
+			return true
+		}
+	}
+	return false
+}
+
+// compareChanges orders changes within a heading: mods that run on the server first, then by name, then by path. Notes
+// come after files, and stay in the order they were made.
 func compareChanges(a, b Change) int {
+	if aNote, bNote := a.Kind == Note, b.Kind == Note; aNote || bNote {
+		switch {
+		case aNote && bNote:
+			return 0
+		case aNote:
+			return 1
+		default:
+			return -1
+		}
+	}
 	if a.IsMod() && b.IsMod() {
 		if serverA, serverB := RunsOnServer(a.Side), RunsOnServer(b.Side); serverA != serverB {
 			if serverA {
@@ -122,6 +154,15 @@ func describe(c Change) string {
 		return fmt.Sprintf("Changed `%s`", c.Path)
 	case FileRemoved:
 		return fmt.Sprintf("Removed `%s`", c.Path)
+	case Note:
+		text := escapeMarkdown(c.Text)
+		if c.Scope != "" && c.Scope != "config" {
+			text = "**" + escapeMarkdown(c.Scope) + ":** " + text
+		}
+		if c.Breaking {
+			text = "**Breaking:** " + text
+		}
+		return text
 	}
 
 	parts := []string{"**" + escapeMarkdown(c.Name) + "**"}

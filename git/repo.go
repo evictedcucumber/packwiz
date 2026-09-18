@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/evictedcucumber/packwiz/changelog"
 )
 
 // repo runs git commands from a directory inside a repository, which is the pack's root. Paths given to git are
@@ -57,6 +59,52 @@ func (r repo) run(stdin string, args ...string) ([]byte, error) {
 		return out, &gitError{args, stderr.String(), err}
 	}
 	return out, nil
+}
+
+// head is the hash of the current commit.
+func (r repo) head() (string, error) {
+	out, err := r.run("", "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// log lists the commits made after since, oldest first, up to the current commit; all of them if since is empty.
+func (r repo) log(since string) ([]changelog.Commit, error) {
+	// Something that starts with "-" would be taken for an option rather than a commit
+	if strings.HasPrefix(since, "-") {
+		return nil, fmt.Errorf("%q isn't a commit", since)
+	}
+	args := []string{"log", "--reverse", "--no-merges", "--format=%s%x1f%b%x1e"}
+	if since != "" {
+		args = append(args, since+"..HEAD")
+	}
+	out, err := r.run("", args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var commits []changelog.Commit
+	for _, record := range strings.Split(string(out), "\x1e") {
+		// Each commit ends in a newline, which comes after the separator
+		subject, body, _ := strings.Cut(strings.TrimLeft(record, "\n"), "\x1f")
+		if subject == "" && strings.TrimSpace(body) == "" {
+			continue
+		}
+		commits = append(commits, changelog.Commit{Subject: subject, Body: strings.TrimSpace(body)})
+	}
+	return commits, nil
+}
+
+// lastChangedIn is the hash of the last commit to change a file, given relative to the pack root, or "" if there
+// hasn't been one.
+func (r repo) lastChangedIn(file string) (string, error) {
+	out, err := r.run("", "log", "-1", "--format=%H", "--", file)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // hasCommits reports whether the repository has a commit yet; a new one doesn't.

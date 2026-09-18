@@ -14,24 +14,18 @@ func sampleHistory() History {
 	return History{
 		Releases: []Release{
 			{
-				Version: "1.0.0", Date: "2026-01-01", Bump: BumpNone,
+				Version: "1.0.0", Date: "2026-01-01", Bump: BumpNone, Commit: "1111111111111111111111111111111111111111",
 				Changes: []Change{{Kind: ModAdded, Path: "mods/sodium.pw.toml", Name: "Sodium", Side: core.ClientSide, To: "0.5.7"}},
 			},
 			{
-				Version: "2.0.0", Date: "2026-02-01", Bump: BumpMajor,
+				Version: "2.0.0", Date: "2026-02-01", Bump: BumpMajor, Commit: "2222222222222222222222222222222222222222",
 				Changes: []Change{
-					{Kind: ModAdded, Path: "mods/lithium.pw.toml", Name: "Lithium", Side: core.UniversalSide, To: "0.12.0"},
-					{Kind: ModUpdated, Path: "mods/sodium.pw.toml", Name: "Sodium", Side: core.ClientSide, From: "0.5.7", To: "0.5.8"},
+					{Kind: ModAdded, Name: "Lithium", Side: core.UniversalSide, To: "0.12.0"},
+					{Kind: ModUpdated, Name: "Sodium", Side: core.ClientSide, From: "0.5.7", To: "0.5.8"},
 					{Kind: FileChanged, Path: "config/sodium.json"},
+					{Kind: Note, Type: "feat", Scope: "world", Text: "reset the spawn point", Breaking: true},
 				},
 			},
-		},
-		Snapshot: Snapshot{
-			Mods: map[string]SnapshotMod{
-				"mods/sodium.pw.toml":  {Name: "Sodium", Side: core.ClientSide, Version: "0.5.8"},
-				"mods/lithium.pw.toml": {Name: "Lithium", Side: core.UniversalSide, Version: "0.12.0"},
-			},
-			Files: map[string]string{"config/sodium.json": "abc123"},
 		},
 	}
 }
@@ -198,10 +192,6 @@ func legacyHistory() History {
 				{Kind: ModRemoved, Path: "mods/c.pw.toml", Name: "C", Side: core.ClientSide, From: "c-1.0.jar"},
 			}},
 		},
-		Snapshot: Snapshot{Mods: map[string]SnapshotMod{
-			"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "a-1.0.jar"},
-			"mods/b.pw.toml": {Name: "B", Side: core.ServerSide, Version: "b-2.0.jar"},
-		}},
 	}
 }
 
@@ -235,13 +225,6 @@ func TestUpgradeVersions(t *testing.T) {
 	}
 	if first[3] != (Change{Kind: FileAdded, Path: "config/a.json"}) {
 		t.Errorf("a config change was altered: %+v", first[3])
-	}
-	// The snapshot is brought into line as well, though it isn't counted as it isn't seen
-	if got := h.Snapshot.Mods["mods/a.pw.toml"].Version; got != "1.0" {
-		t.Errorf("snapshot has A as %q, want 1.0", got)
-	}
-	if got := h.Snapshot.Mods["mods/b.pw.toml"].Version; got != "2.0" {
-		t.Errorf("snapshot has B as %q, want 2.0", got)
 	}
 }
 
@@ -299,5 +282,86 @@ func TestUpgradeVersionsWithNoHistory(t *testing.T) {
 
 	if upgraded := h.UpgradeVersions(current); upgraded != 0 {
 		t.Errorf("UpgradeVersions() = %d, want 0 for an empty history", upgraded)
+	}
+}
+
+func TestHistoryRecordsTheCommitEachReleaseWasMadeAt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), HistoryFile)
+	if err := sampleHistory().Write(path); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	got, err := LoadHistory(path)
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+	if got.Releases[0].Commit != "1111111111111111111111111111111111111111" || got.Releases[1].Commit != "2222222222222222222222222222222222222222" {
+		t.Errorf("commits = %q, %q, want each release's own", got.Releases[0].Commit, got.Releases[1].Commit)
+	}
+}
+
+func TestLoadHistoryIgnoresTheSnapshotOlderVersionsKept(t *testing.T) {
+	// Histories used to hold the pack as of the last release, to compare the next one with; the git log does that now
+	path := filepath.Join(t.TempDir(), HistoryFile)
+	legacy := `[[release]]
+version = "1.0.0"
+date = "2026-01-01"
+bump = "none"
+
+[[release.change]]
+kind = "mod-added"
+path = "mods/sodium.pw.toml"
+name = "Sodium"
+side = "client"
+to = "0.5.7"
+
+[snapshot]
+[snapshot.mods]
+[snapshot.mods."mods/sodium.pw.toml"]
+name = "Sodium"
+side = "client"
+version = "0.5.7"
+[snapshot.files]
+"config/a.json" = "abc"
+`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	got, err := LoadHistory(path)
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+	if len(got.Releases) != 1 || got.Releases[0].Changes[0].Name != "Sodium" {
+		t.Errorf("history = %+v, want the release read as it was", got)
+	}
+
+	// Writing it back drops what is no longer used
+	if err := got.Write(path); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read history: %v", err)
+	}
+	if strings.Contains(string(data), "snapshot") {
+		t.Errorf("the rewritten history still has the snapshot:\n%s", data)
+	}
+}
+
+func TestNotesAreStoredInTheHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), HistoryFile)
+	want := History{Releases: []Release{{
+		Version: "1.1.0", Date: "2026-01-02", Bump: BumpMajor,
+		Changes: []Change{{Kind: Note, Type: "feat", Scope: "world", Text: "reset the spawn point", Breaking: true}},
+	}}}
+	if err := want.Write(path); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	got, err := LoadHistory(path)
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LoadHistory() =\n%+v\nwant\n%+v", got, want)
 	}
 }

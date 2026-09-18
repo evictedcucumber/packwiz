@@ -128,12 +128,63 @@ func TestInitialSummary(t *testing.T) {
 	}
 }
 
-func TestRenderReleaseOnlyMajorGetsServerNote(t *testing.T) {
-	for bump, wantNote := range map[Bump]bool{BumpNone: false, BumpPatch: false, BumpMinor: false, BumpMajor: true} {
-		got := RenderRelease(Release{Version: "1.0.0", Date: "2026-01-01", Bump: bump})
-		if has := strings.Contains(got, "Server update required"); has != wantNote {
-			t.Errorf("bump %v: server note present = %v, want %v", bump, has, wantNote)
-		}
+func TestRenderReleaseAsksForAServerUpdateOnlyForChangesToModsOnTheServer(t *testing.T) {
+	change := func(kind Kind, side string) []Change { return []Change{{Kind: kind, Name: "M", Side: side, To: "1"}} }
+	tests := []struct {
+		name    string
+		bump    Bump
+		changes []Change
+		want    bool
+	}{
+		{"a server mod", BumpMajor, change(ModAdded, core.ServerSide), true},
+		{"a mod on both sides", BumpMajor, change(ModUpdated, core.UniversalSide), true},
+		{"a client mod", BumpMinor, change(ModAdded, core.ClientSide), false},
+		{"config", BumpPatch, []Change{{Kind: FileChanged, Path: "config/a.json"}}, false},
+		// A change can be breaking without anything on the server changing, such as moving to a new Minecraft version
+		{"a breaking note", BumpMajor, []Change{{Kind: Note, Type: "feat", Breaking: true, Text: "update"}}, false},
+		// There is nothing to update a server from for the first release
+		{"the first release", BumpNone, change(ModAdded, core.ServerSide), false},
+		{"nothing", BumpMajor, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RenderRelease(Release{Version: "1.0.0", Date: "2026-01-01", Bump: tt.bump, Changes: tt.changes})
+			if has := strings.Contains(got, "Server update required"); has != tt.want {
+				t.Errorf("server note present = %v, want %v:\n%s", has, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestRenderReleaseNotes(t *testing.T) {
+	got := RenderRelease(Release{
+		Version: "2.0.0", Date: "2026-02-01", Bump: BumpMajor,
+		Changes: []Change{
+			{Kind: Note, Type: "feat", Scope: "world", Text: "reset the spawn point"},
+			{Kind: Note, Type: "fix", Scope: "config", Text: "lower the particle count"},
+			{Kind: FileChanged, Path: "config/a.json"},
+			{Kind: Note, Type: "feat", Text: "update to Minecraft 1.21.4", Breaking: true},
+			{Kind: Note, Type: "fix", Scope: "config", Text: "raise the fps cap"},
+			{Kind: Note, Type: "feat", Text: "add a *splash* screen"},
+		},
+	})
+
+	want := `## 2.0.0 - 2026-02-01
+
+### Config
+
+- Changed ` + "`config/a.json`" + `
+- lower the particle count
+- raise the fps cap
+
+### Changes
+
+- **world:** reset the spawn point
+- **Breaking:** update to Minecraft 1.21.4
+- add a \*splash\* screen
+`
+	if got != want {
+		t.Errorf("RenderRelease() =\n%s\nwant\n%s", got, want)
 	}
 }
 

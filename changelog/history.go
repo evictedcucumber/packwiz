@@ -25,7 +25,9 @@ type Release struct {
 	// Date is the day of the release, as YYYY-MM-DD
 	Date string `toml:"date"`
 	// Bump is how far this release raised the version; BumpNone for the first release, which has nothing to bump from
-	Bump    Bump     `toml:"bump"`
+	Bump Bump `toml:"bump"`
+	// Commit is the commit the release was made at. The next release covers the commits made after it.
+	Commit  string   `toml:"commit,omitempty"`
 	Changes []Change `toml:"change"`
 }
 
@@ -38,8 +40,6 @@ func (r Release) IsInitial() bool {
 type History struct {
 	// Releases are in the order they were made, oldest first
 	Releases []Release `toml:"release"`
-	// Snapshot is the pack as of the latest release, which the next release is compared against
-	Snapshot Snapshot `toml:"snapshot"`
 }
 
 // Latest returns the most recent release, if there has been one.
@@ -52,8 +52,7 @@ func (h History) Latest() (Release, bool) {
 
 // UpgradeVersions replaces versions that were recorded as a file name, because the mod's version wasn't known at
 // the time, with the version the mod has in current. This is only done for a mod that is still on that file, where
-// the version is certain. The snapshot is upgraded too, but what is returned is how many lines of the releases
-// were, as those are what someone reading the changelog sees change.
+// the version is certain. It returns how many lines of the releases were replaced.
 func (h *History) UpgradeVersions(current Snapshot) int {
 	upgraded := 0
 	for i := range h.Releases {
@@ -67,14 +66,6 @@ func (h *History) UpgradeVersions(current Snapshot) int {
 			c.To = cur.Version
 			upgraded++
 		}
-	}
-	for path, old := range h.Snapshot.Mods {
-		cur, ok := current.Mods[path]
-		if !ok || !knownVersion(cur) || old.Version != cur.File {
-			continue
-		}
-		old.Version = cur.Version
-		h.Snapshot.Mods[path] = old
 	}
 	return upgraded
 }

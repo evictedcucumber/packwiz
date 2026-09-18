@@ -1,7 +1,6 @@
 package git
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 var (
 	dryRunFlag         bool
 	releaseVersionFlag string
+	sinceFlag          string
 )
 
 // gitCmd represents the base command when called without any subcommands
@@ -48,12 +48,11 @@ valid pack (though mods go in alphabetical order, so one can come before a mod i
 var releaseCmd = &cobra.Command{
 	Use:   "release",
 	Short: "Record a release with \"packwiz changelog release\", then commit and tag it",
-	Long: `Records a release (see "packwiz changelog release"), commits the result as "chore(release): X.Y.Z" and tags it
-"vX.Y.Z". The pack must have no uncommitted changes, so the release commit contains only the release itself;
-use "packwiz git commit" first.`,
+	Long: `Records a release (see "packwiz changelog release", which first commits any changes to the pack), commits the
+result as "chore(release): X.Y.Z" and tags it "vX.Y.Z".`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := runRelease(releaseVersionFlag); err != nil {
+		if err := runRelease(releaseVersionFlag, sinceFlag); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
@@ -65,7 +64,8 @@ func init() {
 	gitCmd.AddCommand(releaseCmd)
 
 	commitCmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Print the commit messages without committing")
-	releaseCmd.Flags().StringVar(&releaseVersionFlag, "version", "", "Release this version instead of the one worked out from the changes; it must be greater than the last release")
+	releaseCmd.Flags().StringVar(&releaseVersionFlag, "version", "", "Release this version instead of the one worked out from the commits; it must be greater than the last release")
+	releaseCmd.Flags().StringVar(&sinceFlag, "since", "", "Read the commits made after this one (a hash, tag or branch), rather than after the last release")
 
 	cmd.Add(gitCmd)
 }
@@ -83,34 +83,21 @@ func indexFile(pack core.Pack) (string, error) {
 }
 
 // runRelease records a release, commits it and tags it. A non-empty versionOverride replaces the version that would
-// otherwise be worked out from the changes.
-func runRelease(versionOverride string) error {
+// otherwise be worked out from the commits, and a non-empty since is the commit to read the log from, if it isn't where
+// the last release was made.
+func runRelease(versionOverride, since string) error {
 	r, err := openRepo(packRoot())
 	if err != nil {
 		return err
 	}
-	hasCommits, err := r.hasCommits()
-	if err != nil {
-		return err
-	}
-	if !hasCommits {
-		return errors.New("the pack has no commits yet; run \"packwiz git commit\" first")
-	}
-	dirty, err := r.dirty()
-	if err != nil {
-		return err
-	}
-	if dirty {
-		return errors.New("the pack has uncommitted changes; run \"packwiz git commit\" first, so the release commit contains only the release")
-	}
 
-	release, released, err := changelog.RunRelease(versionOverride)
+	// This commits any changes to the pack first, so they are in the log the release is made from
+	release, released, err := changelog.RunRelease(versionOverride, since)
 	if err != nil {
 		return err
 	}
 	if !released {
-		// Nothing was released, but a release also saves what it looked up for mods that don't record a version,
-		// and this command isn't going to commit that
+		// Nothing was released, but that can still change the changelog, and this command isn't going to commit it
 		if dirty, err := r.dirty(); err == nil && dirty {
 			fmt.Println(`The pack changed; commit it with "packwiz git commit".`)
 		}

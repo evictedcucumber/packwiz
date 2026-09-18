@@ -40,26 +40,26 @@ func planCommits(changes []changelog.Change, rest bool) []commitStep {
 	return steps
 }
 
-// runCommit commits every change under the pack root: one commit for each mod that was added, updated or removed, and
-// then one for everything else. With dryRun, it only prints the commits it would make.
-func runCommit(dryRun bool) error {
+// prepareCommit works out the commits that packwiz git commit would make. With dryRun, failing to look up the versions
+// of mods that don't record one isn't an error, as they are only needed to describe commits that won't be made.
+func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 	// Committing saves the versions looked up for mods that don't record one, so a failure to look them up mustn't
-	// be papered over; describing commits that won't be made can carry on without them
+	// be papered over
 	w, err := changelog.LoadWorking(!dryRun)
 	if err != nil {
-		return err
+		return committer{}, nil, err
 	}
 	r, err := openRepo(packRoot())
 	if err != nil {
-		return err
+		return committer{}, nil, err
 	}
 	current, err := w.Snapshot()
 	if err != nil {
-		return err
+		return committer{}, nil, err
 	}
 	indexPath, err := indexFile(w.Pack)
 	if err != nil {
-		return err
+		return committer{}, nil, err
 	}
 	c := committer{
 		r: r, w: w, indexPath: indexPath,
@@ -68,38 +68,60 @@ func runCommit(dryRun bool) error {
 
 	hasCommits, err := r.hasCommits()
 	if err != nil {
-		return err
+		return committer{}, nil, err
 	}
-	var steps []commitStep
 	if !hasCommits {
 		// The repository's first commit takes the whole pack: there is nothing before it for the pack to have changed from
-		steps = []commitStep{{message: InitialMessage}}
-	} else {
-		c.head, err = r.packAt("HEAD", indexPath, c.packPath)
-		if err != nil {
-			return fmt.Errorf("failed to read the pack as of the last commit: %w", err)
-		}
-		changes := changelog.Diff(c.head.Snapshot, current)
-		rest, err := c.changedBeyond(changes)
-		if err != nil {
-			return err
-		}
-		steps = planCommits(changes, rest)
+		return c, []commitStep{{message: InitialMessage}}, nil
 	}
 
-	if dryRun {
-		if len(steps) == 0 {
-			fmt.Println("Nothing to commit.")
-			return nil
-		}
-		messages := make([]string, len(steps))
-		for i, step := range steps {
-			messages[i] = step.message
-		}
-		fmt.Println(strings.Join(messages, "\n---\n"))
+	c.head, err = r.packAt("HEAD", indexPath, c.packPath)
+	if err != nil {
+		return committer{}, nil, fmt.Errorf("failed to read the pack as of the last commit: %w", err)
+	}
+	changes := changelog.Diff(c.head.Snapshot, current)
+	rest, err := c.changedBeyond(changes)
+	if err != nil {
+		return committer{}, nil, err
+	}
+	return c, planCommits(changes, rest), nil
+}
+
+// runCommit commits every change under the pack root: one commit for each mod that was added, updated or removed, and
+// then one for everything else. With dryRun, it only prints the commits it would make.
+func runCommit(dryRun bool) error {
+	c, steps, err := prepareCommit(dryRun)
+	if err != nil {
+		return err
+	}
+	if !dryRun {
+		return c.run(steps)
+	}
+
+	if len(steps) == 0 {
+		fmt.Println("Nothing to commit.")
 		return nil
 	}
-	return c.run(steps)
+	messages := make([]string, len(steps))
+	for i, step := range steps {
+		messages[i] = step.message
+	}
+	fmt.Println(strings.Join(messages, "\n---\n"))
+	return nil
+}
+
+// pendingCommits describes the commits that runCommit would make, as the changelog reads them, without making any.
+func pendingCommits() ([]changelog.Commit, error) {
+	_, steps, err := prepareCommit(true)
+	if err != nil {
+		return nil, err
+	}
+	commits := make([]changelog.Commit, len(steps))
+	for i, step := range steps {
+		subject, body, _ := strings.Cut(step.message, "\n")
+		commits[i] = changelog.Commit{Subject: subject, Body: strings.TrimSpace(body)}
+	}
+	return commits, nil
 }
 
 // committer makes the commits for a pack.

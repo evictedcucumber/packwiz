@@ -17,13 +17,16 @@ const (
 	FileAdded   Kind = "file-added"
 	FileRemoved Kind = "file-removed"
 	FileChanged Kind = "file-changed"
+	// Note is a commit that says something other than what a mod or a file did, such as one written by hand
+	Note Kind = "note"
 )
 
-// Change is one difference between two snapshots of a pack.
+// Change is one thing that changed in a pack: a difference between two snapshots of it, or what a commit said.
 type Change struct {
 	Kind Kind `toml:"kind"`
-	// Path is the path of the metadata file or config file, relative to the index
-	Path string `toml:"path"`
+	// Path is the path of the metadata file or config file, relative to the index. Changes read from commits know
+	// the paths of config files but not of mods.
+	Path string `toml:"path,omitempty"`
 
 	// The rest only apply to mods (Kind is ModAdded, ModRemoved or ModUpdated):
 	Name string `toml:"name,omitempty"`
@@ -33,9 +36,19 @@ type Change struct {
 	From string `toml:"from,omitempty"`
 	// To is the version after the change; empty for a removed mod
 	To string `toml:"to,omitempty"`
+
+	// The rest only apply to notes (Kind is Note), which are conventional commits:
+	// Type is the type of the commit, such as "feat" or "fix"
+	Type string `toml:"type,omitempty"`
+	// Scope is what the commit says it is about, such as "config"; it may be empty
+	Scope string `toml:"scope,omitempty"`
+	// Text is what the commit says was done
+	Text string `toml:"text,omitempty"`
+	// Breaking is whether the commit says it breaks compatibility
+	Breaking bool `toml:"breaking,omitempty"`
 }
 
-// IsMod reports whether this is a change to a mod (as opposed to a config or other file).
+// IsMod reports whether this is a change to a mod (as opposed to a config or other file, or a note).
 func (c Change) IsMod() bool {
 	return c.Kind == ModAdded || c.Kind == ModRemoved || c.Kind == ModUpdated
 }
@@ -48,9 +61,20 @@ func (c Change) IsMod() bool {
 //   - Any change to a config or other file is patch.
 //
 // Each level lines up with a conventional commit type: major is a breaking change (feat!), minor is a feature (feat)
-// and patch is a fix (fix).
+// and patch is a fix (fix). A note, which is a commit that wasn't written by packwiz, is bumped by its own type in
+// the same way, and only if it is one of those; chores, documentation and the like don't make a release.
 func (c Change) Bump() Bump {
 	switch c.Kind {
+	case Note:
+		switch {
+		case c.Breaking:
+			return BumpMajor
+		case c.Type == "feat":
+			return BumpMinor
+		case c.Type == "fix" || c.Type == "perf":
+			return BumpPatch
+		}
+		return BumpNone
 	case ModAdded, ModRemoved:
 		if RunsOnServer(c.Side) {
 			return BumpMajor

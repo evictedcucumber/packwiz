@@ -145,7 +145,7 @@ func commit(t *testing.T) string {
 func release(t *testing.T, override string) string {
 	t.Helper()
 	var err error
-	out := cmdtest.CaptureStdout(t, func() { err = runRelease(override) })
+	out := cmdtest.CaptureStdout(t, func() { err = runRelease(override, "") })
 	if err != nil {
 		t.Fatalf("runRelease() returned error: %v\noutput: %s", err, out)
 	}
@@ -514,15 +514,15 @@ func TestReleaseCommitsAndTags(t *testing.T) {
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
 	p.write(t, "config/sodium.json", "{}")
-	commit(t)
 
+	// Nothing has been committed, in a repository that has no commits at all: releasing does that first
 	out := release(t, "")
 
 	if !strings.Contains(out, "Committed and tagged v1.0.0") {
 		t.Errorf("output = %q, want it to report the tag", out)
 	}
-	if got := headMessage(t); got != "chore(release): 1.0.0" {
-		t.Errorf("release commit message = %q", got)
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"chore(pack): initial commit", "chore(release): 1.0.0"}) {
+		t.Errorf("commit messages = %q, want the initial commit and then the release", got)
 	}
 	// An annotated tag, on the release commit
 	if kind := git(t, "cat-file", "-t", "v1.0.0"); kind != "tag" {
@@ -531,64 +531,161 @@ func TestReleaseCommitsAndTags(t *testing.T) {
 	if tagged, head := git(t, "rev-parse", "v1.0.0^{commit}"), git(t, "rev-parse", "HEAD"); tagged != head {
 		t.Errorf("v1.0.0 points at %s, want the release commit %s", tagged, head)
 	}
-	changed := git(t, "show", "--name-only", "--format=", "HEAD")
-	for _, want := range []string{"CHANGELOG.md", "changelog.toml"} {
-		if !strings.Contains(changed, want) {
-			t.Errorf("release commit doesn't include %s:\n%s", want, changed)
-		}
+	// The first release keeps the version pack.toml already had, so that isn't part of it
+	if changed := commitFiles(t, "HEAD"); !reflect.DeepEqual(changed, []string{"CHANGELOG.md", "changelog.toml"}) {
+		t.Errorf("release commit changed %v, want the changelog and the history", changed)
 	}
 	requireClean(t)
 
-	// A later release continues from it
+	// A later release commits what hasn't been committed, then releases what the commits since the last one say
 	p.mod(t, "Lithium", core.ServerSide, "0.12.0")
-	commit(t)
 	release(t, "")
-	if got := headMessage(t); got != "chore(release): 2.0.0" {
-		t.Errorf("second release commit message = %q, want 2.0.0 for a server mod", got)
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"feat(mods)!: add Lithium 0.12.0 (server)\n\n" + wantBreakingFooter, "chore(release): 2.0.0"}) {
+		t.Errorf("commit messages = %q, want the mod committed and then a release that is major for a server mod", got)
 	}
 	if tags := git(t, "tag", "--list"); tags != "v1.0.0\nv2.0.0" {
 		t.Errorf("tags = %q, want v1.0.0 and v2.0.0", tags)
 	}
+	// This one raised the version, so pack.toml is part of the release
+	if changed := commitFiles(t, "HEAD"); !reflect.DeepEqual(changed, []string{"CHANGELOG.md", "changelog.toml", "pack.toml"}) {
+		t.Errorf("release commit changed %v, want the changelog, the history and pack.toml with the new version", changed)
+	}
 	requireClean(t)
 }
 
-func TestReleaseRefusesUncommittedChanges(t *testing.T) {
+func TestReleaseCommitsEachModAndThenReleasesWhatTheLogSays(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
-	commit(t)
-	p.mod(t, "Sodium", core.ClientSide, "0.5.8") // not committed
-	before := commitCount(t)
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	p.write(t, "config/sodium.json", "{}")
+	release(t, "")
 
-	var err error
-	cmdtest.CaptureStdout(t, func() { err = runRelease("") })
+	// Everything that has changed since, none of it committed
+	p.mod(t, "Sodium", core.ClientSide, "0.5.8")   // updated
+	p.remove(t, "mods/iris.pw.toml")               // removed
+	p.mod(t, "Lithium", core.ServerSide, "0.12.0") // added
+	p.write(t, "config/sodium.json", `{"a": 1}`)   // changed
+	release(t, "")
 
-	if err == nil || !strings.Contains(err.Error(), "uncommitted") {
-		t.Errorf("runRelease() error = %v, want one about uncommitted changes", err)
+	// One command, and a commit for each of them, then the release
+	want := []string{
+		"feat(mods): remove Iris 1.0 (client)",
+		"feat(mods)!: add Lithium 0.12.0 (server)\n\n" + wantBreakingFooter,
+		"fix(mods): update Sodium 0.5.7 -> 0.5.8 (client)",
+		"fix(config): change config/sodium.json",
+		"chore(release): 2.0.0",
 	}
-	if got := commitCount(t); got != before {
-		t.Errorf("commit count = %d, want %d", got, before)
+	if got := lastMessages(t, 5); !reflect.DeepEqual(got, want) {
+		t.Errorf("commit messages =\n%q\nwant\n%q", got, want)
 	}
-	if tags := git(t, "tag", "--list"); tags != "" {
-		t.Errorf("tags = %q, want none", tags)
-	}
-	for _, name := range []string{changelog.HistoryFile, changelog.MarkdownFile} {
-		if _, statErr := os.Stat(name); statErr == nil {
-			t.Errorf("%s was written although the release was refused", name)
+
+	changelogMD := git(t, "show", "HEAD:CHANGELOG.md")
+	for _, want := range []string{
+		"## 2.0.0 - ",
+		"Server update required",
+		"### Added\n\n- **Lithium** 0.12.0 (server)",
+		"### Updated\n\n- **Sodium** 0.5.7 → 0.5.8 (client)",
+		"### Removed\n\n- **Iris** 1.0 (client)",
+		"### Config\n\n- Changed `config/sodium.json`",
+	} {
+		if !strings.Contains(changelogMD, want) {
+			t.Errorf("the committed changelog is missing %q:\n%s", want, changelogMD)
 		}
+	}
+
+	// The release is recorded at the commit before the release commit: the last of the commits it was made from
+	history, err := changelog.LoadHistory("changelog.toml")
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+	latest, _ := history.Latest()
+	if before := git(t, "rev-parse", "HEAD~1"); latest.Version != "2.0.0" || latest.Commit != before {
+		t.Errorf("latest release = %s at %s, want 2.0.0 at %s", latest.Version, latest.Commit, before)
+	}
+	requireClean(t)
+}
+
+func TestReleaseIncludesCommitsWrittenByHand(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	release(t, "")
+
+	// Ordinary git commits with conventional messages, not made by packwiz
+	p.write(t, "config/general.json", `{"particles": 1}`)
+	git(t, "add", "-A")
+	git(t, "commit", "-q", "-m", "fix(config): lower the particle count")
+	git(t, "commit", "-q", "--allow-empty", "-m", "feat!: update to Minecraft 1.21.4")
+	git(t, "commit", "-q", "--allow-empty", "-m", "docs: explain the settings")
+	git(t, "commit", "-q", "--allow-empty", "-m", "Fix a typo")
+
+	release(t, "")
+
+	changelogMD := git(t, "show", "HEAD:CHANGELOG.md")
+	for _, want := range []string{"- lower the particle count", "- **Breaking:** update to Minecraft 1.21.4"} {
+		if !strings.Contains(changelogMD, want) {
+			t.Errorf("the changelog is missing %q:\n%s", want, changelogMD)
+		}
+	}
+	for _, unwanted := range []string{"explain the settings", "typo"} {
+		if strings.Contains(changelogMD, unwanted) {
+			t.Errorf("the changelog has %q, which isn't a change to the pack:\n%s", unwanted, changelogMD)
+		}
+	}
+	if got := headMessage(t); got != "chore(release): 2.0.0" {
+		t.Errorf("release commit message = %q, want 2.0.0 for a breaking commit", got)
 	}
 }
 
-func TestReleaseRefusesARepositoryWithNoCommits(t *testing.T) {
+func TestReleaseFindsWhereTheLastOneWasMadeWhenItWasNotRecorded(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	release(t, "")
+
+	// A history from before the commit was recorded: the same, without it
+	history, err := changelog.LoadHistory("changelog.toml")
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+	history.Releases[0].Commit = ""
+	if err := history.Write("changelog.toml"); err != nil {
+		t.Fatalf("failed to write history: %v", err)
+	}
+	git(t, "commit", "-q", "-a", "-m", "chore: history from before commits were recorded")
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+
+	out := release(t, "")
+
+	if got := headMessage(t); got != "chore(release): 1.1.0" {
+		t.Errorf("release commit message = %q, want 1.1.0 for the mod added since; output:\n%s", got, out)
+	}
+	if changelogMD := git(t, "show", "HEAD:CHANGELOG.md"); strings.Count(changelogMD, "**Sodium**") != 1 {
+		t.Errorf("the changelog lists Sodium more than once, so the first release was read again:\n%s", changelogMD)
+	}
+}
+
+func TestReleaseSinceReadsFromTheCommitGiven(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	release(t, "")
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	release(t, "")
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
 
 	var err error
-	cmdtest.CaptureStdout(t, func() { err = runRelease("") })
+	cmdtest.CaptureStdout(t, func() { err = runRelease("", "v1.0.0") })
+	if err != nil {
+		t.Fatalf("runRelease() returned error: %v", err)
+	}
 
-	if err == nil || !strings.Contains(err.Error(), "no commits") {
-		t.Errorf("runRelease() error = %v, want one saying there are no commits", err)
+	// Everything since the first release, so Iris is listed again as well as Zoom
+	changelogMD := git(t, "show", "HEAD:CHANGELOG.md")
+	newest := changelogMD[strings.Index(changelogMD, "## 1.2.0"):strings.Index(changelogMD, "## 1.1.0")]
+	if !strings.Contains(newest, "**Iris** 1.0 (client)") || !strings.Contains(newest, "**Zoom** 2.0 (client)") {
+		t.Errorf("the newest release should list what was added since v1.0.0:\n%s", newest)
 	}
 }
 
@@ -621,7 +718,7 @@ func TestReleaseTellsYouHowToFinishWhenTheTagAlreadyExists(t *testing.T) {
 	git(t, "tag", "v1.0.0") // in the way of the first release
 
 	var err error
-	cmdtest.CaptureStdout(t, func() { err = runRelease("") })
+	cmdtest.CaptureStdout(t, func() { err = runRelease("", "") })
 
 	if err == nil {
 		t.Fatal("runRelease() succeeded although the tag already existed")
@@ -764,7 +861,7 @@ func TestCommitFailsWhenVersionsCannotBeLookedUp(t *testing.T) {
 	})
 }
 
-func TestReleaseCommitsTheVersionsItSaved(t *testing.T) {
+func TestReleaseCommitsTheVersionsItSavesBeforeReleasing(t *testing.T) {
 	setUpRepo(t)
 	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
 	p := setUpPack(t, "", "1.0.0")
@@ -774,14 +871,13 @@ func TestReleaseCommitsTheVersionsItSaved(t *testing.T) {
 
 	release(t, "")
 
-	if got := headMessage(t); got != "chore(release): 1.0.0" {
-		t.Errorf("release commit message = %q", got)
+	// Committing what is pending is what records the version, and that is a commit of its own before the release's
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"chore(pack): update pack files", "chore(release): 1.0.0"}) {
+		t.Errorf("commit messages = %q", got)
 	}
-	changed := git(t, "show", "--name-only", "--format=", "HEAD")
-	for _, want := range []string{"mods/sodium.pw.toml", "index.toml", "CHANGELOG.md", "changelog.toml"} {
-		if !strings.Contains(changed, want) {
-			t.Errorf("release commit doesn't include %s:\n%s", want, changed)
-		}
+	revs := lastCommits(t, 2)
+	if changed := commitFiles(t, revs[0]); !slices.Contains(changed, "mods/sodium.pw.toml") {
+		t.Errorf("the commit before the release changed %v, want the mod that had its version recorded", changed)
 	}
 	if changelogMD := git(t, "show", "HEAD:CHANGELOG.md"); !strings.Contains(changelogMD, "**Sodium** 0.5.7 (client)") {
 		t.Errorf("the committed changelog doesn't show the version:\n%s", changelogMD)
@@ -819,30 +915,33 @@ func TestCommitDryRunSaysWhenOnlyVersionsWouldBeCommitted(t *testing.T) {
 	}
 }
 
-func TestReleaseWithNothingNewToldToCommitWhatItSaved(t *testing.T) {
+func TestReleaseWithNothingNewToldToCommitWhatItFixed(t *testing.T) {
 	setUpRepo(t)
 	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
 	p := setUpPack(t, "", "1.0.0")
 	p.unversioned(t, src, "Sodium", core.ClientSide, "id-a")
 	commit(t)
-	release(t, "") // the first release, while the version couldn't be found
+	release(t, "") // the first release, while the version couldn't be found: it lists the file name
 	src.Versions = map[string]string{"id-a": "0.5.7"}
 	before := commitCount(t)
 
 	out := release(t, "")
 
-	// No release was made, but the pack changed, and the release commit is the only one this command makes
-	if !strings.Contains(out, "Recorded the versions of 1 mod") {
-		t.Errorf("output = %q, want it to say the versions were recorded", out)
+	// The version was recorded, in a commit that doesn't make a release, and the old changelog lines were fixed
+	if !strings.Contains(out, "No changes since the last release (1.0.0).") || !strings.Contains(out, "Updated 1 line in the changelog.") {
+		t.Errorf("output = %q, want it to say nothing was released and what was fixed", out)
 	}
 	if !strings.Contains(out, `packwiz git commit`) {
 		t.Errorf("output = %q, want it to say how to commit what changed", out)
 	}
-	if got := commitCount(t); got != before {
-		t.Errorf("commit count = %d, want %d; nothing was released", got, before)
+	if got := commitCount(t); got != before+1 {
+		t.Errorf("commit count = %d, want %d: the one that recorded the version", got, before+1)
 	}
 	if git(t, "status", "--porcelain") == "" {
-		t.Error("the tree is clean, but the versions were saved to files")
+		t.Error("the tree is clean, but the changelog was rewritten")
+	}
+	if got := readFile(t, "CHANGELOG.md"); !strings.Contains(got, "**Sodium** 0.5.7 (client)") || strings.Contains(got, "sodium-id-a.jar") {
+		t.Errorf("CHANGELOG.md still shows the file name:\n%s", got)
 	}
 }
 
@@ -1490,4 +1589,271 @@ func TestCommitFixesAStaleCommittedIndex(t *testing.T) {
 	}
 	requireConsistentPack(t, "", "HEAD")
 	requireClean(t)
+}
+
+// plainCommit makes a commit the way a person would with git, with a message of their own and nothing staged
+func plainCommit(t *testing.T, subject string, body ...string) {
+	t.Helper()
+	args := []string{"commit", "-q", "--allow-empty", "-m", subject}
+	for _, paragraph := range body {
+		args = append(args, "-m", paragraph)
+	}
+	git(t, args...)
+}
+
+func TestLogListsCommitsOldestFirstWithTheirBodies(t *testing.T) {
+	setUpRepo(t)
+	plainCommit(t, "first")
+	plainCommit(t, "feat(mods)!: second", "A paragraph.\n\nWith two lines in it.", "BREAKING CHANGE: something")
+	plainCommit(t, "third")
+	r, err := openRepo(".")
+	if err != nil {
+		t.Fatalf("openRepo() returned error: %v", err)
+	}
+
+	got, err := r.log("")
+	if err != nil {
+		t.Fatalf("log() returned error: %v", err)
+	}
+
+	want := []changelog.Commit{
+		{Subject: "first"},
+		{Subject: "feat(mods)!: second", Body: "A paragraph.\n\nWith two lines in it.\n\nBREAKING CHANGE: something"},
+		{Subject: "third"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("log() =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestLogSinceListsOnlyTheCommitsAfterIt(t *testing.T) {
+	setUpRepo(t)
+	plainCommit(t, "one")
+	second := func() string { plainCommit(t, "two"); return git(t, "rev-parse", "HEAD") }()
+	plainCommit(t, "three")
+	plainCommit(t, "four")
+	git(t, "tag", "v-two", second)
+	r, err := openRepo(".")
+	if err != nil {
+		t.Fatalf("openRepo() returned error: %v", err)
+	}
+	subjects := func(commits []changelog.Commit) []string {
+		var out []string
+		for _, c := range commits {
+			out = append(out, c.Subject)
+		}
+		return out
+	}
+
+	for name, since := range map[string]string{"a hash": second, "a tag": "v-two", "a branch-like name": "HEAD~2"} {
+		got, err := r.log(since)
+		if err != nil {
+			t.Fatalf("%s: log() returned error: %v", name, err)
+		}
+		if want := []string{"three", "four"}; !reflect.DeepEqual(subjects(got), want) {
+			t.Errorf("%s: log() = %v, want %v", name, subjects(got), want)
+		}
+	}
+
+	if got, err := r.log("HEAD"); err != nil || len(got) != 0 {
+		t.Errorf("log(HEAD) = %v, %v, want nothing after the current commit", got, err)
+	}
+	if _, err := r.log("no-such-revision"); err == nil {
+		t.Error("log() of a revision that doesn't exist returned no error")
+	}
+	// Something that looks like an option is never handed to git as one
+	if _, err := r.log("--output=/tmp/should-not-exist"); err == nil || !strings.Contains(err.Error(), "isn't a commit") {
+		t.Errorf("log() of an option = %v, want it refused as not being a commit", err)
+	}
+}
+
+func TestLogSkipsMergeCommits(t *testing.T) {
+	setUpRepo(t)
+	plainCommit(t, "base")
+	git(t, "checkout", "-q", "-b", "side")
+	plainCommit(t, "on the side")
+	git(t, "checkout", "-q", "-")
+	plainCommit(t, "on the main line")
+	git(t, "merge", "-q", "--no-ff", "-m", "Merge branch 'side'", "side")
+	r, err := openRepo(".")
+	if err != nil {
+		t.Fatalf("openRepo() returned error: %v", err)
+	}
+
+	got, err := r.log("")
+	if err != nil {
+		t.Fatalf("log() returned error: %v", err)
+	}
+	for _, c := range got {
+		if strings.HasPrefix(c.Subject, "Merge") {
+			t.Errorf("log() has the merge commit %q, which says nothing about the pack", c.Subject)
+		}
+	}
+	if len(got) != 3 {
+		t.Errorf("log() has %d commits, want the 3 that aren't merges", len(got))
+	}
+}
+
+func TestHeadAndLastChangedIn(t *testing.T) {
+	setUpRepo(t)
+	if err := os.WriteFile("a.txt", []byte("a"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	git(t, "add", "a.txt")
+	git(t, "commit", "-q", "-m", "add a")
+	added := git(t, "rev-parse", "HEAD")
+	plainCommit(t, "changes nothing")
+	r, err := openRepo(".")
+	if err != nil {
+		t.Fatalf("openRepo() returned error: %v", err)
+	}
+
+	if head, err := r.head(); err != nil || head != git(t, "rev-parse", "HEAD") {
+		t.Errorf("head() = %q, %v, want the current commit", head, err)
+	}
+	if got, err := r.lastChangedIn("a.txt"); err != nil || got != added {
+		t.Errorf("lastChangedIn(a.txt) = %q, %v, want the commit that changed it, %q", got, err, added)
+	}
+	if got, err := r.lastChangedIn("never-existed.txt"); err != nil || got != "" {
+		t.Errorf("lastChangedIn(never-existed.txt) = %q, %v, want nothing", got, err)
+	}
+}
+
+func TestPendingCommitsAreWhatCommitWouldMake(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	p.mod(t, "Lithium", core.ServerSide, "0.12.0")
+	p.write(t, "config/a.json", "{}")
+	before := commitCount(t)
+
+	var got []changelog.Commit
+	var err error
+	cmdtest.CaptureStdout(t, func() { got, err = pendingCommits() })
+	if err != nil {
+		t.Fatalf("pendingCommits() returned error: %v", err)
+	}
+
+	want := []changelog.Commit{
+		{Subject: "feat(mods)!: add Lithium 0.12.0 (server)", Body: wantBreakingFooter},
+		{Subject: "fix(config): add config/a.json"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("pendingCommits() =\n%+v\nwant\n%+v", got, want)
+	}
+	if now := commitCount(t); now != before {
+		t.Errorf("commit count = %d, want %d; describing the commits isn't making them", now, before)
+	}
+
+	// And they are the ones that get made
+	commit(t)
+	if made := lastMessages(t, 2); !reflect.DeepEqual(made, []string{
+		"feat(mods)!: add Lithium 0.12.0 (server)\n\n" + wantBreakingFooter, "fix(config): add config/a.json",
+	}) {
+		t.Errorf("committed %q, want what was described", made)
+	}
+}
+
+func TestChangelogRepositoryIsRegisteredAndNeedsAGitRepository(t *testing.T) {
+	setUpRepo(t)
+	setUpPack(t, "", "1.0.0")
+	if repo, err := changelog.OpenRepository(); err != nil || repo == nil {
+		t.Errorf("OpenRepository() inside a repository = %v, %v, want one", repo, err)
+	}
+
+	// Somewhere that isn't in one
+	dir := cmdtest.Chdir(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	cmdtest.SetViper(t, "pack-file", "pack.toml")
+	if _, err := changelog.OpenRepository(); err == nil || !strings.Contains(err.Error(), "git init") {
+		t.Errorf("OpenRepository() outside a repository error = %v, want one telling the user to run git init", err)
+	}
+}
+
+// Everything packwiz git commit writes must be read back by a changelog as the change it described, and as the same
+// size of change, or the version a release comes to would depend on how it was worked out
+func TestCommitMessagesAreReadBackAsTheChangesTheyDescribe(t *testing.T) {
+	mods := []changelog.Change{
+		{Kind: changelog.ModAdded, Name: "Sodium", Side: core.ClientSide, To: "0.5.7"},
+		{Kind: changelog.ModRemoved, Name: "Sodium", Side: core.ClientSide, From: "0.5.7"},
+		{Kind: changelog.ModUpdated, Name: "Iris", Side: core.ClientSide, From: "1.7.0", To: "1.7.1"},
+		{Kind: changelog.ModAdded, Name: "Lithium", Side: core.ServerSide, To: "0.12.0"},
+		{Kind: changelog.ModUpdated, Name: "Lithium", Side: core.ServerSide, From: "0.12.0", To: "0.12.1"},
+		{Kind: changelog.ModRemoved, Name: "Fabric API", Side: core.UniversalSide, From: "0.100.0+1.21.1"},
+		{Kind: changelog.ModAdded, Name: "Iris Shaders", Side: core.ClientSide, To: "1.8.12+1.21.1-neoforge"},
+		{Kind: changelog.ModUpdated, Name: "Roughly Enough Items (REI)", Side: core.UniversalSide, From: "16.0.799", To: "16.0.800"},
+		{Kind: changelog.ModAdded, Name: "Xaero's Minimap", Side: core.ClientSide, To: "25.2.10_Fabric_1.21"},
+		{Kind: changelog.ModUpdated, Name: "Sodium", Side: core.ClientSide, From: "sodium-0.5.7.jar", To: "sodium-0.5.8.jar"},
+	}
+	files := []changelog.Change{
+		{Kind: changelog.FileAdded, Path: "config/sodium.json"},
+		{Kind: changelog.FileChanged, Path: "config/iris.properties"},
+		{Kind: changelog.FileRemoved, Path: "options.txt"},
+	}
+
+	read := func(changes []changelog.Change) []changelog.Change {
+		message := Message(changes)
+		subject, body, _ := strings.Cut(message, "\n")
+		return changelog.ChangesFromCommits([]changelog.Commit{{Subject: subject, Body: strings.TrimSpace(body)}})
+	}
+
+	t.Run("each change in a commit of its own", func(t *testing.T) {
+		for _, c := range append(append([]changelog.Change(nil), mods...), files...) {
+			got := read([]changelog.Change{c})
+			if len(got) != 1 || got[0] != c {
+				t.Errorf("Message(%+v) was read back as %+v", c, got)
+			}
+			if changelog.HighestBump(got) != c.Bump() {
+				t.Errorf("Message(%+v) was read back as a %v change, want %v", c, changelog.HighestBump(got), c.Bump())
+			}
+		}
+	})
+
+	t.Run("several files in one commit", func(t *testing.T) {
+		if got := read(files); !reflect.DeepEqual(got, files) {
+			t.Errorf("the config commit was read back as\n%+v\nwant\n%+v", got, files)
+		}
+	})
+
+	t.Run("mods and files together, as commits once were", func(t *testing.T) {
+		together := []changelog.Change{files[0], mods[3], mods[2]}
+		got := read(together)
+		if len(got) != 3 || changelog.HighestBump(got) != changelog.HighestBump(together) {
+			t.Errorf("read back %+v, want the same three changes and bump", got)
+		}
+	})
+}
+
+func TestReadingCommitMessagesBackNeverChangesTheBumpOfAnyCombination(t *testing.T) {
+	kinds := []changelog.Change{
+		{Kind: changelog.ModAdded, Name: "A", Side: core.ClientSide, To: "1"},
+		{Kind: changelog.ModRemoved, Name: "B", Side: core.ClientSide, From: "1"},
+		{Kind: changelog.ModUpdated, Name: "C", Side: core.ClientSide, From: "1", To: "2"},
+		{Kind: changelog.ModAdded, Name: "D", Side: core.ServerSide, To: "1"},
+		{Kind: changelog.ModUpdated, Name: "E", Side: core.UniversalSide, From: "1", To: "2"},
+		{Kind: changelog.FileChanged, Path: "config/f.json"},
+		{Kind: changelog.FileAdded, Path: "config/g.json"},
+	}
+	for mask := 1; mask < 1<<len(kinds); mask++ {
+		var changes []changelog.Change
+		for i, c := range kinds {
+			if mask&(1<<i) != 0 {
+				changes = append(changes, c)
+			}
+		}
+		// As one commit, and as a commit for each mod and one for the files, which is what is actually made
+		var commits []changelog.Commit
+		for _, step := range planCommits(changes, false) {
+			subject, body, _ := strings.Cut(step.message, "\n")
+			commits = append(commits, changelog.Commit{Subject: subject, Body: strings.TrimSpace(body)})
+		}
+		got := changelog.ChangesFromCommits(commits)
+		if want := changelog.HighestBump(changes); changelog.HighestBump(got) != want {
+			t.Fatalf("the commits for %+v were read back as %+v, a %v change; want %v", changes, got, changelog.HighestBump(got), want)
+		}
+		if len(got) != len(changes) {
+			t.Fatalf("the commits for %+v were read back as %d changes, want %d: %+v", changes, len(got), len(changes), got)
+		}
+	}
 }
