@@ -66,6 +66,13 @@ var initCmd = &cobra.Command{
 		}
 
 		mcVersion := viper.GetString("init.mc-version")
+		if len(mcVersion) > 0 && !mcVersions.IsValid(mcVersion) {
+			fmt.Println("\"" + mcVersion + "\" is not a valid Minecraft version!")
+			if viper.GetBool("non-interactive") {
+				os.Exit(1)
+			}
+			mcVersion = ""
+		}
 		if len(mcVersion) == 0 {
 			var latestVersion string
 			if viper.GetBool("init.snapshot") {
@@ -76,51 +83,78 @@ var initCmd = &cobra.Command{
 			if viper.GetBool("init.latest") {
 				mcVersion = latestVersion
 			} else {
-				mcVersion = initReadValue("Minecraft version ["+latestVersion+"]: ", latestVersion)
+				mcVersion = initReadValidValue(
+					"Minecraft version ["+latestVersion+"]: ", latestVersion,
+					mcVersions.IsValid,
+					func(v string) string { return "\"" + v + "\" is not a valid Minecraft version, please try again." },
+				)
 			}
 		}
-		mcVersions.CheckValid(mcVersion)
+
+		loaderNames := slices.Collect(maps.Keys(core.ModLoaders))
+		slices.Sort(loaderNames)
+		validLoaderChoices := append([]string{"none"}, loaderNames...)
+		isValidLoaderChoice := func(name string) bool { return slices.Contains(validLoaderChoices, name) }
 
 		modLoaderName := strings.ToLower(viper.GetString("init.modloader"))
+		if len(modLoaderName) > 0 && !isValidLoaderChoice(modLoaderName) {
+			fmt.Println("\"" + modLoaderName + "\" is not a supported mod loader! Use \"none\" to specify no modloader, or to configure one manually.")
+			fmt.Println("The following mod loaders are supported: " + strings.Join(validLoaderChoices, ", "))
+			if viper.GetBool("non-interactive") {
+				os.Exit(1)
+			}
+			modLoaderName = ""
+		}
 		if len(modLoaderName) == 0 {
-			modLoaderName = "neoforge"
+			modLoaderName = strings.ToLower(initReadValidValue(
+				"Mod loader [neoforge] ("+strings.Join(validLoaderChoices, ", ")+"): ", "neoforge",
+				isValidLoaderChoice,
+				func(v string) string {
+					return "\"" + v + "\" is not a supported mod loader, please try again. Supported mod loaders: " + strings.Join(validLoaderChoices, ", ")
+				},
+			))
 		}
 
 		loader, ok := core.ModLoaders[modLoaderName]
 		modLoaderVersions := make(map[string]string)
-		if modLoaderName != "none" {
-			if ok {
-				versionData, err := core.DoQuery(core.MakeQuery(loader, mcVersion))
-				if err != nil {
-					fmt.Printf("Error loading versions: %s\n", err)
-					os.Exit(1)
-				}
-				componentVersion := viper.GetString("init." + loader.Name + "-version")
-				if len(componentVersion) == 0 {
-					if viper.GetBool("init." + loader.Name + "-latest") {
-						componentVersion = versionData.Latest
-					} else {
-						componentVersion = initReadValue(loader.FriendlyName+" version ["+versionData.Latest+"]: ", versionData.Latest)
-					}
-				}
-				v := componentVersion
-				// NeoForge reused Forge's version-prefixing format (prefixed with the supported
-				// minecraft version), but only during the 1.20.1 days; they've since switched formats.
-				if loader.Name == "neoforge" && mcVersion == "1.20.1" {
-					v = cmdshared.GetRawForgeVersion(componentVersion)
-				}
-				if !slices.Contains(versionData.Versions, v) {
-					fmt.Println("Given " + loader.FriendlyName + " version cannot be found!")
-					os.Exit(1)
-				}
-				modLoaderVersions[loader.Name] = v
-			} else {
-				fmt.Println("Given mod loader is not supported! Use \"none\" to specify no modloader, or to configure one manually.")
-				fmt.Print("The following mod loaders are supported: ")
-				loader_names := slices.Collect(maps.Keys(core.ModLoaders))
-				fmt.Println(strings.Join(loader_names, ", "))
+		if modLoaderName != "none" && ok {
+			versionData, err := core.DoQuery(core.MakeQuery(loader, mcVersion))
+			if err != nil {
+				fmt.Printf("Error loading versions: %s\n", err)
 				os.Exit(1)
 			}
+			// NeoForge reused Forge's version-prefixing format (prefixed with the supported
+			// minecraft version), but only during the 1.20.1 days; they've since switched formats.
+			resolveVersion := func(v string) string {
+				if loader.Name == "neoforge" && mcVersion == "1.20.1" {
+					return cmdshared.GetRawForgeVersion(v)
+				}
+				return v
+			}
+			isValidComponentVersion := func(v string) bool { return slices.Contains(versionData.Versions, resolveVersion(v)) }
+
+			componentVersion := viper.GetString("init." + loader.Name + "-version")
+			if len(componentVersion) > 0 && !isValidComponentVersion(componentVersion) {
+				fmt.Println("\"" + componentVersion + "\" is not a valid " + loader.FriendlyName + " version!")
+				if viper.GetBool("non-interactive") {
+					os.Exit(1)
+				}
+				componentVersion = ""
+			}
+			if len(componentVersion) == 0 {
+				if viper.GetBool("init." + loader.Name + "-latest") {
+					componentVersion = versionData.Latest
+				} else {
+					componentVersion = initReadValidValue(
+						loader.FriendlyName+" version ["+versionData.Latest+"]: ", versionData.Latest,
+						isValidComponentVersion,
+						func(v string) string {
+							return "\"" + v + "\" is not a valid " + loader.FriendlyName + " version, please try again."
+						},
+					)
+				}
+			}
+			modLoaderVersions[loader.Name] = resolveVersion(componentVersion)
 		}
 
 		indexFilePath := viper.GetString("init.index-file")
@@ -219,13 +253,18 @@ func init() {
 	}
 }
 
+// stdinReader is shared across all initReadValue calls. A fresh bufio.Reader per call would
+// read ahead into its own internal buffer and discard whatever it didn't consume as a line,
+// silently dropping already-typed or piped-in answers to later prompts.
+var stdinReader = bufio.NewReader(os.Stdin)
+
 func initReadValue(prompt string, def string) string {
 	fmt.Print(prompt)
 	if viper.GetBool("non-interactive") {
 		fmt.Printf("%s\n", def)
 		return def
 	}
-	value, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	value, err := stdinReader.ReadString('\n')
 	if err != nil {
 		fmt.Printf("Error reading input: %s\n", err)
 		os.Exit(1)
@@ -236,4 +275,18 @@ func initReadValue(prompt string, def string) string {
 		return value
 	}
 	return def
+}
+
+// initReadValidValue repeatedly prompts until isValid accepts the entered value, printing
+// invalidMsg's result in between attempts. This keeps a single bad answer from aborting the
+// whole init process. In non-interactive mode, initReadValue immediately returns def, so def
+// must always be valid.
+func initReadValidValue(prompt string, def string, isValid func(string) bool, invalidMsg func(string) string) string {
+	for {
+		value := initReadValue(prompt, def)
+		if isValid(value) {
+			return value
+		}
+		fmt.Println(invalidMsg(value))
+	}
 }

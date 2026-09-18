@@ -23,11 +23,18 @@ type McVersionManifest struct {
 	} `json:"versions"`
 }
 
-func (m McVersionManifest) CheckValid(version string) {
+func (m McVersionManifest) IsValid(version string) bool {
 	for _, v := range m.Versions {
 		if v.ID == version {
-			return
+			return true
 		}
+	}
+	return false
+}
+
+func (m McVersionManifest) CheckValid(version string) {
+	if m.IsValid(version) {
+		return
 	}
 	fmt.Println("Given version is not a valid Minecraft version!")
 	os.Exit(1)
