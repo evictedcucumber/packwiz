@@ -25,6 +25,32 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Easy installation and updating of multiple mods at once from Modrinth
 - Exporting to Modrinth packs
 - Server-only and Client-only mod handling
+- Versioned releases with an automatic changelog, and git commits following conventional commits
+
+## Changelog and releases
+
+A pack manages its own release history. Each mod's `.pw.toml` records its readable `version` when it is added or updated, and a release remembers what the pack contained, so the next release can describe exactly what changed.
+
+```
+packwiz changelog          # preview what changed since the last release, and the version it would make
+packwiz changelog release  # bump pack.toml's version, update CHANGELOG.md, and remember the pack's contents
+packwiz git commit         # commit every change to the pack with a generated conventional commit message
+packwiz git release        # changelog release, then commit it as "chore(release): X.Y.Z" and tag it "vX.Y.Z"
+```
+
+The version is bumped by the most significant change since the last release:
+
+| Change | Version | Commit |
+| --- | --- | --- |
+| any change to a server or both-side mod | major | `feat(mods)!: add Lithium 0.12.0 (server)` |
+| a client-only mod added or removed | minor | `feat(mods): add Sodium 0.5.7 (client)` |
+| a client-only mod updated | patch | `fix(mods): update Iris 1.7.0 -> 1.7.1 (client)` |
+| a config or other file changed | patch | `fix(config): change config/sodium.json` |
+| anything else (pinning a mod, `pack.toml` edits, ...) | none | `chore(pack): update pack files` |
+
+The first release keeps the version already in `pack.toml`. Pass `--version X.Y.Z` to `release` to choose a higher version than the one worked out. The release history is kept in `changelog.toml` next to `pack.toml`, and `CHANGELOG.md` is generated from it; neither is distributed as part of the pack. `packwiz git release` needs everything committed first (`packwiz git commit`), so the release commit contains only the release.
+
+Mods added before `version` was recorded are compared by file name until they are next updated.
 
 ## Installation
 This fork does not currently publish prebuilt binaries, so install from source:
