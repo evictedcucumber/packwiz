@@ -1,6 +1,7 @@
 package core
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -122,6 +123,80 @@ func TestModGetDestFilePath(t *testing.T) {
 	want := filepath.Join(dir, "mods", "test-mod.jar")
 	if got != want {
 		t.Errorf("GetDestFilePath() = %q, want %q", got, want)
+	}
+}
+
+// stubUpdater is a minimal Updater for exercising LoadMod's update-plugin
+// parsing and GetParsedUpdateData.
+type stubUpdater struct{}
+
+func (stubUpdater) ParseUpdate(raw map[string]interface{}) (interface{}, error) {
+	return raw["version"], nil
+}
+func (stubUpdater) CheckUpdate([]*Mod, Pack) ([]UpdateCheck, error) { return nil, nil }
+func (stubUpdater) DoUpdate([]*Mod, []interface{}) error            { return nil }
+
+func TestModGetParsedUpdateDataKnownUpdater(t *testing.T) {
+	Updaters["stub"] = stubUpdater{}
+	t.Cleanup(func() { delete(Updaters, "stub") })
+
+	dir := t.TempDir()
+	metaPath := filepath.Join(dir, "test-mod.pw.toml")
+	if err := os.WriteFile(metaPath, []byte(`name = "Test Mod"
+filename = "test-mod.jar"
+
+[download]
+hash-format = "sha256"
+hash = "deadbeef"
+
+[update.stub]
+version = "1.2.3"
+`), 0644); err != nil {
+		t.Fatalf("failed to write mod fixture: %v", err)
+	}
+
+	mod, err := LoadMod(metaPath)
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+
+	data, ok := mod.GetParsedUpdateData("stub")
+	if !ok {
+		t.Fatal("GetParsedUpdateData(\"stub\") ok = false, want true")
+	}
+	if data != "1.2.3" {
+		t.Errorf("GetParsedUpdateData(\"stub\") = %v, want %q", data, "1.2.3")
+	}
+}
+
+func TestModGetParsedUpdateDataUnknownUpdater(t *testing.T) {
+	mod := Mod{Name: "Test Mod"}
+	// LoadMod normally populates updateData; a zero-value Mod has a nil map,
+	// so this also exercises the not-found path when nothing has been parsed.
+	_, ok := mod.GetParsedUpdateData("nonexistent")
+	if ok {
+		t.Error("GetParsedUpdateData(\"nonexistent\") ok = true, want false")
+	}
+}
+
+func TestLoadModUnknownUpdatePlugin(t *testing.T) {
+	dir := t.TempDir()
+	metaPath := filepath.Join(dir, "test-mod.pw.toml")
+	if err := os.WriteFile(metaPath, []byte(`name = "Test Mod"
+filename = "test-mod.jar"
+
+[download]
+hash-format = "sha256"
+hash = "deadbeef"
+
+[update.doesnotexist]
+version = "1.2.3"
+`), 0644); err != nil {
+		t.Fatalf("failed to write mod fixture: %v", err)
+	}
+
+	if _, err := LoadMod(metaPath); err == nil {
+		t.Error("expected an error for an unregistered update plugin, got nil")
 	}
 }
 

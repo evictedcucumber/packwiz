@@ -448,3 +448,55 @@ func TestIndexFilesAliasEmptyStringNormalisedToClean(t *testing.T) {
 		t.Errorf("Alias = %q, want empty string (not '.')", entry.Alias)
 	}
 }
+
+func TestIndexLoadAllMods(t *testing.T) {
+	dir := t.TempDir()
+
+	modPath := filepath.Join(dir, "mods", "foo.pw.toml")
+	if err := os.MkdirAll(filepath.Dir(modPath), 0755); err != nil {
+		t.Fatalf("failed to create mods dir: %v", err)
+	}
+	if err := os.WriteFile(modPath, []byte(`name = "Foo"
+filename = "foo.jar"
+
+[download]
+hash-format = "sha256"
+hash = "abc123"
+`), 0644); err != nil {
+		t.Fatalf("failed to write mod fixture: %v", err)
+	}
+
+	idx := Index{
+		HashFormat: "sha256",
+		Files: IndexFiles{
+			"mods/foo.pw.toml": &indexFile{File: "mods/foo.pw.toml", MetaFile: true},
+			"config/bar.txt":   &indexFile{File: "config/bar.txt"}, // not a metafile, must be skipped
+		},
+		packRoot: dir,
+	}
+
+	mods, err := idx.LoadAllMods()
+	if err != nil {
+		t.Fatalf("LoadAllMods() returned error: %v", err)
+	}
+	if len(mods) != 1 {
+		t.Fatalf("got %d mods, want 1 (non-metafile entries must be excluded)", len(mods))
+	}
+	if mods[0].Name != "Foo" {
+		t.Errorf("mods[0].Name = %q, want %q", mods[0].Name, "Foo")
+	}
+}
+
+func TestIndexLoadAllModsMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	idx := Index{
+		Files: IndexFiles{
+			"mods/missing.pw.toml": &indexFile{File: "mods/missing.pw.toml", MetaFile: true},
+		},
+		packRoot: dir,
+	}
+
+	if _, err := idx.LoadAllMods(); err == nil {
+		t.Error("expected an error when a metafile referenced by the index is missing, got nil")
+	}
+}

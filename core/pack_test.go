@@ -264,6 +264,116 @@ func TestGetLoadersNone(t *testing.T) {
 	}
 }
 
+func TestPackLoadIndex(t *testing.T) {
+	packFile := withPackFile(t, "")
+	dir := filepath.Dir(packFile)
+
+	indexPath := filepath.Join(dir, "index.toml")
+	if err := os.WriteFile(indexPath, []byte(`hash-format = "sha256"
+
+[[files]]
+file = "mods/foo.pw.toml"
+hash = "abc123"
+metafile = true
+`), 0644); err != nil {
+		t.Fatalf("failed to write index.toml fixture: %v", err)
+	}
+
+	pack := Pack{PackFormat: CurrentPackFormat}
+	pack.Index.File = "index.toml"
+
+	index, err := pack.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex() returned error: %v", err)
+	}
+	if index.HashFormat != "sha256" {
+		t.Errorf("HashFormat = %q, want %q", index.HashFormat, "sha256")
+	}
+	if _, ok := index.Files["mods/foo.pw.toml"]; !ok {
+		t.Errorf("expected mods/foo.pw.toml in loaded index, got %v", index.Files)
+	}
+}
+
+func TestPackLoadIndexAbsolutePath(t *testing.T) {
+	packFile := withPackFile(t, "")
+	dir := filepath.Dir(packFile)
+
+	indexPath := filepath.Join(dir, "nested", "index.toml")
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0755); err != nil {
+		t.Fatalf("failed to create nested dir: %v", err)
+	}
+	if err := os.WriteFile(indexPath, []byte(`hash-format = "sha256"
+`), 0644); err != nil {
+		t.Fatalf("failed to write index.toml fixture: %v", err)
+	}
+
+	pack := Pack{PackFormat: CurrentPackFormat}
+	pack.Index.File = indexPath // absolute path
+
+	index, err := pack.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex() returned error: %v", err)
+	}
+	if index.HashFormat != "sha256" {
+		t.Errorf("HashFormat = %q, want %q", index.HashFormat, "sha256")
+	}
+}
+
+func TestUpdateIndexHash(t *testing.T) {
+	packFile := withPackFile(t, "")
+	dir := filepath.Dir(packFile)
+
+	indexPath := filepath.Join(dir, "index.toml")
+	if err := os.WriteFile(indexPath, []byte("hash-format = \"sha256\"\n"), 0644); err != nil {
+		t.Fatalf("failed to write index.toml fixture: %v", err)
+	}
+
+	pack := Pack{PackFormat: CurrentPackFormat}
+	pack.Index.File = "index.toml"
+
+	if err := pack.UpdateIndexHash(); err != nil {
+		t.Fatalf("UpdateIndexHash() returned error: %v", err)
+	}
+	if pack.Index.HashFormat != "sha256" {
+		t.Errorf("Index.HashFormat = %q, want %q", pack.Index.HashFormat, "sha256")
+	}
+	if pack.Index.Hash == "" {
+		t.Error("Index.Hash is empty after UpdateIndexHash()")
+	}
+}
+
+func TestUpdateIndexHashNoInternalHashes(t *testing.T) {
+	withPackFile(t, "")
+	old := viper.GetBool("no-internal-hashes")
+	viper.Set("no-internal-hashes", true)
+	t.Cleanup(func() { viper.Set("no-internal-hashes", old) })
+
+	pack := Pack{PackFormat: CurrentPackFormat}
+	pack.Index.File = "index.toml"
+	pack.Index.Hash = "stale"
+
+	if err := pack.UpdateIndexHash(); err != nil {
+		t.Fatalf("UpdateIndexHash() returned error: %v", err)
+	}
+	if pack.Index.Hash != "" {
+		t.Errorf("Index.Hash = %q, want empty when no-internal-hashes is set", pack.Index.Hash)
+	}
+	if pack.Index.HashFormat != "sha256" {
+		t.Errorf("Index.HashFormat = %q, want %q", pack.Index.HashFormat, "sha256")
+	}
+}
+
+func TestUpdateIndexHashMissingFile(t *testing.T) {
+	withPackFile(t, "")
+
+	pack := Pack{PackFormat: CurrentPackFormat}
+	pack.Index.File = "does-not-exist.toml"
+
+	if err := pack.UpdateIndexHash(); err == nil {
+		t.Error("expected an error when the index file doesn't exist, got nil")
+	}
+}
+
 func slicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

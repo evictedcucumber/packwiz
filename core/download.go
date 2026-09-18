@@ -240,25 +240,21 @@ func downloadNewFile(task *downloadTask, cacheFolder string, hashesToObtain []st
 	// lock - otherwise two concurrent downloads of identical content could both
 	// decide they're new and race to rename into the same cache destination.
 	cacheMutex.Lock()
-	cacheHandle, alreadyExists := index.NewHandleFromHashes(hashes)
+	cacheHandle, _ := index.NewHandleFromHashes(hashes)
 	warnings := cacheHandle.UpdateIndex()
 	cacheMutex.Unlock()
 
-	var file *os.File
-	if alreadyExists {
-		// The downloaded content is already present in the cache under another
-		// entry; discard this duplicate temp copy rather than leaving it on disk.
-		discardTempFile(tempFile)
-		file, err = cacheHandle.Open()
-		if err != nil {
-			return CompletedDownload{}, fmt.Errorf("failed to read file %s from cache: %w", cacheHandle.Path(), err)
-		}
-	} else {
-		// Moves tempFile into the cache, or removes it if that fails
-		file, err = cacheHandle.CreateFromTemp(tempFile)
-		if err != nil {
-			return CompletedDownload{}, fmt.Errorf("failed to move file %s to cache: %w", cacheHandle.Path(), err)
-		}
+	// Always move our own temp copy into the cache, even if this hash was
+	// already present in the index: the index entry can become visible to
+	// other goroutines before the owning goroutine has actually renamed its
+	// file into place, so another goroutine's file may not exist on disk yet.
+	// Since the cache path
+	// is derived from the content hash and os.Rename atomically replaces an
+	// existing destination, racing to rename byte-identical content here is
+	// safe - whichever goroutine's rename lands last simply wins.
+	file, err := cacheHandle.CreateFromTemp(tempFile)
+	if err != nil {
+		return CompletedDownload{}, fmt.Errorf("failed to move file %s to cache: %w", cacheHandle.Path(), err)
 	}
 
 	return CompletedDownload{

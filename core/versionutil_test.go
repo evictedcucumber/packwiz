@@ -109,3 +109,65 @@ func TestNeoForge261snapshot6(t *testing.T) {
 	expectValid(t, "neoforge", "26.1-snapshot-6", "26.1.0.0-alpha.9+snapshot-6")
 	expectInvalid(t, "neoforge", "26.1-snapshot-6", "26.1.0.0-alpha.11+snapshot-7")
 }
+
+func TestWithQueryType(t *testing.T) {
+	base := MakeQuery(ModLoaders["neoforge"], "1.20.1")
+	if base.QueryType != Latest {
+		t.Fatalf("MakeQuery() QueryType = %v, want Latest", base.QueryType)
+	}
+
+	updated := base.WithQueryType(Recommended)
+	if updated.QueryType != Recommended {
+		t.Errorf("WithQueryType(Recommended) QueryType = %v, want Recommended", updated.QueryType)
+	}
+	if updated.Loader.Name != base.Loader.Name {
+		t.Errorf("WithQueryType() Loader = %v, want %v", updated.Loader, base.Loader)
+	}
+	if updated.McVersion != base.McVersion {
+		t.Errorf("WithQueryType() McVersion = %q, want %q", updated.McVersion, base.McVersion)
+	}
+	// The original query must be untouched.
+	if base.QueryType != Latest {
+		t.Errorf("original query QueryType = %v, want Latest (WithQueryType must not mutate the receiver)", base.QueryType)
+	}
+}
+
+func TestComponentToFriendlyName(t *testing.T) {
+	cases := []struct {
+		component string
+		want      string
+	}{
+		{"minecraft", "Minecraft"},
+		{"neoforge", "NeoForge"},
+		{"unknown-loader", "unknown-loader"},
+	}
+	for _, c := range cases {
+		t.Run(c.component, func(t *testing.T) {
+			if got := ComponentToFriendlyName(c.component); got != c.want {
+				t.Errorf("ComponentToFriendlyName(%q) = %q, want %q", c.component, got, c.want)
+			}
+		})
+	}
+}
+
+func TestHighestSliceIndex(t *testing.T) {
+	cases := []struct {
+		name   string
+		slice  []string
+		values []string
+		want   int
+	}{
+		{"no match", []string{"a", "b", "c"}, []string{"z"}, -1},
+		{"single match", []string{"a", "b", "c"}, []string{"b"}, 1},
+		{"picks highest of several matches", []string{"a", "b", "c"}, []string{"a", "c"}, 2},
+		{"empty values", []string{"a", "b", "c"}, nil, -1},
+		{"empty slice", nil, []string{"a"}, -1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := HighestSliceIndex(c.slice, c.values); got != c.want {
+				t.Errorf("HighestSliceIndex(%v, %v) = %d, want %d", c.slice, c.values, got, c.want)
+			}
+		})
+	}
+}

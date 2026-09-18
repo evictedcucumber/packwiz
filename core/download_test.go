@@ -3,9 +3,11 @@ package core
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jarcoal/httpmock"
@@ -678,5 +680,304 @@ func TestCreateDownloadSessionConcurrentDownloads(t *testing.T) {
 
 	if err := session.SaveIndex(); err != nil {
 		t.Errorf("SaveIndex() returned error: %v", err)
+	}
+}
+
+func TestGetRemainingHashes(t *testing.T) {
+	cases := []struct {
+		name           string
+		have           map[string]string
+		hashesToObtain []string
+		want           []string
+	}{
+		{"some missing", map[string]string{"sha256": "abc"}, []string{"sha256", "md5", "sha1"}, []string{"md5", "sha1"}},
+		{"none missing", map[string]string{"sha256": "abc", "md5": "def"}, []string{"sha256", "md5"}, nil},
+		{"none requested", map[string]string{"sha256": "abc"}, nil, nil},
+		{"all missing", map[string]string{}, []string{"sha256"}, []string{"sha256"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			handle := &CacheIndexHandle{Hashes: c.have}
+			got := handle.GetRemainingHashes(c.hashesToObtain)
+			if len(got) != len(c.want) {
+				t.Fatalf("GetRemainingHashes() = %v, want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("GetRemainingHashes()[%d] = %q, want %q", i, got[i], c.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestReuseExistingFileComputesMissingHashAndResetsPosition(t *testing.T) {
+	cachePath := t.TempDir()
+	content := []byte("cached content")
+	sha256Hash := writeCacheFile(t, cachePath, content)
+	md5Hash := hashOf(t, "md5", content)
+
+	idx := CacheIndex{cachePath: cachePath, Hashes: map[string][]string{cacheHashFormat: {sha256Hash}}}
+	handle := idx.GetHandleFromHash(cacheHashFormat, sha256Hash)
+	if handle == nil {
+		t.Fatal("GetHandleFromHash() returned nil for a hash that was just registered")
+	}
+
+	var mu sync.Mutex
+	dl, err := reuseExistingFile(handle, []string{cacheHashFormat, "md5"}, &Mod{Name: "test"}, &mu)
+	if err != nil {
+		t.Fatalf("reuseExistingFile() returned error: %v", err)
+	}
+	defer dl.File.Close()
+
+	if dl.Hashes["md5"] != md5Hash {
+		t.Errorf("Hashes[md5] = %q, want %q", dl.Hashes["md5"], md5Hash)
+	}
+	if dl.Hashes[cacheHashFormat] != sha256Hash {
+		t.Errorf("Hashes[%s] = %q, want %q", cacheHashFormat, dl.Hashes[cacheHashFormat], sha256Hash)
+	}
+
+	// The file must be seeked back to the start after computing the missing hash.
+	got, err := io.ReadAll(dl.File)
+	if err != nil {
+		t.Fatalf("failed to read returned file: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Errorf("file content = %q, want %q", got, content)
+	}
+
+	// The newly computed hash must also be persisted back into the index.
+	if idx.Hashes["md5"] == nil || idx.Hashes["md5"][handle.hashIdx] != md5Hash {
+		t.Errorf("index md5 hashes = %v, want entry %q at index %d", idx.Hashes["md5"], md5Hash, handle.hashIdx)
+	}
+}
+
+func TestReuseExistingFileNoMissingHashesSkipsIndexUpdate(t *testing.T) {
+	cachePath := t.TempDir()
+	content := []byte("cached content")
+	sha256Hash := writeCacheFile(t, cachePath, content)
+
+	idx := CacheIndex{cachePath: cachePath, Hashes: map[string][]string{cacheHashFormat: {sha256Hash}}}
+	handle := idx.GetHandleFromHash(cacheHashFormat, sha256Hash)
+
+	var mu sync.Mutex
+	dl, err := reuseExistingFile(handle, []string{cacheHashFormat}, &Mod{Name: "test"}, &mu)
+	if err != nil {
+		t.Fatalf("reuseExistingFile() returned error: %v", err)
+	}
+	defer dl.File.Close()
+	if len(dl.Warnings) != 0 {
+		t.Errorf("Warnings = %v, want none", dl.Warnings)
+	}
+}
+
+func TestReuseExistingFileMissingCacheFile(t *testing.T) {
+	cachePath := t.TempDir()
+	idx := CacheIndex{cachePath: cachePath}
+	handle := &CacheIndexHandle{
+		index:  &idx,
+		Hashes: map[string]string{cacheHashFormat: hashOf(t, "sha256", []byte("never written"))},
+	}
+
+	var mu sync.Mutex
+	_, err := reuseExistingFile(handle, []string{cacheHashFormat}, &Mod{Name: "test"}, &mu)
+	if err == nil {
+		t.Error("expected an error when the cache file referenced by the handle doesn't exist, got nil")
+	}
+}
+
+func TestMoveImportFilesAddsNewFile(t *testing.T) {
+	cachePath := t.TempDir()
+	importDir := filepath.Join(cachePath, DownloadCacheImportFolder)
+	if err := os.MkdirAll(importDir, 0755); err != nil {
+		t.Fatalf("failed to create import dir: %v", err)
+	}
+	content := []byte("imported content")
+	importFile := filepath.Join(importDir, "mystery.bin")
+	if err := os.WriteFile(importFile, content, 0644); err != nil {
+		t.Fatalf("failed to write import fixture: %v", err)
+	}
+
+	idx := CacheIndex{cachePath: cachePath, Hashes: map[string][]string{cacheHashFormat: {}}}
+	if err := idx.MoveImportFiles(); err != nil {
+		t.Fatalf("MoveImportFiles() returned error: %v", err)
+	}
+
+	if _, err := os.Stat(importFile); !os.IsNotExist(err) {
+		t.Error("import file should have been removed after being moved into the cache")
+	}
+
+	wantHash := hashOf(t, cacheHashFormat, content)
+	if len(idx.Hashes[cacheHashFormat]) != 1 || idx.Hashes[cacheHashFormat][0] != wantHash {
+		t.Fatalf("index hashes = %v, want [%s]", idx.Hashes[cacheHashFormat], wantHash)
+	}
+
+	got, err := os.ReadFile(filepath.Join(cachePath, wantHash[:2], wantHash[2:]))
+	if err != nil {
+		t.Fatalf("failed to read moved cache file: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Errorf("cached content = %q, want %q", got, content)
+	}
+}
+
+func TestMoveImportFilesDuplicateIsRemovedWithoutDuplicatingIndex(t *testing.T) {
+	cachePath := t.TempDir()
+	content := []byte("duplicate content")
+	existingHash := writeCacheFile(t, cachePath, content)
+
+	importDir := filepath.Join(cachePath, DownloadCacheImportFolder)
+	if err := os.MkdirAll(importDir, 0755); err != nil {
+		t.Fatalf("failed to create import dir: %v", err)
+	}
+	importFile := filepath.Join(importDir, "dup.bin")
+	if err := os.WriteFile(importFile, content, 0644); err != nil {
+		t.Fatalf("failed to write import fixture: %v", err)
+	}
+
+	idx := CacheIndex{cachePath: cachePath, Hashes: map[string][]string{cacheHashFormat: {existingHash}}}
+	if err := idx.MoveImportFiles(); err != nil {
+		t.Fatalf("MoveImportFiles() returned error: %v", err)
+	}
+
+	if _, err := os.Stat(importFile); !os.IsNotExist(err) {
+		t.Error("duplicate import file should have been removed")
+	}
+	if len(idx.Hashes[cacheHashFormat]) != 1 {
+		t.Errorf("index should still have exactly 1 entry after importing a duplicate, got %d", len(idx.Hashes[cacheHashFormat]))
+	}
+}
+
+// fakeMetaDownloaderData is a stub MetaDownloaderData for exercising the
+// "metadata:" download mode without a real network dependency.
+type fakeMetaDownloaderData struct {
+	manual   bool
+	download ManualDownload
+	fileData []byte
+}
+
+func (f fakeMetaDownloaderData) GetManualDownload() (bool, ManualDownload) {
+	return f.manual, f.download
+}
+
+func (f fakeMetaDownloaderData) DownloadFile() (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(f.fileData)), nil
+}
+
+type fakeMetaDownloader struct {
+	data []MetaDownloaderData
+}
+
+func (f fakeMetaDownloader) GetFilesMetadata([]*Mod) ([]MetaDownloaderData, error) {
+	return f.data, nil
+}
+
+func TestCreateDownloadSessionMetadataModeManualAndAuto(t *testing.T) {
+	cacheDir := t.TempDir()
+	oldCacheDir := viper.GetString("cache.directory")
+	viper.Set("cache.directory", cacheDir)
+	t.Cleanup(func() { viper.Set("cache.directory", oldCacheDir) })
+
+	manualMod := &Mod{Name: "manual-mod", FileName: "manual.jar",
+		Download: ModDownload{Mode: "metadata:fake", HashFormat: "sha256", Hash: "deadbeef"}}
+	autoContent := []byte("auto-downloaded content")
+	autoHash := hashOf(t, "sha256", autoContent)
+	autoMod := &Mod{Name: "auto-mod", FileName: "auto.jar",
+		Download: ModDownload{Mode: "metadata:fake", HashFormat: "sha256", Hash: autoHash}}
+
+	manualDownload := ManualDownload{Name: "Manual Mod", FileName: "manual.jar", URL: "https://example.com/manual"}
+	MetaDownloaders["fake"] = fakeMetaDownloader{data: []MetaDownloaderData{
+		fakeMetaDownloaderData{manual: true, download: manualDownload},
+		fakeMetaDownloaderData{manual: false, fileData: autoContent},
+	}}
+	t.Cleanup(func() { delete(MetaDownloaders, "fake") })
+
+	session, err := CreateDownloadSession([]*Mod{manualMod, autoMod}, []string{"sha256"})
+	if err != nil {
+		t.Fatalf("CreateDownloadSession() returned error: %v", err)
+	}
+
+	manuals := session.GetManualDownloads()
+	if len(manuals) != 1 {
+		t.Fatalf("GetManualDownloads() = %v, want 1 entry", manuals)
+	}
+	if manuals[0] != manualDownload {
+		t.Errorf("GetManualDownloads()[0] = %+v, want %+v", manuals[0], manualDownload)
+	}
+
+	results := make(map[string]CompletedDownload)
+	for dl := range session.StartDownloads() {
+		if dl.Error != nil {
+			t.Errorf("download for %s failed: %v", dl.Mod.Name, dl.Error)
+			continue
+		}
+		results[dl.Mod.Name] = dl
+		_ = dl.File.Close()
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d download results, want 1 (only the auto-download mod)", len(results))
+	}
+	if results["auto-mod"].Hashes["sha256"] != autoHash {
+		t.Errorf("auto-mod hash = %q, want %q", results["auto-mod"].Hashes["sha256"], autoHash)
+	}
+}
+
+func TestCreateDownloadSessionUnknownDownloadMode(t *testing.T) {
+	cacheDir := t.TempDir()
+	oldCacheDir := viper.GetString("cache.directory")
+	viper.Set("cache.directory", cacheDir)
+	t.Cleanup(func() { viper.Set("cache.directory", oldCacheDir) })
+
+	mod := &Mod{Name: "bad-mod", Download: ModDownload{Mode: "not-a-real-mode"}}
+	_, err := CreateDownloadSession([]*Mod{mod}, []string{"sha256"})
+	if err == nil {
+		t.Error("expected an error for an unknown download mode, got nil")
+	}
+}
+
+func TestCreateDownloadSessionUnknownMetaDownloader(t *testing.T) {
+	cacheDir := t.TempDir()
+	oldCacheDir := viper.GetString("cache.directory")
+	viper.Set("cache.directory", cacheDir)
+	t.Cleanup(func() { viper.Set("cache.directory", oldCacheDir) })
+
+	mod := &Mod{Name: "bad-mod", Download: ModDownload{Mode: "metadata:does-not-exist"}}
+	_, err := CreateDownloadSession([]*Mod{mod}, []string{"sha256"})
+	if err == nil {
+		t.Error("expected an error for an unregistered metadata downloader, got nil")
+	}
+}
+
+func TestDownloadNewFileDiscardsTempFileOnHTTPError(t *testing.T) {
+	httpmock.Activate(t)
+
+	cacheDir := t.TempDir()
+	oldCacheDir := viper.GetString("cache.directory")
+	viper.Set("cache.directory", cacheDir)
+	t.Cleanup(func() { viper.Set("cache.directory", oldCacheDir) })
+
+	httpmock.RegisterResponder("GET", "https://example.com/missing.jar", httpmock.NewStringResponder(404, "not found"))
+	mod := &Mod{Name: "missing", FileName: "missing.jar",
+		Download: ModDownload{URL: "https://example.com/missing.jar", HashFormat: "sha256", Hash: "irrelevant"}}
+
+	session, err := CreateDownloadSession([]*Mod{mod}, []string{"sha256"})
+	if err != nil {
+		t.Fatalf("CreateDownloadSession() returned error: %v", err)
+	}
+
+	var gotErr error
+	for dl := range session.StartDownloads() {
+		gotErr = dl.Error
+	}
+	if gotErr == nil {
+		t.Fatal("expected a download error for a 404 response, got nil")
+	}
+
+	entries, err := os.ReadDir(filepath.Join(cacheDir, "temp"))
+	if err != nil {
+		t.Fatalf("failed to read temp dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("temp dir has %d leftover entries after a failed download, want 0", len(entries))
 	}
 }
