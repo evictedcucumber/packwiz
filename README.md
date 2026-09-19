@@ -24,6 +24,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Pack distribution with HTTP servers, with a built in local server for testing
 - Easy installation and updating of multiple mods at once from Modrinth
 - Exporting to Modrinth packs, listing what goes in each one and which sides it is for
+- `packwiz list --markdown` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
 - `packwiz mr validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz mr fix` fixes what it can, showing the changes and asking first
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
@@ -116,6 +117,32 @@ fix(config): change configureddefaults/config/sodium.json
 ```
 
 Files anywhere else, such as `config/` (which would replace players' own settings on every update), aren't tracked, and `.packwizignore` can't bring them back. The first `packwiz refresh` after adding the mod says how many files left the index; move them into `configureddefaults/` to keep them in the pack. Removing the mod makes every file trackable again.
+
+## Listing a pack
+
+`packwiz list` prints the names of what is in the pack: its mods, and any resource packs and shader packs. `packwiz list --markdown` writes them to `MODS.md`, next to `pack.toml`, to put in a README or a pack page:
+
+```
+# Cozy Adventures
+
+A relaxed pack for exploring, building & farming
+
+## Mods
+
+- Architectury API
+- Create: Steam 'n' Rails
+- Sodium
+
+## Resource Packs
+
+- Faithful 32x
+
+## Shader Packs
+
+- Complementary Shaders - Reimagined
+```
+
+The names are in alphabetical order under a heading for each kind of file, going by the folder its `.pw.toml` is in. There are no versions, and nothing marks the mods that were added as dependencies; `--only main` leaves those out of the list instead, and `--side client` or `--side server` lists what is needed on one side, as they do for the plain list. `--output docs/mods.md` writes the file somewhere else (`--output -` prints it), and doesn't need `--markdown`. `MODS.md` isn't distributed with the pack, so if you choose another name inside the pack's folder, add it to `.packwizignore`.
 
 ## Checking a pack
 

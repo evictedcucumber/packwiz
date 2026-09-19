@@ -136,6 +136,10 @@ func (in Index) RelIndexPath(p string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
+// ModListFile is the markdown file that `packwiz list --markdown` writes, unless told where to put it. It is made from
+// the pack, so it isn't distributed with it (see ignoreDefaults).
+const ModListFile = "MODS.md"
+
 var ignoreDefaults = []string{
 	// Defaults (can be overridden with a negating pattern preceded with !)
 
@@ -160,6 +164,8 @@ var ignoreDefaults = []string{
 	// Exclude the pack's own release history (see the changelog package)
 	"CHANGELOG.md",
 	"changelog.toml",
+	// Exclude the list of the pack's mods that packwiz list --markdown writes
+	ModListFile,
 	".direnv/**",
 	".editorconfig",
 	".envrc",

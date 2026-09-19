@@ -299,6 +299,41 @@ func TestIndexRefresh(t *testing.T) {
 	}
 }
 
+// The list of mods that `packwiz list --markdown` writes is made from the pack, so it isn't part of what is distributed
+func TestIndexRefreshDoesNotTrackTheModList(t *testing.T) {
+	dir := t.TempDir()
+
+	indexFilePath := filepath.Join(dir, "index.toml")
+	mustWriteFile(t, filepath.Join(dir, "pack.toml"), "name = \"Test\"\n")
+	mustWriteFile(t, indexFilePath, "")
+	mustWriteFile(t, filepath.Join(dir, "mods", "test.jar"), "fake jar content")
+	mustWriteFile(t, filepath.Join(dir, ModListFile), "# Test\n")
+	mustWriteFile(t, filepath.Join(dir, "docs", ModListFile), "# Test\n")
+
+	oldPackFile := viper.GetString("pack-file")
+	viper.Set("pack-file", filepath.Join(dir, "pack.toml"))
+	oldNoHashes := viper.GetBool("no-internal-hashes")
+	viper.Set("no-internal-hashes", false)
+	t.Cleanup(func() {
+		viper.Set("pack-file", oldPackFile)
+		viper.Set("no-internal-hashes", oldNoHashes)
+	})
+
+	idx := Index{HashFormat: "sha256", indexFile: indexFilePath, packRoot: dir, Files: IndexFiles{}}
+	if err := idx.Refresh(); err != nil {
+		t.Fatalf("Refresh() returned error: %v", err)
+	}
+
+	if _, ok := idx.Files["mods/test.jar"]; !ok {
+		t.Error("expected mods/test.jar to be added to the index")
+	}
+	for _, file := range []string{ModListFile, "docs/" + ModListFile} {
+		if _, ok := idx.Files[file]; ok {
+			t.Errorf("expected %s to be excluded from the index", file)
+		}
+	}
+}
+
 func TestIndexRefreshSkipsSymlinkedDirectory(t *testing.T) {
 	dir := t.TempDir()
 
