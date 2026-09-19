@@ -431,6 +431,35 @@ func TestComparableVersionNumberMissingNumber(t *testing.T) {
 	}
 }
 
+// --- versionNumberShape ---
+
+func TestVersionNumberShape(t *testing.T) {
+	cases := []struct {
+		number string
+		want   string
+	}{
+		{"1.2.3", ""},
+		{"1.0", ""},
+		{"v1.2.3", "v"},
+		{"1.21-2.1.10", "-"},
+		{"neoforge_1.21-2.0.8", "neoforge_-"},
+		{"mc1.21.1-6.0.9", "mc-"},
+		{"1.21.1-6.0.6", "-"},
+		// An appendix is ignored by FlexVer, so it isn't part of the shape
+		{"6.0.10+mc1.21.1", ""},
+		// Nor is a pre-release, which is a dash followed by something other than a digit
+		{"2.1.0-beta.2", ""},
+		{"1.21-2.0.15-neoforge", "-"},
+		{"1.0-", "-"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := versionNumberShape(c.number); got != c.want {
+			t.Errorf("versionNumberShape(%q) = %q, want %q", c.number, got, c.want)
+		}
+	}
+}
+
 // neoForgeVersion is a NeoForge version of a project, with the given number, release type and date of publication
 func neoForgeVersion(number, releaseType string, published time.Time) *modrinthApi.Version {
 	return &modrinthApi.Version{
@@ -478,6 +507,39 @@ func TestFindHigherNumberedIgnoresChangedLoaderTags(t *testing.T) {
 
 	if higher := findHigherNumbered(latest, []*modrinthApi.Version{latest, suffixed, tagged}, []string{"1.21.1"}); higher != nil {
 		t.Errorf("expected no higher version number, got %s", versionNumberOf(higher))
+	}
+}
+
+// Create numbered its versions "1.21.1-6.0.6", then "mc1.21.1-6.0.9", then "6.0.10+mc1.21.1". FlexVer ranks the
+// middle one highest, as text sorts above a number, which says nothing about the versions
+func TestFindHigherNumberedIgnoresVersionsNumberedAnotherWay(t *testing.T) {
+	first := neoForgeVersion("1.21.1-6.0.6", "release", at(time.June, 1))
+	second := neoForgeVersion("mc1.21.1-6.0.9", "release", at(time.January, 1))
+	latest := neoForgeVersion("6.0.10+mc1.21.1", "release", at(time.April, 1))
+
+	if higher := findHigherNumbered(latest, []*modrinthApi.Version{latest, second, first}, []string{"1.21.1"}); higher != nil {
+		t.Errorf("expected no higher version number, got %s", versionNumberOf(higher))
+	}
+}
+
+func TestFindHigherNumberedStillComparesVersionsNumberedTheSameWay(t *testing.T) {
+	major := neoForgeVersion("7.0.0+mc1.21.1", "release", at(time.January, 1))
+	other := neoForgeVersion("mc1.21.1-6.0.9", "release", at(time.February, 1))
+	latest := neoForgeVersion("6.0.10+mc1.21.1", "release", at(time.April, 1))
+
+	higher := findHigherNumbered(latest, []*modrinthApi.Version{major, other, latest}, []string{"1.21.1"})
+	if higher != major {
+		t.Errorf("expected 7.0.0+mc1.21.1 to have the higher version number, got %v", higher)
+	}
+}
+
+func TestFindHigherNumberedNoneWithoutAVersionNumber(t *testing.T) {
+	other := neoForgeVersion("1.0.0", "release", at(time.January, 1))
+	latest := neoForgeVersion("", "release", at(time.February, 1))
+	latest.VersionNumber = nil
+
+	if higher := findHigherNumbered(latest, []*modrinthApi.Version{other, latest}, []string{"1.21.1"}); higher != nil {
+		t.Errorf("expected nothing to compare a version without a number with, got %s", versionNumberOf(higher))
 	}
 }
 

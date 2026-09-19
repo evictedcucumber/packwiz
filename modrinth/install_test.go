@@ -652,6 +652,32 @@ func TestGetLatestVersionDoesNotWarnWhenOnlyTheLoaderTagChanged(t *testing.T) {
 	}
 }
 
+// Create went from "mc1.21.1-6.0.9" to "6.0.10+mc1.21.1": 6.0.10 is higher, however FlexVer ranks the two
+func TestGetLatestVersionDoesNotWarnWhenVersionNumbersAreWrittenDifferently(t *testing.T) {
+	pack, _ := setupPackFixture(t)
+	older := testVersion("v1", "mc1.21.1-6.0.9")
+	older.Loaders = []string{"neoforge"}
+	older.DatePublished = timePtr(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC))
+	newer := testVersion("v2", "6.0.10+mc1.21.1")
+	newer.Loaders = []string{"neoforge"}
+	newer.DatePublished = timePtr(time.Date(2024, 4, 21, 0, 0, 0, 0, time.UTC))
+	serveProjectVersions(t, older, newer)
+
+	var latest *modrinthApi.Version
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { latest, err = getLatestVersion("p1", "Test Project", pack, "") })
+
+	if err != nil {
+		t.Fatalf("getLatestVersion() returned error: %v", err)
+	}
+	if *latest.ID != "v2" {
+		t.Errorf("latest = %s, want the newest version, v2", *latest.ID)
+	}
+	if strings.Contains(out, "Warning") {
+		t.Errorf("output = %q, want no warning", out)
+	}
+}
+
 // setFlag sets one of the flags of 'mr add' for the duration of the test
 func setFlag(t *testing.T, flag *string, value string) {
 	t.Helper()

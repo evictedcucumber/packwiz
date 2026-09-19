@@ -289,6 +289,26 @@ func comparableVersionNumber(v *modrinthApi.Version) string {
 	return stripped
 }
 
+// versionNumberShape returns how the release part of a version number is written, without its numbers: the text around
+// and between them. "neoforge_1.21-2.0.8" has the shape "neoforge_-", "mc1.21.1-6.0.9" has "mc-", and "6.0.10+mc1.21.1"
+// has none. The release part ends where FlexVer's does, at an appendix ('+') or a pre-release (a dash followed by
+// something other than a digit), so "2.1.0-beta.2" is shaped like "3.0.0".
+func versionNumberShape(number string) string {
+	isDigit := func(r rune) bool { return r >= '0' && r <= '9' }
+	for i := 0; i < len(number); i++ {
+		if number[i] == '+' || (number[i] == '-' && i+1 < len(number) && !isDigit(rune(number[i+1]))) {
+			number = number[:i]
+			break
+		}
+	}
+	return strings.Map(func(r rune) rune {
+		if r == '.' || isDigit(r) {
+			return -1
+		}
+		return r
+	}, number)
+}
+
 func findLatestVersion(versions []*modrinthApi.Version, gameVersions []string, useFlexVer bool) *modrinthApi.Version {
 	numbers := make(map[*modrinthApi.Version]string, len(versions))
 	if useFlexVer {
@@ -377,13 +397,24 @@ func getLatestVersion(projectID string, name string, pack core.Pack, releaseType
 }
 
 // findHigherNumbered returns the version with the highest version number if that number is higher than the one of
-// latest, the version picked as the newest, or nil if latest is as high as any. Only versions at least as stable as
-// latest are compared with it: a beta running ahead of the newest release is what betas are, and doesn't say that
-// the release is the wrong pick.
+// latest, the version picked as the newest out of versions, or nil if latest is as high as any.
+//
+// Only some versions are compared with latest, as the others can't say that it is the wrong pick. Those less stable
+// than it aren't: a beta running ahead of the newest release is what betas are. Nor are those numbered another way,
+// since FlexVer says its result for versions written differently is nonsense: it ranks "mc1.21.1-6.0.9" above
+// "6.0.10+mc1.21.1", as text sorts above a number. A project that changed how it numbers its versions is left alone.
 func findHigherNumbered(latest *modrinthApi.Version, versions []*modrinthApi.Version, gameVersions []string) *modrinthApi.Version {
-	peers := filterVersionsByReleaseType(versions, versionReleaseType(latest))
+	latestNumber := comparableVersionNumber(latest)
+	if latestNumber == "" {
+		return nil
+	}
+
+	shape := versionNumberShape(latestNumber)
+	peers := slices.DeleteFunc(filterVersionsByReleaseType(versions, versionReleaseType(latest)), func(v *modrinthApi.Version) bool {
+		return versionNumberShape(comparableVersionNumber(v)) != shape
+	})
 	highest := findLatestVersion(peers, gameVersions, true)
-	if highest == latest || flexver.Compare(comparableVersionNumber(highest), comparableVersionNumber(latest)) <= 0 {
+	if highest == latest || flexver.Compare(comparableVersionNumber(highest), latestNumber) <= 0 {
 		return nil
 	}
 	return highest
