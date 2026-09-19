@@ -40,6 +40,10 @@ func (r Release) IsInitial() bool {
 type History struct {
 	// Releases are in the order they were made, oldest first
 	Releases []Release `toml:"release"`
+	// Snapshot is the pack as of the latest release, if that release was made without a repository. With one, the next
+	// release reads the log from the commit the release was made at, but without one there is nothing to say what has
+	// changed since other than the pack itself, so it is compared against this.
+	Snapshot *Snapshot `toml:"snapshot,omitempty"`
 }
 
 // Latest returns the most recent release, if there has been one.
@@ -52,7 +56,8 @@ func (h History) Latest() (Release, bool) {
 
 // UpgradeVersions replaces versions that were recorded as a file name, because the mod's version wasn't known at
 // the time, with the version the mod has in current. This is only done for a mod that is still on that file, where
-// the version is certain. It returns how many lines of the releases were replaced.
+// the version is certain. The snapshot is upgraded too, but what is returned is how many lines of the releases
+// were, as those are what someone reading the changelog sees change.
 func (h *History) UpgradeVersions(current Snapshot) int {
 	upgraded := 0
 	for i := range h.Releases {
@@ -65,6 +70,16 @@ func (h *History) UpgradeVersions(current Snapshot) int {
 			}
 			c.To = cur.Version
 			upgraded++
+		}
+	}
+	if h.Snapshot != nil {
+		for path, old := range h.Snapshot.Mods {
+			cur, ok := current.Mods[path]
+			if !ok || !knownVersion(cur) || old.Version != cur.File {
+				continue
+			}
+			old.Version = cur.Version
+			h.Snapshot.Mods[path] = old
 		}
 	}
 	return upgraded

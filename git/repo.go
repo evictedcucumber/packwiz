@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/evictedcucumber/packwiz/changelog"
@@ -33,22 +35,42 @@ func (e *gitError) Error() string {
 
 func (e *gitError) Unwrap() error { return e.err }
 
-// openRepo checks that git is installed and that dir is inside a working tree.
+// openRepo checks that git is installed and that dir is inside a working tree. If git isn't installed, or there is no
+// repository, the error is a changelog.ErrNoRepository, as a changelog can be made without one but the commands that
+// use git can't. A repository that git refuses to use (because of who owns it, say) is some other error: it has a log,
+// so that isn't the same as there being none.
 func openRepo(dir string) (repo, error) {
 	if _, err := exec.LookPath("git"); err != nil {
-		return repo{}, errors.New("git isn't installed, or isn't on your PATH")
+		return repo{}, changelog.NoRepository("git isn't installed, or isn't on your PATH")
 	}
 	r := repo{dir}
-	if _, err := r.run("", "rev-parse", "--is-inside-work-tree"); err != nil {
-		return repo{}, fmt.Errorf("%s isn't inside a git repository; run \"git init\" first", dir)
+	// Git exits the same way for all of these, so what it says is all that tells them apart, and that is translated
+	if _, err := r.runWith([]string{"LC_ALL=C"}, "", "rev-parse", "--is-inside-work-tree"); err != nil {
+		var gitErr *gitError
+		if !errors.As(err, &gitErr) || !strings.Contains(gitErr.stderr, "not a git repository") {
+			return repo{}, err
+		}
+		// "." says nothing about where it is
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+		return repo{}, changelog.NoRepository(fmt.Sprintf("%s isn't inside a git repository; run \"git init\" first", dir))
 	}
 	return r, nil
 }
 
 // run runs git with the given arguments, feeding it stdin if that isn't empty, and returns what it printed.
 func (r repo) run(stdin string, args ...string) ([]byte, error) {
+	return r.runWith(nil, stdin, args...)
+}
+
+// runWith is run with more environment variables set, given as "NAME=value".
+func (r repo) runWith(env []string, stdin string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.dir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}

@@ -20,7 +20,23 @@ type Repository interface {
 	PendingCommits() ([]Commit, error)
 }
 
-// OpenRepository opens the repository the pack is in, or fails if it isn't in one.
+// ErrNoRepository is what the error from OpenRepository is when the pack isn't in a repository, or there is nothing to
+// open one with. That isn't a failure for a changelog: it is made without a log to read, from the pack alone. Anything
+// else that stops a repository being opened is one.
+var ErrNoRepository = errors.New("the pack isn't in a repository")
+
+// NoRepository is an error with the given reason that is ErrNoRepository, for OpenRepository to return.
+func NoRepository(reason string) error {
+	return noRepositoryError(reason)
+}
+
+type noRepositoryError string
+
+func (e noRepositoryError) Error() string { return string(e) }
+
+func (e noRepositoryError) Is(target error) bool { return target == ErrNoRepository }
+
+// OpenRepository opens the repository the pack is in, or fails with an error that is ErrNoRepository if it isn't in one.
 var OpenRepository = func() (Repository, error) {
-	return nil, errors.New("no version control has been set up for changelogs")
+	return nil, NoRepository("no version control has been set up for changelogs")
 }

@@ -1,6 +1,7 @@
 package changelog
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,7 +32,10 @@ var changelogCmd = &cobra.Command{
 	Use:   "changelog",
 	Short: "Show the changes since the last release and the version they would produce",
 	Long: `Reads the commits made since the last release, which are conventional commits (see "packwiz git commit"), and shows
-the release they would make and the version it would have. Nothing is committed or saved.`,
+the release they would make and the version it would have. Nothing is committed or saved.
+
+A pack that isn't in a git repository has no commits to read, so its changes are found by comparing it with the pack as
+it was at the last release instead.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runPreview(sinceFlag); err != nil {
@@ -53,7 +57,10 @@ release to CHANGELOG.md.
 Besides what "packwiz git commit" writes for mods and config files, any conventional commit that is a feature, a fix
 or breaking is listed in the release in its own words, and counts towards the version.
 
-The first release describes the pack as it is, and keeps the version already in pack.toml.`,
+The first release describes the pack as it is, and keeps the version already in pack.toml.
+
+A pack that isn't in a git repository can be released too, without the commits to read: nothing is committed, and the
+release lists what has changed in the pack since the last one, which it keeps a record of for the next release.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if _, _, err := RunRelease(releaseVersionFlag, sinceFlag); err != nil {
@@ -66,7 +73,7 @@ The first release describes the pack as it is, and keeps the version already in 
 // runPreview prints the release the pack's changes would make, including those that haven't been committed yet,
 // without changing anything. since is the commit to read the log from, if it isn't where the last release was made.
 func runPreview(since string) error {
-	repo, err := OpenRepository()
+	repo, err := openRepository()
 	if err != nil {
 		return err
 	}
@@ -91,13 +98,18 @@ func runPreview(since string) error {
 // replaces the version that would otherwise be worked out from the commits, and a non-empty since is the commit to
 // read the log from, if it isn't where the last release was made. It returns the release and true, or false if no
 // release was made because there was nothing to release or the user declined.
+//
+// A pack that isn't in a repository has no log, so nothing is committed and the release is what has changed in the
+// pack since the last one, which the release keeps a record of.
 func RunRelease(versionOverride, since string) (Release, bool, error) {
-	repo, err := OpenRepository()
+	repo, err := openRepository()
 	if err != nil {
 		return Release{}, false, err
 	}
-	if err := repo.CommitPending(); err != nil {
-		return Release{}, false, err
+	if repo != nil {
+		if err := repo.CommitPending(); err != nil {
+			return Release{}, false, err
+		}
 	}
 	p, err := loadPending(repo, true, since, false)
 	if err != nil {
@@ -139,6 +151,17 @@ func init() {
 	cmd.Add(changelogCmd)
 }
 
+// openRepository opens the repository the pack is in. If it isn't in one it says so and returns nil, as a changelog is
+// still made then, from the pack alone. Anything else that stops the repository being opened is an error.
+func openRepository() (Repository, error) {
+	repo, err := OpenRepository()
+	if errors.Is(err, ErrNoRepository) {
+		ui.Info.Printf("Not reading the git log (%v).\n", err)
+		return nil, nil
+	}
+	return repo, err
+}
+
 func packRoot() string {
 	return filepath.Dir(viper.GetString("pack-file"))
 }
@@ -153,27 +176,45 @@ func markdownPath() string {
 
 // pending is a pack, and what has changed in it since its last release.
 type pending struct {
-	pack    core.Pack
+	pack  core.Pack
+	index core.Index
+	// history is the past releases, with any versions upgraded (see upgraded)
 	history History
-	// changes are what the commits since the last release changed; for the first release, they are what the pack contains
+	// changes are what the commits since the last release changed, or without a repository what differs from the pack as
+	// it was then; for the first release, they are what the pack contains
 	changes []Change
+	// current is the pack as it is now, which a release made without a repository keeps for the next one to compare with
+	current Snapshot
+	// versions are the versions found for mods that don't record one. A repository has them saved by committing (see
+	// Repository.CommitPending), so without one a release saves them.
+	versions map[string]string
+	// inRepo is whether the pack is in a repository, and so whether changes were read from its log
+	inRepo bool
 	// head is the commit a release would be made at. It is only known when the changes have all been committed.
 	head string
 	// upgraded is how many lines of past releases showed a file name that has been replaced by a real version
 	upgraded int
 }
 
-// loadPending reads the pack, and the commits made since its last release. strict is whether failing to look up the
-// versions of mods that don't record one is an error (see LoadWorking). withPending is whether to include the commits
-// that "packwiz git commit" would make as well as those that have been made, for a preview.
+// loadPending reads the pack, and what has changed in it since its last release: the commits made since, or if repo is
+// nil, because the pack isn't in a repository, how it differs from the pack as of that release. strict is whether
+// failing to look up the versions of mods that don't record one is an error (see LoadWorking). withPending is whether
+// to include the commits that "packwiz git commit" would make as well as those that have been made, for a preview.
 func loadPending(repo Repository, strict bool, since string, withPending bool) (pending, error) {
-	w, err := LoadWorking(strict)
-	if err != nil {
-		return pending{}, err
-	}
 	history, err := LoadHistory(historyPath())
 	if err != nil {
 		return pending{}, fmt.Errorf("failed to read %s: %w", HistoryFile, err)
+	}
+	// This can be told before the pack is loaded, which can need the network
+	if repo == nil {
+		if err := checkWithoutRepository(history, since); err != nil {
+			return pending{}, err
+		}
+	}
+
+	w, err := LoadWorking(strict)
+	if err != nil {
+		return pending{}, err
 	}
 	current, err := w.Snapshot()
 	if err != nil {
@@ -181,13 +222,20 @@ func loadPending(repo Repository, strict bool, since string, withPending bool) (
 	}
 	// Anything released before a mod's version was known was recorded by file name. That's only fixed in memory
 	// here; it is written if a release is.
-	p := pending{pack: w.Pack, history: history, upgraded: history.UpgradeVersions(current)}
+	upgraded := history.UpgradeVersions(current)
+	p := pending{
+		pack: w.Pack, index: w.Index, history: history, current: current, versions: w.Versions,
+		inRepo: repo != nil, upgraded: upgraded,
+	}
 
-	if _, released := history.Latest(); !released {
+	switch _, released := history.Latest(); {
+	case !released:
 		// The first release describes the pack as it is. Its history begins with whatever was committed first, which
 		// doesn't list the mods that were in it.
 		p.changes = Diff(Snapshot{}, current)
-	} else {
+	case repo == nil:
+		p.changes = Diff(*history.Snapshot, current)
+	default:
 		base, err := releaseBase(repo, history, since)
 		if err != nil {
 			return pending{}, err
@@ -206,12 +254,25 @@ func loadPending(repo Repository, strict bool, since string, withPending bool) (
 		p.changes = ChangesFromCommits(commits)
 	}
 
-	if !withPending {
+	if repo != nil && !withPending {
 		if p.head, err = repo.Head(); err != nil {
 			return pending{}, err
 		}
 	}
 	return p, nil
+}
+
+// checkWithoutRepository fails if a pack that isn't in a repository can't have its changes worked out. There is no log
+// to read, so a release after the first is compared with the snapshot the last one kept; a release made from the log
+// didn't keep one, as there is nothing to say what the pack was like then.
+func checkWithoutRepository(history History, since string) error {
+	if since != "" {
+		return errors.New("--since is a commit in the git log, but the pack isn't in a git repository")
+	}
+	if last, released := history.Latest(); released && history.Snapshot == nil {
+		return fmt.Errorf("can't tell what has changed since release %s, which was made from the git log, as the pack isn't in a git repository", last.Version)
+	}
+	return nil
 }
 
 // releaseBase is the commit that the next release is made from the commits after: the one given, or else the one the
@@ -318,14 +379,31 @@ func (p pending) apply(release Release) error {
 	release.Commit = p.head
 	history := p.history
 	history.Releases = append(slices.Clone(history.Releases), release)
+	// The next release is read from the log if the pack is in a repository, so what it was like isn't kept. Otherwise it
+	// is, and any snapshot that was there is out of date.
+	history.Snapshot = nil
+	if !p.inRepo {
+		snapshot := p.current
+		history.Snapshot = &snapshot
+	}
 	p.pack.Version = release.Version
 	return p.save(history)
 }
 
-// save writes pack.toml and the release history. The history file is written last because it is what marks a release
-// as made: if any earlier step fails, running the release again works out and redoes the same release rather than
-// skipping it.
+// save writes pack.toml and the release history, and without a repository the versions that were found and the index.
+// The history file is written last because it is what marks a release as made: if any earlier step fails, running the
+// release again works out and redoes the same release rather than skipping it.
 func (p pending) save(history History) error {
+	if !p.inRepo {
+		// Nothing has committed these, as it does with a repository. The index was refreshed to find the changes being
+		// released, and consumers of the pack (which see the pack.toml version) need it to match.
+		if err := p.index.RecordVersions(p.versions); err != nil {
+			return err
+		}
+		if err := p.index.Write(); err != nil {
+			return err
+		}
+	}
 	if err := p.pack.UpdateIndexHash(); err != nil {
 		return err
 	}

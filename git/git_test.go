@@ -544,7 +544,159 @@ func TestOpenRepoOutsideARepository(t *testing.T) {
 
 	_, err := openRepo(".")
 	if err == nil || !strings.Contains(err.Error(), "git init") {
-		t.Errorf("openRepo() error = %v, want one telling the user to run git init", err)
+		t.Fatalf("openRepo() error = %v, want one telling the user to run git init", err)
+	}
+	// A changelog goes on without a repository, but not because of anything else that went wrong with git
+	if !errors.Is(err, changelog.ErrNoRepository) {
+		t.Errorf("openRepo() error = %v, want it to be changelog.ErrNoRepository", err)
+	}
+	// It says where, rather than "."
+	if where, _, _ := strings.Cut(err.Error(), " isn't inside"); !filepath.IsAbs(where) {
+		t.Errorf("openRepo() error = %q, want it to start with the directory it looked in, in full", err)
+	}
+}
+
+func TestOpenRepoWithoutGitInstalled(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	_, err := openRepo(".")
+
+	if err == nil || !strings.Contains(err.Error(), "git isn't installed") {
+		t.Fatalf("openRepo() error = %v, want one saying git isn't installed", err)
+	}
+	// There is no git log to read without it, which is all a changelog needs to know
+	if !errors.Is(err, changelog.ErrNoRepository) {
+		t.Errorf("openRepo() error = %v, want it to be changelog.ErrNoRepository", err)
+	}
+}
+
+func TestOpenRepoOfARepositoryGitWontUseIsNotAMissingOne(t *testing.T) {
+	// Git exits the same way when it refuses a repository, because of who owns it say, as when there isn't one. Taking
+	// the first for the second would make a changelog without the log the pack has, and tell the user to git init.
+	setUpRepo(t)
+	git(t, "config", "core.repositoryformatversion", "1")
+	git(t, "config", "extensions.bogus", "true")
+	if err := exec.Command("git", "rev-parse", "--is-inside-work-tree").Run(); err == nil {
+		t.Skip("this git uses a repository with an extension it doesn't know")
+	}
+	setUpPack(t, "", "1.0.0")
+
+	_, err := openRepo(".")
+
+	if err == nil {
+		t.Fatal("openRepo() of a repository git won't use returned no error")
+	}
+	if errors.Is(err, changelog.ErrNoRepository) || strings.Contains(err.Error(), "git init") {
+		t.Errorf("openRepo() error = %v, want git's own reason rather than there being no repository", err)
+	}
+	if !strings.Contains(err.Error(), "bogus") {
+		t.Errorf("openRepo() error = %v, want it to say what git said", err)
+	}
+
+	// So nothing is released, rather than released the way a pack outside a repository is
+	cmdtest.CaptureStdout(t, func() { _, _, err = changelog.RunRelease("", "") })
+	if err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Errorf("RunRelease() error = %v, want the reason git gave", err)
+	}
+	if _, statErr := os.Stat(changelog.HistoryFile); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("a release was made: %v", statErr)
+	}
+}
+
+// setUpPackOutsideARepo makes a pack in a fresh temp directory that isn't in a git repository, though git is installed.
+func setUpPackOutsideARepo(t *testing.T) testPack {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git isn't installed")
+	}
+	dir := cmdtest.Chdir(t)
+	// Never treat a repository around the temp directory as this one
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(dir, "gitconfig"))
+	return setUpPack(t, "", "1.0.0")
+}
+
+func TestGitCommandsRefuseToRunOutsideARepositoryBeforeLoadingAnything(t *testing.T) {
+	// Loading the pack looks up the versions of mods that don't record one, which needs the network and can fail, so
+	// that must not be what a pack that isn't in a repository is told
+	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "0.5.7"})
+	src.Err = errors.New("network is down")
+	p := setUpPackOutsideARepo(t)
+	p.unversioned(t, src, "Sodium", core.ClientSide, "id-a")
+	files := []string{"pack.toml", "index.toml", "mods/sodium.pw.toml"}
+	before := make(map[string]string)
+	for _, f := range files {
+		before[f] = readFile(t, f)
+	}
+
+	commands := map[string]func() error{
+		"commit":           func() error { return runCommit(false) },
+		"commit --dry-run": func() error { return runCommit(true) },
+		"release":          func() error { return runRelease("", "") },
+	}
+	for name, run := range commands {
+		t.Run(name, func(t *testing.T) {
+			src.Calls = 0
+			var err error
+			out := cmdtest.CaptureStdout(t, func() { err = run() })
+
+			if err == nil || !strings.Contains(err.Error(), "isn't inside a git repository") || !strings.Contains(err.Error(), "git init") {
+				t.Errorf("error = %v, want one saying the pack isn't inside a git repository", err)
+			}
+			if out != "" {
+				t.Errorf("printed %q before refusing", out)
+			}
+			if src.Calls != 0 {
+				t.Errorf("%d versions were looked up before it refused", src.Calls)
+			}
+			for _, f := range files {
+				if got := readFile(t, f); got != before[f] {
+					t.Errorf("%s changed:\n--- before\n%s\n--- after\n%s", f, before[f], got)
+				}
+			}
+			if _, err := os.Stat(".git"); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("a repository was made where there was none: %v", err)
+			}
+		})
+	}
+}
+
+func TestChangelogIsMadeOutsideARepositoryWithoutTheGitLog(t *testing.T) {
+	p := setUpPackOutsideARepo(t)
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, "config/sodium.json", "{}")
+
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { _, _, err = changelog.RunRelease("", "") })
+	if err != nil {
+		t.Fatalf("RunRelease() returned error: %v\noutput: %s", err, out)
+	}
+	for _, want := range []string{"Not reading the git log", "isn't inside a git repository", "Released 1.0.0!"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	// It only reads the pack: nothing was committed, or made to commit into
+	if _, err := os.Stat(".git"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a repository was made where there was none: %v", err)
+	}
+	history, err := changelog.LoadHistory(changelog.HistoryFile)
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+	if latest, _ := history.Latest(); latest.Version != "1.0.0" || latest.Commit != "" || history.Snapshot == nil {
+		t.Errorf("history = %+v, want 1.0.0 made at no commit, with a snapshot of the pack", history)
+	}
+
+	// And the release after it is what changed in the pack since
+	p.mod(t, "Sodium", core.ClientSide, "0.5.8")
+	out = cmdtest.CaptureStdout(t, func() { _, _, err = changelog.RunRelease("", "") })
+	if err != nil {
+		t.Fatalf("second RunRelease() returned error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "next version is 1.0.1") || !strings.Contains(out, "**Sodium** 0.5.7 → 0.5.8 (client)") {
+		t.Errorf("second release output should say what changed in Sodium:\n%s", out)
 	}
 }
 
@@ -1826,7 +1978,7 @@ func TestPendingCommitsAreWhatCommitWouldMake(t *testing.T) {
 	}
 }
 
-func TestChangelogRepositoryIsRegisteredAndNeedsAGitRepository(t *testing.T) {
+func TestChangelogRepositoryIsRegisteredAndSaysWhenThereIsNoGitRepository(t *testing.T) {
 	setUpRepo(t)
 	setUpPack(t, "", "1.0.0")
 	if repo, err := changelog.OpenRepository(); err != nil || repo == nil {
@@ -1837,8 +1989,12 @@ func TestChangelogRepositoryIsRegisteredAndNeedsAGitRepository(t *testing.T) {
 	dir := cmdtest.Chdir(t)
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	cmdtest.SetViper(t, "pack-file", "pack.toml")
-	if _, err := changelog.OpenRepository(); err == nil || !strings.Contains(err.Error(), "git init") {
+	_, err := changelog.OpenRepository()
+	if err == nil || !strings.Contains(err.Error(), "git init") {
 		t.Errorf("OpenRepository() outside a repository error = %v, want one telling the user to run git init", err)
+	}
+	if !errors.Is(err, changelog.ErrNoRepository) {
+		t.Errorf("OpenRepository() outside a repository error = %v, want it to be changelog.ErrNoRepository so a changelog is made without one", err)
 	}
 }
 

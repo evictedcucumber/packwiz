@@ -10,8 +10,9 @@ import (
 	"github.com/evictedcucumber/packwiz/core"
 )
 
-// Snapshot is the contents of a pack at a point in time. A release stores one, and the next release is described by
-// the difference between that snapshot and the pack as it is then.
+// Snapshot is the contents of a pack at a point in time, for describing a pack that has no log to read its changes from:
+// the first release is the difference between one and nothing, and a release made without a repository stores one, so
+// the next release is the difference between that snapshot and the pack as it is then.
 type Snapshot struct {
 	// Mods holds every metadata file (mods, resource packs, etc.), keyed by its path relative to the index
 	Mods map[string]SnapshotMod `toml:"mods"`

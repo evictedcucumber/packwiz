@@ -671,28 +671,6 @@ func TestReleaseAsksForSinceWhenItCannotFindWhereTheLastOneWasMade(t *testing.T)
 	}
 }
 
-func TestReleaseWritesNothingWithoutARepository(t *testing.T) {
-	setUpPack(t, "1.0.0")
-	writeMod(t, "Sodium", core.ClientSide, "0.5.7")
-	old := OpenRepository
-	OpenRepository = func() (Repository, error) { return nil, errors.New("not inside a git repository") }
-	t.Cleanup(func() { OpenRepository = old })
-	before := releaseFiles(t)
-
-	var releaseErr, previewErr error
-	cmdtest.CaptureStdout(t, func() {
-		_, _, releaseErr = RunRelease("", "")
-		previewErr = runPreview("")
-	})
-
-	for name, err := range map[string]error{"release": releaseErr, "preview": previewErr} {
-		if err == nil || !strings.Contains(err.Error(), "not inside a git repository") {
-			t.Errorf("%s error = %v, want the reason there is no repository", name, err)
-		}
-	}
-	requireUnchanged(t, before)
-}
-
 func TestReleaseFilesAreNotPartOfThePack(t *testing.T) {
 	releasedOnce(t)
 

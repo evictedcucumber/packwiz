@@ -31,7 +31,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 
 ## Changelog and releases
 
-A pack manages its own release history, from its git history. `packwiz git commit` turns changes to the pack into conventional commits, and a release is made from the commits since the last one: the changelog is what they say, and the version is what they add up to.
+A pack manages its own release history, from its git history. `packwiz git commit` turns changes to the pack into conventional commits, and a release is made from the commits since the last one: the changelog is what they say, and the version is what they add up to. (A pack that isn't in a git repository can still have a changelog, just [without the commits to read](#without-git).)
 
 ```
 packwiz changelog          # preview the release the commits since the last one would make, including changes not committed yet
@@ -97,6 +97,12 @@ The first release has no log to read, so it describes the pack as it is, and kee
 ```
 
 Mods added before `version` was recorded have it looked up from Modrinth and saved to their `.pw.toml` the next time you run `packwiz changelog release` or `packwiz git commit` (`packwiz changelog` shows the versions but saves nothing), so that needs the network once. Releases made before then show file names, which are replaced with the versions too wherever the mod is still on that file.
+
+### Without git
+
+`packwiz git commit` and `packwiz git release` need the pack to be in a git repository, and refuse, before doing anything else, when it isn't. `packwiz changelog` and `packwiz changelog release` don't: they say that there is no git log to read, and make the changelog from the pack alone. The first release is the same as ever, and each release made this way keeps a snapshot of the pack in `changelog.toml`, so the next one lists what has changed in the pack since: mods added, updated and removed, and config files, with the version bumped by the same rules.
+
+What comes from the log isn't there without one. Nothing is committed, so `packwiz changelog release` doesn't run `packwiz git commit` first (it saves the versions it looks up for mods that don't record one into their `.pw.toml` files itself, as committing would), there are no commits written by hand to list, and `--since` is an error. A pack that is put in a repository later is released from its log from then on. The log begins at its first commit, so anything that changed before that, since the last release, isn't in it. And a pack whose last release was made from the log can't be released without the repository, as nothing else says what the pack was like then.
 
 ## Configured Defaults
 

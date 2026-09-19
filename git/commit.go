@@ -44,13 +44,15 @@ func planCommits(changes []changelog.Change, rest bool) []commitStep {
 // prepareCommit works out the commits that packwiz git commit would make. With dryRun, failing to look up the versions
 // of mods that don't record one isn't an error, as they are only needed to describe commits that won't be made.
 func prepareCommit(dryRun bool) (committer, []commitStep, error) {
-	// Committing saves the versions looked up for mods that don't record one, so a failure to look them up mustn't
-	// be papered over
-	w, err := changelog.LoadWorking(!dryRun)
+	// Before anything else, as there is no point loading the pack, which can need the network, to say there's nowhere
+	// to commit it
+	r, err := openRepo(packRoot())
 	if err != nil {
 		return committer{}, nil, err
 	}
-	r, err := openRepo(packRoot())
+	// Committing saves the versions looked up for mods that don't record one, so a failure to look them up mustn't
+	// be papered over
+	w, err := changelog.LoadWorking(!dryRun)
 	if err != nil {
 		return committer{}, nil, err
 	}

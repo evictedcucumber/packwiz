@@ -299,10 +299,9 @@ func TestHistoryRecordsTheCommitEachReleaseWasMadeAt(t *testing.T) {
 	}
 }
 
-func TestLoadHistoryIgnoresTheSnapshotOlderVersionsKept(t *testing.T) {
-	// Histories used to hold the pack as of the last release, to compare the next one with; the git log does that now
-	path := filepath.Join(t.TempDir(), HistoryFile)
-	legacy := `[[release]]
+// olderHistory is a history file as older versions wrote it, which held the pack as of the last release to compare the
+// next one with
+const olderHistory = `[[release]]
 version = "1.0.0"
 date = "2026-01-01"
 bump = "none"
@@ -323,7 +322,11 @@ version = "0.5.7"
 [snapshot.files]
 "config/a.json" = "abc"
 `
-	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+
+func TestLoadHistoryReadsTheSnapshotOlderVersionsKept(t *testing.T) {
+	// A pack that isn't in a repository compares its next release with it, so it is as good as one made now
+	path := filepath.Join(t.TempDir(), HistoryFile)
+	if err := os.WriteFile(path, []byte(olderHistory), 0o644); err != nil {
 		t.Fatalf("failed to write fixture: %v", err)
 	}
 
@@ -331,20 +334,109 @@ version = "0.5.7"
 	if err != nil {
 		t.Fatalf("LoadHistory() returned error: %v", err)
 	}
+
 	if len(got.Releases) != 1 || got.Releases[0].Changes[0].Name != "Sodium" {
 		t.Errorf("history = %+v, want the release read as it was", got)
 	}
+	want := &Snapshot{
+		Mods:  map[string]SnapshotMod{"mods/sodium.pw.toml": {Name: "Sodium", Side: core.ClientSide, Version: "0.5.7"}},
+		Files: map[string]string{"config/a.json": "abc"},
+	}
+	if !reflect.DeepEqual(got.Snapshot, want) {
+		t.Errorf("snapshot = %+v, want %+v", got.Snapshot, want)
+	}
+}
 
-	// Writing it back drops what is no longer used
-	if err := got.Write(path); err != nil {
+func TestHistoryKeepsTheSnapshotOfAReleaseMadeWithoutARepository(t *testing.T) {
+	path := filepath.Join(t.TempDir(), HistoryFile)
+	want := sampleHistory()
+	want.Snapshot = &Snapshot{
+		Mods:  map[string]SnapshotMod{"mods/sodium.pw.toml": {Name: "Sodium", Side: core.ClientSide, Version: "0.5.8"}},
+		Files: map[string]string{"config/sodium.json": "abc"},
+	}
+
+	if err := want.Write(path); err != nil {
 		t.Fatalf("Write() returned error: %v", err)
 	}
+	got, err := LoadHistory(path)
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LoadHistory() =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestHistoryWithoutASnapshotWritesNone(t *testing.T) {
+	// A release made from the log doesn't keep the pack, so there is nothing in the file to read as the last release's
+	path := filepath.Join(t.TempDir(), HistoryFile)
+	if err := sampleHistory().Write(path); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read history: %v", err)
 	}
 	if strings.Contains(string(data), "snapshot") {
-		t.Errorf("the rewritten history still has the snapshot:\n%s", data)
+		t.Errorf("the history has a snapshot:\n%s", data)
+	}
+	got, err := LoadHistory(path)
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+	if got.Snapshot != nil {
+		t.Errorf("snapshot = %+v, want none", got.Snapshot)
+	}
+}
+
+func TestHistoryKeepsTheSnapshotOfAPackWithNothingInIt(t *testing.T) {
+	// Every mod and file removed is a pack to compare with like any other, and not one with no snapshot at all, which
+	// would leave the next release with nothing to compare with
+	path := filepath.Join(t.TempDir(), HistoryFile)
+	h := sampleHistory()
+	h.Snapshot = &Snapshot{Mods: map[string]SnapshotMod{}, Files: map[string]string{}}
+	if err := h.Write(path); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
+	got, err := LoadHistory(path)
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+
+	if got.Snapshot == nil {
+		t.Fatal("the snapshot of an empty pack was lost")
+	}
+	if len(got.Snapshot.Mods) != 0 || len(got.Snapshot.Files) != 0 {
+		t.Errorf("snapshot = %+v, want it empty", got.Snapshot)
+	}
+}
+
+func TestUpgradeVersionsUpgradesTheSnapshotToo(t *testing.T) {
+	h := legacyHistory()
+	h.Snapshot = &Snapshot{Mods: map[string]SnapshotMod{
+		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "a-1.0.jar"},
+		"mods/b.pw.toml": {Name: "B", Side: core.ServerSide, Version: "b-2.0.jar"},
+	}}
+	current := Snapshot{Mods: map[string]SnapshotMod{
+		"mods/a.pw.toml": {Name: "A", Side: core.ClientSide, Version: "1.0", File: "a-1.0.jar"},
+		// B has moved on to another file, so nothing says which version b-2.0.jar was
+		"mods/b.pw.toml": {Name: "B", Side: core.ServerSide, Version: "3.0", File: "b-3.0.jar"},
+	}}
+
+	upgraded := h.UpgradeVersions(current)
+
+	// Only lines of the releases count, as those are what the changelog shows
+	if upgraded != 1 {
+		t.Errorf("UpgradeVersions() = %d, want 1: A's addition", upgraded)
+	}
+	if got := h.Snapshot.Mods["mods/a.pw.toml"].Version; got != "1.0" {
+		t.Errorf("A is %q in the snapshot, want 1.0 now that it is known", got)
+	}
+	if got := h.Snapshot.Mods["mods/b.pw.toml"].Version; got != "b-2.0.jar" {
+		t.Errorf("B is %q in the snapshot, want it left as its file", got)
 	}
 }
 
