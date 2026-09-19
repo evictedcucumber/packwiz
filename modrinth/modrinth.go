@@ -422,6 +422,21 @@ func getInstalledProjectIDs(index *core.Index) []string {
 	return installedProjects
 }
 
+// findInstalledMod returns the mod in the pack that was added from the given Modrinth project, or nil if there isn't
+// one. It goes by the project, not by the name of the metadata file, which can be anything.
+func findInstalledMod(index *core.Index, projectID string) (*core.Mod, error) {
+	mods, err := index.LoadAllMods()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check whether the project is already added: %w", err)
+	}
+	for _, mod := range mods {
+		if data, ok := modrinthUpdateData(mod); ok && data.ProjectID == projectID {
+			return mod, nil
+		}
+	}
+	return nil, nil
+}
+
 func resolveVersion(project *modrinthApi.Project, version string) (*modrinthApi.Version, error) {
 	// If it exists in the version list, it is already a version ID (and doesn't need querying further)
 	if slices.Contains(project.Versions, version) {

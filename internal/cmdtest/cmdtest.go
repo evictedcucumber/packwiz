@@ -63,6 +63,30 @@ func CaptureStdout(t *testing.T, fn func()) string {
 	return <-outC
 }
 
+// SetStdin makes os.Stdin read input for the duration of the test, and turns off non-interactive mode, so that
+// prompts (cmdshared.PromptYesNo) are answered from it, one line each.
+func SetStdin(t *testing.T, input string) {
+	t.Helper()
+	SetViperBool(t, "non-interactive", false)
+
+	f, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("failed to create stdin file: %v", err)
+	}
+	if _, err := f.WriteString(input); err != nil {
+		t.Fatalf("failed to write stdin file: %v", err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatalf("failed to rewind stdin file: %v", err)
+	}
+	old := os.Stdin
+	os.Stdin = f
+	t.Cleanup(func() {
+		os.Stdin = old
+		_ = f.Close()
+	})
+}
+
 // WritePackFile writes pack.toml (in the current directory - use Chdir
 // first) and points viper's "pack-file" at it for the duration of the test.
 //

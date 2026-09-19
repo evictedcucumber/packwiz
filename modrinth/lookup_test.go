@@ -32,6 +32,55 @@ func TestGetInstalledProjectIDsEmptyIndex(t *testing.T) {
 	}
 }
 
+func TestFindInstalledMod(t *testing.T) {
+	pack, index := setupPackFixture(t)
+	project, version, file := testProjectAndFile()
+	if err := createFileMeta(project, version, file, pack, &index, "", false); err != nil {
+		t.Fatalf("createFileMeta() returned error: %v", err)
+	}
+
+	mod, err := findInstalledMod(&index, "p1")
+	if err != nil {
+		t.Fatalf("findInstalledMod() returned error: %v", err)
+	}
+	if mod == nil || mod.Name != "Test Project" {
+		t.Errorf("findInstalledMod() = %+v, want the Test Project mod", mod)
+	}
+
+	other, err := findInstalledMod(&index, "someone-else")
+	if err != nil {
+		t.Fatalf("findInstalledMod() returned error: %v", err)
+	}
+	if other != nil {
+		t.Errorf("findInstalledMod() = %+v, want nil for a project that isn't added", other)
+	}
+}
+
+func TestFindInstalledModEmptyIndex(t *testing.T) {
+	_, index := setupPackFixture(t)
+
+	mod, err := findInstalledMod(&index, "p1")
+	if err != nil || mod != nil {
+		t.Errorf("findInstalledMod() = %+v, %v; want nil, nil", mod, err)
+	}
+}
+
+// Not knowing what is added could mean adding a mod twice, so an unreadable metadata file is an error
+func TestFindInstalledModUnreadableMod(t *testing.T) {
+	pack, index := setupPackFixture(t)
+	project, version, file := testProjectAndFile()
+	if err := createFileMeta(project, version, file, pack, &index, "", false); err != nil {
+		t.Fatalf("createFileMeta() returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("mods", "test-project"+core.MetaExtension), []byte("not = [toml"), 0644); err != nil {
+		t.Fatalf("failed to corrupt the metadata: %v", err)
+	}
+
+	if _, err := findInstalledMod(&index, "p1"); err == nil {
+		t.Error("expected an error when a metadata file can't be read, got nil")
+	}
+}
+
 func TestResolveVersionByKnownID(t *testing.T) {
 	httpmock.Activate(t)
 	project := &modrinthApi.Project{ID: strPtr("p1"), Versions: []string{"v1", "v2"}}

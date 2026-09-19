@@ -104,24 +104,43 @@ func (u mrUpdater) DoUpdate(mods []*core.Mod, cachedState []interface{}) error {
 			}
 		}
 
-		algorithm, hash := getBestHash(file)
-		if algorithm == "" {
-			return errors.New("file for project " + mod.Name + " doesn't have a valid hash")
+		if err := applyVersion(mod, version, file); err != nil {
+			return err
 		}
-
-		mod.FileName = *file.Filename
-		// Overwrite rather than keep the old value, so a version without a number doesn't leave a stale one behind
-		mod.Version = versionNumberOf(version)
-		mod.Download = core.ModDownload{
-			URL:        *file.URL,
-			HashFormat: algorithm,
-			Hash:       hash,
-		}
-		mod.Update["modrinth"]["version"] = version.ID
-		mod.Dependencies = buildDependencyList(version)
 	}
 
 	return nil
+}
+
+// applyVersion points a mod at file, one of the files of version, recording where to download it from and which
+// version it is. The rest of the mod (its name, side, pin, and so on) is left as it was.
+func applyVersion(mod *core.Mod, version *modrinthApi.Version, file *modrinthApi.File) error {
+	algorithm, hash := getBestHash(file)
+	if algorithm == "" {
+		return errors.New("file for project " + mod.Name + " doesn't have a valid hash")
+	}
+
+	mod.FileName = *file.Filename
+	// Overwrite rather than keep the old value, so a version without a number doesn't leave a stale one behind
+	mod.Version = versionNumberOf(version)
+	mod.Download = core.ModDownload{
+		URL:        *file.URL,
+		HashFormat: algorithm,
+		Hash:       hash,
+	}
+	mod.Update["modrinth"]["version"] = version.ID
+	mod.Dependencies = buildDependencyList(version)
+	return nil
+}
+
+// modrinthUpdateData returns the Modrinth update data of a mod, and whether it has any (i.e. is managed by Modrinth)
+func modrinthUpdateData(mod *core.Mod) (mrUpdateData, bool) {
+	raw, ok := mod.GetParsedUpdateData("modrinth")
+	if !ok {
+		return mrUpdateData{}, false
+	}
+	data, ok := raw.(mrUpdateData)
+	return data, ok
 }
 
 // ResolveVersions implements core.VersionResolver, looking up the version number of the version each mod has

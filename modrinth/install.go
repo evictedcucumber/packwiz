@@ -17,8 +17,12 @@ import (
 
 // installCmd represents the install command
 var installCmd = &cobra.Command{
-	Use:     "add [URL]",
-	Short:   "Add a project from a Modrinth URL",
+	Use:   "add [URL]",
+	Short: "Add a project from a Modrinth URL",
+	Long: `Add a project from a Modrinth URL.
+
+If the project is already in the pack, it isn't added again: the version you asked for (by default the latest) is
+compared with the one the pack has, and if they differ you are asked whether to update it. A pinned project is not updated.`,
 	Aliases: []string{"install", "get"},
 	Args:    cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -59,7 +63,8 @@ var installCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		if (len(args) == 0 || len(args[0]) == 0) && projectID == "" {
+		// A version ID is enough: it belongs to a project, which is looked up from it
+		if (len(args) == 0 || len(args[0]) == 0) && projectID == "" && versionID == "" {
 			fmt.Println("You must specify a project; with the ID flags, or by passing a Modrinth URL directly.")
 			os.Exit(1)
 		}
@@ -131,7 +136,21 @@ func installVersionById(versionId string, versionFilename string, pack core.Pack
 }
 
 func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
-	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, releaseType)
+	lookupReleaseType := releaseType
+	if lookupReleaseType == "" {
+		// A project that is already added is looked up with the release type it was added with, as 'packwiz update'
+		// does, so that both agree on what its latest version is
+		existing, err := findInstalledMod(index, *project.ID)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			data, _ := modrinthUpdateData(existing)
+			lookupReleaseType = data.ReleaseType
+		}
+	}
+
+	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, lookupReleaseType)
 	if err != nil {
 		return fmt.Errorf("failed to get latest version: %v", err)
 	}
@@ -153,6 +172,29 @@ type depMetadataStore struct {
 func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
 	if len(version.Files) == 0 {
 		return errors.New("version doesn't have any files attached")
+	}
+
+	var file = version.Files[0]
+	// Prefer the primary file
+	for _, v := range version.Files {
+		if isPrimary(v) || (versionFilename != "" && v.Filename != nil && versionFilename == *v.Filename) {
+			file = v
+		}
+	}
+	// TODO: handle optional/required resource pack files
+
+	existing, err := findInstalledMod(index, *project.ID)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		update, err := confirmUpdate(existing, version, file)
+		if err != nil {
+			return err
+		}
+		if !update {
+			return nil
+		}
 	}
 
 	if len(version.Dependencies) > 0 {
@@ -291,17 +333,12 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		}
 	}
 
-	var file = version.Files[0]
-	// Prefer the primary file
-	for _, v := range version.Files {
-		if isPrimary(v) || (versionFilename != "" && v.Filename != nil && versionFilename == *v.Filename) {
-			file = v
-		}
+	// Create the metadata file, or update the one the project already has
+	if existing != nil {
+		err = updateFileMeta(existing, version, file, releaseType, index)
+	} else {
+		err = createFileMeta(project, version, file, pack, index, releaseType, false)
 	}
-	// TODO: handle optional/required resource pack files
-
-	// Create the metadata file
-	err := createFileMeta(project, version, file, pack, index, releaseType, false)
 	if err != nil {
 		return err
 	}
@@ -319,8 +356,57 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		return err
 	}
 
-	fmt.Printf("Project \"%s\" successfully added! (%s)\n", *project.Title, *file.Filename)
+	verb := "added"
+	if existing != nil {
+		verb = "updated"
+	}
+	fmt.Printf("Project \"%s\" successfully %s! (%s)\n", *project.Title, verb, *file.Filename)
 	return nil
+}
+
+// confirmUpdate decides what to do when version of a project is added but the pack already has the project, as
+// existing. It reports whether existing should be updated to version (using file): not if it already has that version,
+// if it is pinned, or if the user says no. It says why, except when it is an error.
+func confirmUpdate(existing *core.Mod, version *modrinthApi.Version, file *modrinthApi.File) (bool, error) {
+	if data, _ := modrinthUpdateData(existing); data.InstalledVersion == *version.ID {
+		fmt.Printf("\"%s\" is already added and up to date! (%s)\n", existing.Name, existing.FileName)
+		return false, nil
+	}
+	// Checked before asking, so that -y can't be used to get past it
+	if existing.Pin {
+		return false, fmt.Errorf("\"%s\" is pinned; run the unpin command to allow updating", existing.Name)
+	}
+
+	from, to := existing.Version, versionNumberOf(version)
+	if from == "" || to == "" {
+		// Mods added before their version was recorded only have a file name to go by
+		from, to = existing.FileName, *file.Filename
+	}
+	fmt.Printf("\"%s\" is already added. Update available: %s -> %s\n", existing.Name, from, to)
+	if !cmdshared.PromptYesNo("Would you like to update it? [Y/n]: ") {
+		fmt.Println("Cancelled!")
+		return false, nil
+	}
+	return true, nil
+}
+
+// updateFileMeta updates the metadata file of a mod that is already in the pack to file, one of the files of
+// version. Unlike createFileMeta this keeps what the user has set on the mod (its pin, option, and so on), and it
+// stays where it is, whatever it is called.
+func updateFileMeta(mod *core.Mod, version *modrinthApi.Version, file *modrinthApi.File, releaseType string, index *core.Index) error {
+	if err := applyVersion(mod, version, file); err != nil {
+		return err
+	}
+	// Only changed when explicitly overridden; otherwise the mod keeps the release type it has
+	if releaseType != "" {
+		mod.Update["modrinth"]["release-type"] = releaseType
+	}
+
+	format, hash, err := mod.Write()
+	if err != nil {
+		return err
+	}
+	return index.RefreshFileWithHash(mod.GetFilePath(), format, hash, true)
 }
 
 func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, releaseType string, isDependency bool) error {
@@ -376,7 +462,8 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		path = modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, core.SlugifyName(*project.Title)+core.MetaExtension))
 	}
 
-	// If the file already exists, this will overwrite it!!!
+	// If a file already exists here, this will overwrite it!!! A project that is already in the pack is updated in
+	// place by installVersion instead of coming here, so that would be an unrelated file.
 	// TODO: Should this be improved?
 	// Current strategy is to go ahead and do stuff without asking, with the assumption that you are using
 	// VCS anyway.
