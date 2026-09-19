@@ -26,6 +26,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Exporting to Modrinth packs
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
+- Coloured output in the terminal: successes, warnings and errors are easy to tell apart, and updates show what changes
 
 ## Changelog and releases
 
@@ -95,6 +96,22 @@ The first release has no log to read, so it describes the pack as it is, and kee
 ```
 
 Mods added before `version` was recorded have it looked up from Modrinth and saved to their `.pw.toml` the next time you run `packwiz changelog release` or `packwiz git commit` (`packwiz changelog` shows the versions but saves nothing), so that needs the network once. Releases made before then show file names, which are replaced with the versions too wherever the mod is still on that file.
+
+## Coloured output
+
+Output is coloured when it is going to a terminal: green for what was done, yellow for warnings, red for errors, cyan for notices, and bold or faded text to pick out names from file names and progress. `--help`, and the usage and error messages that come from getting a command wrong, are coloured too. It is never coloured when it is piped or redirected, so scripts, logs and files see the same plain text as always (colour is only added to the text, never changes it), and nothing that packwiz writes to your pack or to git has any in it. Each stream is decided on its own: help is written to stdout, so `packwiz --help > help.txt` is plain but `packwiz --help 2> errors.log` is still coloured, and the error and usage that come from getting a command wrong (`packwiz list extra`) are written to stderr, so `packwiz list extra 2> errors.log` has none in the log.
+
+Use `--color` (or `--colour`) to choose when:
+
+```
+packwiz list --color=always   # colour even when piped, e.g. to a pager: packwiz update --all --color=always | less -R
+packwiz list --color=never    # never
+packwiz list --color=auto     # the default: colour a terminal
+```
+
+`PACKWIZ_COLOR` sets the same thing for every command, as does `color = "never"` in packwiz's config file (`.packwiz.toml` in packwiz's data folder, whose path `packwiz --help` shows under `--config`, or the file given with `--config`); the flag overrides both. With `auto`, the [`NO_COLOR`](https://no-color.org) environment variable turns colour off, as does `TERM=dumb`.
+
+On Windows, colour is used in a console that can show it, such as Windows Terminal or a recent Windows 10 console host, and in the terminals of Git Bash (mintty), Cygwin and MSYS2, which aren't consoles but are recognised by the name of the pipe they give a program. If colour doesn't show up in one, ask for it with `--color=always` or `PACKWIZ_COLOR=always`.
 
 ## Installation
 This fork does not currently publish prebuilt binaries, so install from source:

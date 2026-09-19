@@ -1,9 +1,9 @@
 package utils
 
 import (
-	"fmt"
 	"os"
 
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 	"github.com/spf13/viper"
@@ -19,16 +19,16 @@ var markdownCmd = &cobra.Command{
 		outDir := viper.GetString("utils.markdown.dir")
 		err := os.MkdirAll(outDir, os.ModePerm)
 		if err != nil {
-			fmt.Printf("Error creating directory: %s\n", err)
+			ui.Error.Printf("Error creating directory: %s\n", err)
 			os.Exit(1)
 		}
 		disableTag(cmd.Root())
 		err = doc.GenMarkdownTree(cmd.Root(), outDir)
 		if err != nil {
-			fmt.Printf("Error generating markdown: %s\n", err)
+			ui.Error.Printf("Error generating markdown: %s\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("Generated markdown successfully!")
+		ui.Success.Println("Generated markdown successfully!")
 	},
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/viper"
 )
 
@@ -99,15 +100,29 @@ func runCommit(dryRun bool) error {
 	}
 
 	if len(steps) == 0 {
-		fmt.Println("Nothing to commit.")
+		ui.Info.Println("Nothing to commit.")
 		return nil
 	}
 	messages := make([]string, len(steps))
 	for i, step := range steps {
-		messages[i] = step.message
+		messages[i] = styleMessage(step.message)
 	}
-	fmt.Println(strings.Join(messages, "\n---\n"))
+	fmt.Println(strings.Join(messages, "\n"+ui.Muted.Sprint("---")+"\n"))
 	return nil
+}
+
+// styleMessage picks out the subject of a commit message, which is its first line
+func styleMessage(message string) string {
+	subject, body, hasBody := strings.Cut(message, "\n")
+	if !hasBody {
+		return ui.Bold.Sprint(subject)
+	}
+	return ui.Bold.Sprint(subject) + "\n" + body
+}
+
+// printCommitted says that a commit was made, showing the first line of its message
+func printCommitted(message string) {
+	fmt.Println(ui.Success.Sprint("Committed:"), firstLine(message))
 }
 
 // pendingCommits describes the commits that runCommit would make, as the changelog reads them, without making any.
@@ -212,7 +227,7 @@ func (c committer) run(steps []commitStep) error {
 				made, len(steps), plural(len(steps), "commit"), firstLine(step.message), err)
 		}
 		made++
-		fmt.Println("Committed: " + firstLine(step.message))
+		printCommitted(step.message)
 	}
 
 	if err := c.writeIndexAndPack(c.w.Index.Files, c.w.Pack); err != nil {
@@ -224,7 +239,7 @@ func (c committer) run(steps []commitStep) error {
 	}
 	if !dirty {
 		if made == 0 {
-			fmt.Println("Nothing to commit.")
+			ui.Info.Println("Nothing to commit.")
 		}
 		return nil
 	}
@@ -239,7 +254,7 @@ func (c committer) run(steps []commitStep) error {
 		return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again to commit the rest",
 			made, len(steps), plural(len(steps), "commit"), firstLine(message), err)
 	}
-	fmt.Println("Committed: " + firstLine(message))
+	printCommitted(message)
 	return nil
 }
 

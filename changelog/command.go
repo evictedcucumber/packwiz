@@ -10,6 +10,7 @@ import (
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -34,7 +35,7 @@ the release they would make and the version it would have. Nothing is committed 
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runPreview(sinceFlag); err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 	},
@@ -56,7 +57,7 @@ The first release describes the pack as it is, and keeps the version already in 
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if _, _, err := RunRelease(releaseVersionFlag, sinceFlag); err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 	},
@@ -74,7 +75,7 @@ func runPreview(since string) error {
 		return err
 	}
 	if len(p.changes) == 0 {
-		fmt.Println(p.noChangesMessage())
+		ui.Info.Println(p.noChangesMessage())
 		return nil
 	}
 	release, err := p.plan("")
@@ -103,13 +104,13 @@ func RunRelease(versionOverride, since string) (Release, bool, error) {
 		return Release{}, false, err
 	}
 	if len(p.changes) == 0 {
-		fmt.Println(p.noChangesMessage())
+		ui.Info.Println(p.noChangesMessage())
 		// Nothing to release, but past releases can still be made to show versions where they showed file names
 		if p.upgraded > 0 {
 			if err := p.save(p.history); err != nil {
 				return Release{}, false, fmt.Errorf("failed to update the changelog: %w", err)
 			}
-			fmt.Printf("Updated %d %s in the changelog.\n", p.upgraded, plural(p.upgraded, "line"))
+			ui.Success.Printf("Updated %d %s in the changelog.\n", p.upgraded, plural(p.upgraded, "line"))
 		}
 		return Release{}, false, nil
 	}
@@ -120,13 +121,13 @@ func RunRelease(versionOverride, since string) (Release, bool, error) {
 	p.printPlan(release)
 
 	if !cmdshared.PromptYesNo(fmt.Sprintf("Release %s? [Y/n]: ", release.Version)) {
-		fmt.Println("Cancelled!")
+		ui.Warning.Println("Cancelled!")
 		return Release{}, false, nil
 	}
 	if err := p.apply(release); err != nil {
 		return Release{}, false, fmt.Errorf("failed to release: %w", err)
 	}
-	fmt.Printf("Released %s!\n", release.Version)
+	ui.Success.Printf("Released %s!\n", ui.Bold.Sprint(release.Version))
 	return release, true, nil
 }
 
@@ -301,15 +302,15 @@ func (p pending) firstVersion(override *Version) (Version, error) {
 func (p pending) printPlan(release Release) {
 	last, hasLast := p.history.Latest()
 	if hasLast {
-		fmt.Printf("Changes since %s; next version is %s (%s bump)\n", last.Version, release.Version, release.Bump)
+		fmt.Printf("Changes since %s; next version is %s %s\n", last.Version, ui.Bold.Sprint(release.Version), ui.Muted.Sprintf("(%s bump)", release.Bump))
 		if p.pack.Version != "" && p.pack.Version != last.Version {
-			fmt.Printf("Note: pack.toml has version %s, but the last release was %s; using the last release as the base.\n", p.pack.Version, last.Version)
+			ui.Info.Printf("Note: pack.toml has version %s, but the last release was %s; using the last release as the base.\n", p.pack.Version, last.Version)
 		}
 	} else {
-		fmt.Printf("First release; version is %s\n", release.Version)
+		fmt.Printf("First release; version is %s\n", ui.Bold.Sprint(release.Version))
 	}
 	fmt.Println()
-	fmt.Println(RenderRelease(release))
+	fmt.Println(renderRelease(release, style{colour: true}))
 }
 
 // apply records the release, as made at the commit that was current when it was worked out.

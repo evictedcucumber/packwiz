@@ -1,10 +1,10 @@
 package migrate
 
 import (
-	"fmt"
 	packCmd "github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"os"
@@ -20,25 +20,25 @@ var minecraftCommand = &cobra.Command{
 		if err != nil {
 			// Check if it's a no such file or directory error
 			if os.IsNotExist(err) {
-				fmt.Println("No pack.toml file found, run 'packwiz init' to create one!")
+				ui.Error.Println("No pack.toml file found, run 'packwiz init' to create one!")
 				os.Exit(1)
 			}
-			fmt.Printf("Error loading pack: %s\n", err)
+			ui.Error.Printf("Error loading pack: %s\n", err)
 			os.Exit(1)
 		}
 		currentVersion, err := modpack.GetMCVersion()
 		if err != nil {
-			fmt.Printf("Error getting Minecraft version from pack: %s\n", err)
+			ui.Error.Printf("Error getting Minecraft version from pack: %s\n", err)
 			os.Exit(1)
 		}
 		wantedMCVersion := args[0]
 		if wantedMCVersion == currentVersion {
-			fmt.Printf("Minecraft version is already %s!\n", wantedMCVersion)
+			ui.Info.Printf("Minecraft version is already %s!\n", wantedMCVersion)
 			os.Exit(0)
 		}
 		mcVersions, err := cmdshared.GetValidMCVersions()
 		if err != nil {
-			fmt.Printf("Error getting Minecraft versions: %s\n", err)
+			ui.Error.Printf("Error getting Minecraft versions: %s\n", err)
 			os.Exit(1)
 		}
 		mcVersions.CheckValid(wantedMCVersion)
@@ -47,10 +47,10 @@ var minecraftCommand = &cobra.Command{
 		// Write the pack to disk
 		err = modpack.Write()
 		if err != nil {
-			fmt.Printf("Error writing pack.toml: %s\n", err)
+			ui.Error.Printf("Error writing pack.toml: %s\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Successfully updated Minecraft version to %s\n", wantedMCVersion)
+		ui.Success.Printf("Successfully updated Minecraft version to %s\n", ui.Bold.Sprint(wantedMCVersion))
 		// Prompt the user if they want to update the loader too while they're at it.
 		if cmdshared.PromptYesNo("Would you like to update your loader version to the latest version for this Minecraft version? [Y/n] ") {
 			// We'll run the loader command to update to latest

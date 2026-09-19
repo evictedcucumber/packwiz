@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -28,13 +29,13 @@ compared with the one the pack has, and if they differ you are asked whether to 
 	Run: func(cmd *cobra.Command, args []string) {
 		pack, err := core.LoadPack()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 
 		index, err := pack.LoadIndex()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 
@@ -43,14 +44,14 @@ compared with the one the pack has, and if they differ you are asked whether to 
 		if projectIDFlag != "" {
 			projectID = projectIDFlag
 			if len(args) != 0 {
-				fmt.Println("--project-id cannot be used with a separately specified URL")
+				ui.Error.Println("--project-id cannot be used with a separately specified URL")
 				os.Exit(1)
 			}
 		}
 		if versionIDFlag != "" {
 			versionID = versionIDFlag
 			if len(args) != 0 {
-				fmt.Println("--version-id cannot be used with a separately specified URL")
+				ui.Error.Println("--version-id cannot be used with a separately specified URL")
 				os.Exit(1)
 			}
 		}
@@ -59,13 +60,13 @@ compared with the one the pack has, and if they differ you are asked whether to 
 		}
 
 		if releaseTypeFlag != "" && !core.IsValidReleaseType(releaseTypeFlag) {
-			fmt.Printf("Invalid --release-type %q; must be one of: release, beta, alpha\n", releaseTypeFlag)
+			ui.Error.Printf("Invalid --release-type %q; must be one of: release, beta, alpha\n", releaseTypeFlag)
 			os.Exit(1)
 		}
 
 		// A version ID is enough: it belongs to a project, which is looked up from it
 		if (len(args) == 0 || len(args[0]) == 0) && projectID == "" && versionID == "" {
-			fmt.Println("You must specify a project; with the ID flags, or by passing a Modrinth URL directly.")
+			ui.Error.Println("You must specify a project; with the ID flags, or by passing a Modrinth URL directly.")
 			os.Exit(1)
 		}
 
@@ -74,7 +75,7 @@ compared with the one the pack has, and if they differ you are asked whether to 
 			// Interpret the argument as a project/version/CDN URL
 			err = parseUrl(args[0], &projectID, &version, &versionID, &versionFilename)
 			if err != nil {
-				fmt.Printf("Failed to parse URL: %v\n", err)
+				ui.Error.Printf("Failed to parse URL: %v\n", err)
 				os.Exit(1)
 			}
 		}
@@ -83,7 +84,7 @@ compared with the one the pack has, and if they differ you are asked whether to 
 		if versionID != "" {
 			err = installVersionById(versionID, versionFilename, pack, &index, releaseTypeFlag)
 			if err != nil {
-				fmt.Printf("Failed to add project: %s\n", err)
+				ui.Error.Printf("Failed to add project: %s\n", err)
 				os.Exit(1)
 			}
 			return
@@ -93,7 +94,7 @@ compared with the one the pack has, and if they differ you are asked whether to 
 		// Modrinth transparently handles slugs/project IDs in their API; we don't have to detect which one it is.
 		project, err := mrDefaultClient.Projects.Get(projectID)
 		if err != nil {
-			fmt.Printf("Failed to add project: %s\n", err)
+			ui.Error.Printf("Failed to add project: %s\n", err)
 			os.Exit(1)
 		}
 
@@ -101,12 +102,12 @@ compared with the one the pack has, and if they differ you are asked whether to 
 			// Try to look up version number
 			versionData, err := resolveVersion(project, version)
 			if err != nil {
-				fmt.Printf("Failed to add project: %s\n", err)
+				ui.Error.Printf("Failed to add project: %s\n", err)
 				os.Exit(1)
 			}
 			err = installVersion(project, versionData, versionFilename, pack, &index, releaseTypeFlag)
 			if err != nil {
-				fmt.Printf("Failed to add project: %s\n", err)
+				ui.Error.Printf("Failed to add project: %s\n", err)
 				os.Exit(1)
 			}
 			return
@@ -115,7 +116,7 @@ compared with the one the pack has, and if they differ you are asked whether to 
 		// No version specified; find latest
 		err = installProject(project, versionFilename, pack, &index, releaseTypeFlag)
 		if err != nil {
-			fmt.Printf("Failed to add project: %s\n", err)
+			ui.Error.Printf("Failed to add project: %s\n", err)
 			os.Exit(1)
 		}
 	},
@@ -229,7 +230,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		}
 
 		if len(depProjectIDPendingQueue)+len(depVersionIDPendingQueue) > 0 {
-			fmt.Println("Finding dependencies...")
+			ui.Muted.Println("Finding dependencies...")
 
 			cycles := 0
 			for len(depProjectIDPendingQueue)+len(depVersionIDPendingQueue) > 0 && cycles < maxCycles {
@@ -242,7 +243,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 							depProjectIDPendingQueue = append(depProjectIDPendingQueue, *v.ProjectID)
 						}
 					} else {
-						fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
+						ui.Error.Printf("Error retrieving dependency data: %s\n", err.Error())
 					}
 					depVersionIDPendingQueue = depVersionIDPendingQueue[:0]
 				}
@@ -273,7 +274,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 				}
 				depProjects, err := mrDefaultClient.Projects.GetMultiple(depProjectIDPendingQueue)
 				if err != nil {
-					fmt.Printf("Error retrieving dependency data: %s\n", err.Error())
+					ui.Error.Printf("Error retrieving dependency data: %s\n", err.Error())
 				}
 				depProjectIDPendingQueue = depProjectIDPendingQueue[:0]
 
@@ -285,7 +286,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 					// Dependencies use the pack's default release type rather than inheriting the flag passed for the mod being added
 					latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, "", acceptFabric)
 					if err != nil {
-						fmt.Printf("Failed to get latest version of dependency %v: %v\n", *project.Title, err)
+						ui.Error.Printf("Failed to get latest version of dependency %v: %v\n", *project.Title, err)
 						continue
 					}
 					// Only got a Fabric version because the pack runs Fabric mods
@@ -325,7 +326,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 			}
 
 			if len(depMetadata) > 0 {
-				fmt.Println("Dependencies found:")
+				ui.Bold.Println("Dependencies found:")
 				for _, v := range depMetadata {
 					fmt.Println(*v.projectInfo.Title)
 				}
@@ -336,11 +337,11 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 						if err != nil {
 							return err
 						}
-						fmt.Printf("Dependency \"%s\" successfully added! (%s)\n", *v.projectInfo.Title, *v.fileInfo.Filename)
+						ui.Success.Printf("Dependency \"%s\" successfully added! %s\n", ui.Bold.Sprint(*v.projectInfo.Title), ui.Muted.Sprintf("(%s)", *v.fileInfo.Filename))
 					}
 				}
 			} else {
-				fmt.Println("All dependencies are already added!")
+				ui.Success.Println("All dependencies are already added!")
 			}
 		}
 	}
@@ -372,7 +373,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	if existing != nil {
 		verb = "updated"
 	}
-	fmt.Printf("Project \"%s\" successfully %s! (%s)\n", *project.Title, verb, *file.Filename)
+	ui.Success.Printf("Project \"%s\" successfully %s! %s\n", ui.Bold.Sprint(*project.Title), verb, ui.Muted.Sprintf("(%s)", *file.Filename))
 	return nil
 }
 
@@ -381,7 +382,7 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 // if it is pinned, or if the user says no. It says why, except when it is an error.
 func confirmUpdate(existing *core.Mod, version *modrinthApi.Version, file *modrinthApi.File) (bool, error) {
 	if data, _ := modrinthUpdateData(existing); data.InstalledVersion == *version.ID {
-		fmt.Printf("\"%s\" is already added and up to date! (%s)\n", existing.Name, existing.FileName)
+		ui.Success.Printf("\"%s\" is already added and up to date! %s\n", ui.Bold.Sprint(existing.Name), ui.Muted.Sprintf("(%s)", existing.FileName))
 		return false, nil
 	}
 	// Checked before asking, so that -y can't be used to get past it
@@ -394,9 +395,9 @@ func confirmUpdate(existing *core.Mod, version *modrinthApi.Version, file *modri
 		// Mods added before their version was recorded only have a file name to go by
 		from, to = existing.FileName, *file.Filename
 	}
-	fmt.Printf("\"%s\" is already added. Update available: %s -> %s\n", existing.Name, from, to)
+	ui.Info.Printf("\"%s\" is already added. Update available: %s\n", ui.Bold.Sprint(existing.Name), ui.Transition(from, to))
 	if !cmdshared.PromptYesNo("Would you like to update it? [Y/n]: ") {
-		fmt.Println("Cancelled!")
+		ui.Warning.Println("Cancelled!")
 		return false, nil
 	}
 	return true, nil
@@ -437,7 +438,7 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 
 	side := getSide(project)
 	if side == "" {
-		fmt.Println("Warning: Project doesn't have a side that's supported; assuming universal. Server: " + *project.ServerSide + " Client: " + *project.ClientSide)
+		ui.Warning.Println("Warning: Project doesn't have a side that's supported; assuming universal. Server: " + *project.ServerSide + " Client: " + *project.ClientSide)
 		side = core.UniversalSide
 	}
 

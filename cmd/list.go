@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -21,21 +22,21 @@ var listCmd = &cobra.Command{
 		// Load pack
 		pack, err := core.LoadPack()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 
 		// Load index
 		index, err := pack.LoadIndex()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 
 		// Load mods
 		mods, err := index.LoadAllMods()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 
@@ -43,7 +44,7 @@ var listCmd = &cobra.Command{
 		if viper.IsSet("list.only") {
 			only := viper.GetString("list.only")
 			if only != "main" && only != "dependencies" {
-				fmt.Printf("Invalid --only %q, must be one of main, dependencies\n", only)
+				ui.Error.Printf("Invalid --only %q, must be one of main, dependencies\n", only)
 				os.Exit(1)
 			}
 
@@ -61,7 +62,7 @@ var listCmd = &cobra.Command{
 		if viper.IsSet("list.side") {
 			side := viper.GetString("list.side")
 			if side != core.UniversalSide && side != core.ServerSide && side != core.ClientSide {
-				fmt.Printf("Invalid side %q, must be one of client, server, or both (default)\n", side)
+				ui.Error.Printf("Invalid side %q, must be one of client, server, or both (default)\n", side)
 				os.Exit(1)
 			}
 
@@ -84,14 +85,15 @@ var listCmd = &cobra.Command{
 		for _, mod := range mods {
 			line := mod.Name
 			if viper.GetBool("list.version") {
-				line = fmt.Sprintf("%s (%s)", line, mod.FileName)
+				line = fmt.Sprintf("%s %s", line, ui.Muted.Sprintf("(%s)", mod.FileName))
 			}
 			if showKind {
-				kind := "main"
+				// A dependency is there for another mod, so it is the one that fades back
+				kind := ui.Info.Sprint("[main]")
 				if mod.AddedAsDependency {
-					kind = "dependency"
+					kind = ui.Muted.Sprint("[dependency]")
 				}
-				line = fmt.Sprintf("%s [%s]", line, kind)
+				line = fmt.Sprintf("%s %s", line, kind)
 			}
 			fmt.Println(line)
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -22,17 +23,17 @@ var depsCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		pack, err := core.LoadPack()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		index, err := pack.LoadIndex()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		mods, err := index.LoadAllMods()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 
@@ -53,7 +54,7 @@ var depsCmd = &cobra.Command{
 		}
 
 		if len(mrMods) == 0 {
-			fmt.Println("No Modrinth-managed mods found.")
+			ui.Info.Println("No Modrinth-managed mods found.")
 			return
 		}
 
@@ -83,36 +84,36 @@ var depsCmd = &cobra.Command{
 		}
 
 		for _, name := range fetchFailed {
-			fmt.Printf("Warning: failed to fetch dependency data for %q\n", name)
+			ui.Warning.Printf("Warning: failed to fetch dependency data for %q\n", name)
 		}
 
 		if len(fetched) > 0 {
-			fmt.Printf("Fetched dependency data for %d mod(s) from Modrinth.\n", len(fetched))
+			ui.Info.Printf("Fetched dependency data for %d mod(s) from Modrinth.\n", len(fetched))
 			if cmdshared.PromptYesNo("Save this dependency data to the pack for faster future reports? [Y/n]: ") {
 				for _, mod := range fetched {
 					format, hash, err := mod.Write()
 					if err != nil {
-						fmt.Printf("Failed to save dependency data for %q: %v\n", mod.Name, err)
+						ui.Error.Printf("Failed to save dependency data for %q: %v\n", mod.Name, err)
 						continue
 					}
 					err = index.RefreshFileWithHash(mod.GetFilePath(), format, hash, true)
 					if err != nil {
-						fmt.Printf("Failed to update index for %q: %v\n", mod.Name, err)
+						ui.Error.Printf("Failed to update index for %q: %v\n", mod.Name, err)
 					}
 				}
 				err = index.Write()
 				if err != nil {
-					fmt.Println(err)
+					ui.Error.Println(err)
 					os.Exit(1)
 				}
 				err = pack.UpdateIndexHash()
 				if err != nil {
-					fmt.Println(err)
+					ui.Error.Println(err)
 					os.Exit(1)
 				}
 				err = pack.Write()
 				if err != nil {
-					fmt.Println(err)
+					ui.Error.Println(err)
 					os.Exit(1)
 				}
 			}
@@ -135,7 +136,7 @@ var depsCmd = &cobra.Command{
 		if len(unresolvedIDs) > 0 {
 			projects, err := mrDefaultClient.Projects.GetMultiple(unresolvedIDs)
 			if err != nil {
-				fmt.Printf("Warning: failed to resolve dependency project names: %v\n", err)
+				ui.Warning.Printf("Warning: failed to resolve dependency project names: %v\n", err)
 			} else {
 				for _, p := range projects {
 					if p.ID != nil && p.Title != nil {
@@ -154,31 +155,47 @@ var depsCmd = &cobra.Command{
 			if len(mod.Dependencies) == 0 {
 				continue
 			}
-			fmt.Println(mod.Name + ":")
+			ui.Bold.Println(mod.Name + ":")
 			for _, dep := range mod.Dependencies {
 				name, installed := installedNames[dep.ID]
-				status := "already in pack"
+				status := ui.Success.Sprint("already in pack")
 				if !installed {
-					status = "missing"
+					// Only a dependency that is required is a problem when it is missing
+					missing := ui.Warning
+					if dep.Type == "required" {
+						missing = ui.Error
+						missingRequiredTotal++
+					}
+					status = missing.Sprint("missing")
 					if resolved, ok := depNames[dep.ID]; ok {
 						name = resolved
 					} else {
 						name = dep.ID
 					}
-					if dep.Type == "required" {
-						missingRequiredTotal++
-					}
 				}
-				fmt.Printf("  [%s] %s (%s)\n", dep.Type, name, status)
+				fmt.Printf("  %s %s (%s)\n", styleDependencyType(dep.Type), name, status)
 			}
 		}
 
 		if missingRequiredTotal > 0 {
-			fmt.Printf("\n%d required dependencies are missing from the pack. Use 'packwiz mr add' to install them.\n", missingRequiredTotal)
+			ui.Warning.Printf("\n%d required dependencies are missing from the pack. Use 'packwiz mr add' to install them.\n", missingRequiredTotal)
 		} else {
-			fmt.Println("\nAll required dependencies are already added to the pack!")
+			ui.Success.Println("\nAll required dependencies are already added to the pack!")
 		}
 	},
+}
+
+// styleDependencyType shows how a dependency is needed: one that is required as it is, one that can't be used with the
+// mod stands out, and one that isn't needed fades back
+func styleDependencyType(depType string) string {
+	tag := "[" + depType + "]"
+	switch depType {
+	case "required":
+		return tag
+	case "incompatible":
+		return ui.Error.Sprint(tag)
+	}
+	return ui.Muted.Sprint(tag)
 }
 
 func init() {

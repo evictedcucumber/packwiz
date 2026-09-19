@@ -11,6 +11,7 @@ import (
 
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/fatih/camelcase"
 	"github.com/igorsobreira/titlecase"
 	"github.com/spf13/cobra"
@@ -25,10 +26,10 @@ var initCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		_, err := os.Stat(viper.GetString("pack-file"))
 		if err == nil && !viper.GetBool("init.reinit") {
-			fmt.Println("Modpack metadata file already exists, use -r to override!")
+			ui.Error.Println("Modpack metadata file already exists, use -r to override!")
 			os.Exit(1)
 		} else if err != nil && !os.IsNotExist(err) {
-			fmt.Printf("Error checking pack file: %s\n", err)
+			ui.Error.Printf("Error checking pack file: %s\n", err)
 			os.Exit(1)
 		}
 
@@ -61,13 +62,13 @@ var initCmd = &cobra.Command{
 
 		mcVersions, err := cmdshared.GetValidMCVersions()
 		if err != nil {
-			fmt.Printf("Failed to get latest minecraft versions: %s\n", err)
+			ui.Error.Printf("Failed to get latest minecraft versions: %s\n", err)
 			os.Exit(1)
 		}
 
 		mcVersion := viper.GetString("init.mc-version")
 		if len(mcVersion) > 0 && !mcVersions.IsValid(mcVersion) {
-			fmt.Println("\"" + mcVersion + "\" is not a valid Minecraft version!")
+			ui.Error.Println("\"" + mcVersion + "\" is not a valid Minecraft version!")
 			if viper.GetBool("non-interactive") {
 				os.Exit(1)
 			}
@@ -98,8 +99,8 @@ var initCmd = &cobra.Command{
 
 		modLoaderName := strings.ToLower(viper.GetString("init.modloader"))
 		if len(modLoaderName) > 0 && !isValidLoaderChoice(modLoaderName) {
-			fmt.Println("\"" + modLoaderName + "\" is not a supported mod loader! Use \"none\" to specify no modloader, or to configure one manually.")
-			fmt.Println("The following mod loaders are supported: " + strings.Join(validLoaderChoices, ", "))
+			ui.Error.Println("\"" + modLoaderName + "\" is not a supported mod loader! Use \"none\" to specify no modloader, or to configure one manually.")
+			ui.Info.Println("The following mod loaders are supported: " + strings.Join(validLoaderChoices, ", "))
 			if viper.GetBool("non-interactive") {
 				os.Exit(1)
 			}
@@ -120,7 +121,7 @@ var initCmd = &cobra.Command{
 		if modLoaderName != "none" && ok {
 			versionData, err := core.DoQuery(core.MakeQuery(loader, mcVersion))
 			if err != nil {
-				fmt.Printf("Error loading versions: %s\n", err)
+				ui.Error.Printf("Error loading versions: %s\n", err)
 				os.Exit(1)
 			}
 			// NeoForge reused Forge's version-prefixing format (prefixed with the supported
@@ -135,7 +136,7 @@ var initCmd = &cobra.Command{
 
 			componentVersion := viper.GetString("init." + loader.Name + "-version")
 			if len(componentVersion) > 0 && !isValidComponentVersion(componentVersion) {
-				fmt.Println("\"" + componentVersion + "\" is not a valid " + loader.FriendlyName + " version!")
+				ui.Error.Println("\"" + componentVersion + "\" is not a valid " + loader.FriendlyName + " version!")
 				if viper.GetBool("non-interactive") {
 					os.Exit(1)
 				}
@@ -163,12 +164,12 @@ var initCmd = &cobra.Command{
 			// Create file
 			err = os.WriteFile(indexFilePath, []byte{}, 0644)
 			if err != nil {
-				fmt.Printf("Error creating index file: %s\n", err)
+				ui.Error.Printf("Error creating index file: %s\n", err)
 				os.Exit(1)
 			}
-			fmt.Println(indexFilePath + " created!")
+			ui.Success.Println(indexFilePath + " created!")
 		} else if err != nil {
-			fmt.Printf("Error checking index file: %s\n", err)
+			ui.Error.Printf("Error checking index file: %s\n", err)
 			os.Exit(1)
 		}
 
@@ -198,30 +199,30 @@ var initCmd = &cobra.Command{
 		// Refresh the index and pack
 		index, err := pack.LoadIndex()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		err = index.Refresh()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		err = index.Write()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		err = pack.UpdateIndexHash()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		err = pack.Write()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
-		fmt.Println(viper.GetString("pack-file") + " created!")
+		ui.Success.Println(viper.GetString("pack-file") + " created!")
 	},
 }
 
@@ -259,14 +260,14 @@ func init() {
 var stdinReader = bufio.NewReader(os.Stdin)
 
 func initReadValue(prompt string, def string) string {
-	fmt.Print(prompt)
+	fmt.Print(ui.Prompt(prompt))
 	if viper.GetBool("non-interactive") {
-		fmt.Printf("%s\n", def)
+		ui.Info.Printf("%s\n", def)
 		return def
 	}
 	value, err := stdinReader.ReadString('\n')
 	if err != nil {
-		fmt.Printf("Error reading input: %s\n", err)
+		ui.Error.Printf("Error reading input: %s\n", err)
 		os.Exit(1)
 	}
 	// Trims both CR and LF
@@ -287,6 +288,6 @@ func initReadValidValue(prompt string, def string, isValid func(string) bool, in
 		if isValid(value) {
 			return value
 		}
-		fmt.Println(invalidMsg(value))
+		ui.Error.Println(invalidMsg(value))
 	}
 }

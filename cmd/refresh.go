@@ -1,11 +1,11 @@
 package cmd
 
 import (
-	"fmt"
 	"github.com/spf13/viper"
 	"os"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -15,44 +15,44 @@ var refreshCmd = &cobra.Command{
 	Short: "Refresh the index file",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Loading modpack...")
+		ui.Muted.Println("Loading modpack...")
 		pack, err := core.LoadPack()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		build, err := cmd.Flags().GetBool("build")
 		if err == nil && build {
 			viper.Set("no-internal-hashes", false)
 		} else if viper.GetBool("no-internal-hashes") {
-			fmt.Println("Note: no-internal-hashes mode is set, no hashes will be saved. Use --build to override this for distribution.")
+			ui.Info.Println("Note: no-internal-hashes mode is set, no hashes will be saved. Use --build to override this for distribution.")
 		}
 		index, err := pack.LoadIndex()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		err = index.Refresh()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		err = index.Write()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		err = pack.UpdateIndexHash()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		err = pack.Write()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
-		fmt.Println("Index refreshed!")
+		ui.Success.Println("Index refreshed!")
 	},
 }
 

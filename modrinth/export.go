@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -23,43 +24,43 @@ var exportCmd = &cobra.Command{
 	Short: "Export the current modpack into a .mrpack for Modrinth",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Loading modpack...")
+		ui.Muted.Println("Loading modpack...")
 		pack, err := core.LoadPack()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		index, err := pack.LoadIndex()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		// Do a refresh to ensure files are up to date
 		err = index.Refresh()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			return
 		}
 		err = index.Write()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			return
 		}
 		err = pack.UpdateIndexHash()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			return
 		}
 		err = pack.Write()
 		if err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			return
 		}
 
-		fmt.Println("Reading external files...")
+		ui.Muted.Println("Reading external files...")
 		mods, err := index.LoadAllMods()
 		if err != nil {
-			fmt.Printf("Error reading file: %v\n", err)
+			ui.Error.Printf("Error reading file: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -69,7 +70,7 @@ var exportCmd = &cobra.Command{
 		}
 		expFile, err := os.Create(fileName)
 		if err != nil {
-			fmt.Printf("Failed to create zip: %s\n", err.Error())
+			ui.Error.Printf("Failed to create zip: %s\n", err.Error())
 			os.Exit(1)
 		}
 		exp := zip.NewWriter(expFile)
@@ -77,11 +78,11 @@ var exportCmd = &cobra.Command{
 		// Add an overrides folder even if there are no files to go in it
 		_, err = exp.Create("overrides/")
 		if err != nil {
-			fmt.Printf("Failed to add overrides folder: %s\n", err.Error())
+			ui.Error.Printf("Failed to add overrides folder: %s\n", err.Error())
 			os.Exit(1)
 		}
 
-		fmt.Printf("Retrieving %v external files...\n", len(mods))
+		ui.Muted.Printf("Retrieving %v external files...\n", len(mods))
 
 		restrictDomains := viper.GetBool("modrinth.export.restrictDomains")
 
@@ -94,7 +95,7 @@ var exportCmd = &cobra.Command{
 
 		session, err := core.CreateDownloadSession(mods, []string{"sha1", "sha512", "length-bytes"})
 		if err != nil {
-			fmt.Printf("Error retrieving external files: %v\n", err)
+			ui.Error.Printf("Error retrieving external files: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -104,16 +105,16 @@ var exportCmd = &cobra.Command{
 		for dl := range session.StartDownloads() {
 			if canBeIncludedDirectly(dl.Mod, restrictDomains) {
 				if dl.Error != nil {
-					fmt.Printf("Download of %s (%s) failed: %v\n", dl.Mod.Name, dl.Mod.FileName, dl.Error)
+					ui.Error.Printf("Download of %s (%s) failed: %v\n", dl.Mod.Name, dl.Mod.FileName, dl.Error)
 					continue
 				}
 				for _, warning := range dl.Warnings {
-					fmt.Printf("Warning for %s (%s): %v\n", dl.Mod.Name, dl.Mod.FileName, warning)
+					ui.Warning.Printf("Warning for %s (%s): %v\n", dl.Mod.Name, dl.Mod.FileName, warning)
 				}
 
 				path, err := index.RelIndexPath(dl.Mod.GetDestFilePath())
 				if err != nil {
-					fmt.Printf("Error resolving external file: %s\n", err.Error())
+					ui.Error.Printf("Error resolving external file: %s\n", err.Error())
 					// TODO: exit(1)?
 					continue
 				}
@@ -148,7 +149,7 @@ var exportCmd = &cobra.Command{
 				// Modrinth URLs must be RFC3986
 				u, err := core.ReencodeURL(dl.Mod.Download.URL)
 				if err != nil {
-					fmt.Printf("Error re-encoding download URL: %s\n", err.Error())
+					ui.Error.Printf("Error re-encoding download URL: %s\n", err.Error())
 					u = dl.Mod.Download.URL
 				}
 
@@ -163,7 +164,7 @@ var exportCmd = &cobra.Command{
 					FileSize:  fileSize,
 				})
 
-				fmt.Printf("%s (%s) added to manifest\n", dl.Mod.Name, dl.Mod.FileName)
+				fmt.Printf("%s %s added to manifest\n", ui.Bold.Sprint(dl.Mod.Name), ui.Muted.Sprintf("(%s)", dl.Mod.FileName))
 			} else {
 				if dl.Mod.Side == core.ClientSide {
 					_ = cmdshared.AddToZip(dl, exp, "client-overrides", &index)
@@ -181,7 +182,7 @@ var exportCmd = &cobra.Command{
 
 		err = session.SaveIndex()
 		if err != nil {
-			fmt.Printf("Error saving cache index: %v\n", err)
+			ui.Error.Printf("Error saving cache index: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -190,7 +191,7 @@ var exportCmd = &cobra.Command{
 		if err != nil {
 			_ = exp.Close()
 			_ = expFile.Close()
-			fmt.Println("Error creating manifest: " + err.Error())
+			ui.Error.Println("Error creating manifest: " + err.Error())
 			os.Exit(1)
 		}
 		if neoforgeVersion, ok := pack.Versions["neoforge"]; ok {
@@ -208,14 +209,14 @@ var exportCmd = &cobra.Command{
 		}
 
 		if len(pack.Version) == 0 {
-			fmt.Println("Warning: pack.toml version field must not be empty to create a valid Modrinth pack")
+			ui.Warning.Println("Warning: pack.toml version field must not be empty to create a valid Modrinth pack")
 		}
 
 		manifestFile, err := exp.Create("modrinth.index.json")
 		if err != nil {
 			_ = exp.Close()
 			_ = expFile.Close()
-			fmt.Println("Error creating manifest: " + err.Error())
+			ui.Error.Println("Error creating manifest: " + err.Error())
 			os.Exit(1)
 		}
 
@@ -225,7 +226,7 @@ var exportCmd = &cobra.Command{
 		if err != nil {
 			_ = exp.Close()
 			_ = expFile.Close()
-			fmt.Println("Error writing manifest: " + err.Error())
+			ui.Error.Println("Error writing manifest: " + err.Error())
 			os.Exit(1)
 		}
 
@@ -233,16 +234,16 @@ var exportCmd = &cobra.Command{
 
 		err = exp.Close()
 		if err != nil {
-			fmt.Println("Error writing export file: " + err.Error())
+			ui.Error.Println("Error writing export file: " + err.Error())
 			os.Exit(1)
 		}
 		err = expFile.Close()
 		if err != nil {
-			fmt.Println("Error writing export file: " + err.Error())
+			ui.Error.Println("Error writing export file: " + err.Error())
 			os.Exit(1)
 		}
 
-		fmt.Println("Modpack exported to " + fileName)
+		ui.Success.Println("Modpack exported to " + ui.Bold.Sprint(fileName))
 	},
 }
 

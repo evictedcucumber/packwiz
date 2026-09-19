@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
 // Working is the pack as it is on disk now.
@@ -40,7 +41,7 @@ func LoadWorking(strict bool) (Working, error) {
 		if strict {
 			return Working{}, fmt.Errorf("couldn't look up the versions of mods that don't record one: %w", err)
 		}
-		fmt.Printf("Warning: couldn't look up the versions of mods that don't record one (%v); they are shown by file name.\n", err)
+		ui.Warning.Printf("Warning: couldn't look up the versions of mods that don't record one (%v); they are shown by file name.\n", err)
 	}
 	return Working{pack, index, versions}, nil
 }

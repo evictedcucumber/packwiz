@@ -3,15 +3,20 @@
 // directly in cobra Run closures that print via fmt.Println and exit via
 // os.Exit(1) on error, so tests invoke Run() directly in an isolated temp
 // directory and capture real stdout, rather than driving cobra's Execute().
+//
+// Output is captured through a pipe, which isn't a terminal, so it is never coloured unless a test asks for it (see
+// SetColor).
 package cmdtest
 
 import (
 	"bytes"
 	"io"
 	"os"
+	"regexp"
 	"testing"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/viper"
 )
 
@@ -61,6 +66,72 @@ func CaptureStdout(t *testing.T, fn func()) string {
 	_ = w.Close()
 	os.Stdout = old
 	return <-outC
+}
+
+// CaptureStderr redirects os.Stderr for the duration of fn and returns everything written to it, as CaptureStdout does
+// for os.Stdout.
+func CaptureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stderr = w
+
+	outC := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		outC <- buf.String()
+	}()
+
+	fn()
+
+	_ = w.Close()
+	os.Stderr = old
+	return <-outC
+}
+
+// SetColor sets when output is coloured for the duration of the test, restoring the previous mode on cleanup. Captured
+// output is only coloured with ui.Always.
+func SetColor(t *testing.T, mode ui.Mode) {
+	t.Helper()
+	old := ui.SetMode(mode)
+	t.Cleanup(func() { ui.SetMode(old) })
+}
+
+// progressBar matches what refreshing an index draws: a bar that is redrawn in place with cursor movements, and that
+// shows how long it has taken, so it is different from one run to the next.
+var progressBar = regexp.MustCompile(`(?m)^(?:\x1b\[1A\x1b\[J)?Refreshing index\.\.\..*\n`)
+
+// WithoutProgress removes the progress bar of refreshing an index from captured output, leaving what a test can compare.
+func WithoutProgress(output string) string {
+	return progressBar.ReplaceAllString(output, "")
+}
+
+// AssertColourOnlyAdds runs fn without colour and then with it, and checks that the coloured output has colour in it
+// and that taking the colour out gives the output that has none, so that the text of a command doesn't depend on
+// whether it is coloured. It returns both outputs, without the progress bar (see WithoutProgress), for further
+// checks. fn prints the same thing each time it is run, so this is for commands that don't change what they print by
+// having been run.
+func AssertColourOnlyAdds(t *testing.T, fn func()) (plain, coloured string) {
+	t.Helper()
+	SetColor(t, ui.Never)
+	plain = WithoutProgress(CaptureStdout(t, fn))
+	if ui.Strip(plain) != plain {
+		t.Errorf("output has colour with colour off: %q", plain)
+	}
+
+	SetColor(t, ui.Always)
+	coloured = WithoutProgress(CaptureStdout(t, fn))
+	if coloured == plain {
+		t.Errorf("output has no colour with colour on: %q", coloured)
+	}
+	if stripped := ui.Strip(coloured); stripped != plain {
+		t.Errorf("taking the colour out of the coloured output doesn't give the plain output\nplain:    %q\nstripped: %q", plain, stripped)
+	}
+	return plain, coloured
 }
 
 // SetStdin makes os.Stdin read input for the duration of the test, and turns off non-interactive mode, so that

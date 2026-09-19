@@ -1,10 +1,10 @@
 package settings
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -17,21 +17,21 @@ var releaseTypeCommand = &cobra.Command{
 		modpack, err := core.LoadPack()
 		if err != nil {
 			if os.IsNotExist(err) {
-				fmt.Println("No pack.toml file found, run 'packwiz init' to create one!")
+				ui.Error.Println("No pack.toml file found, run 'packwiz init' to create one!")
 				os.Exit(1)
 			}
-			fmt.Printf("Error loading pack: %s\n", err)
+			ui.Error.Printf("Error loading pack: %s\n", err)
 			os.Exit(1)
 		}
 
 		if len(args) == 0 {
-			fmt.Println("Current release type: " + modpack.GetReleaseType())
+			ui.Info.Println("Current release type: " + ui.Bold.Sprint(modpack.GetReleaseType()))
 			return
 		}
 
 		releaseType := args[0]
 		if !core.IsValidReleaseType(releaseType) {
-			fmt.Printf("Invalid release type %q; must be one of: release, beta, alpha\n", releaseType)
+			ui.Error.Printf("Invalid release type %q; must be one of: release, beta, alpha\n", releaseType)
 			os.Exit(1)
 		}
 
@@ -41,10 +41,10 @@ var releaseTypeCommand = &cobra.Command{
 		modpack.Options["release-type"] = releaseType
 		err = modpack.Write()
 		if err != nil {
-			fmt.Printf("Error writing pack: %s\n", err)
+			ui.Error.Printf("Error writing pack: %s\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("Set default release type to " + releaseType)
+		ui.Success.Println("Set default release type to " + ui.Bold.Sprint(releaseType))
 	},
 }
 

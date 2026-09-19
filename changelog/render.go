@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
 // section is a heading in a release, and the changes listed under it
@@ -46,10 +47,39 @@ func RenderMarkdown(releases []Release) string {
 	return b.String()
 }
 
+// style decorates the parts of a release as it is rendered. The release that is printed to a terminal is coloured, and
+// the Markdown that is saved is not: the zero style leaves everything as it is, and colouring never changes the text.
+type style struct {
+	colour bool
+}
+
+func (s style) apply(st ui.Style, text string) string {
+	if !s.colour {
+		return text
+	}
+	return st.Sprint(text)
+}
+
+func (s style) heading(text string) string    { return s.apply(ui.Bold, s.apply(ui.Info, text)) }
+func (s style) subheading(text string) string { return s.apply(ui.Bold, text) }
+func (s style) callout(text string) string    { return s.apply(ui.Warning, text) }
+func (s style) name(text string) string       { return s.apply(ui.Bold, text) }
+func (s style) code(text string) string       { return s.apply(ui.Info, text) }
+func (s style) breaking(text string) string   { return s.apply(ui.Error, text) }
+func (s style) side(text string) string       { return s.apply(ui.Muted, text) }
+
+// removed is a version that was there before the release, and added one that is there after it
+func (s style) removed(text string) string { return s.apply(ui.Error, text) }
+func (s style) added(text string) string   { return s.apply(ui.Success, text) }
+
 // RenderRelease renders one release as a Markdown section. Within each heading, mods that run on the server come
 // first, as they are what makes a release major, and then everything is in alphabetical order.
 func RenderRelease(r Release) string {
-	blocks := []string{fmt.Sprintf("## %s - %s", r.Version, r.Date)}
+	return renderRelease(r, style{})
+}
+
+func renderRelease(r Release, st style) string {
+	blocks := []string{st.heading(fmt.Sprintf("## %s - %s", r.Version, r.Date))}
 
 	if r.IsInitial() {
 		if summary := initialSummary(r.Changes); summary != "" {
@@ -57,7 +87,7 @@ func RenderRelease(r Release) string {
 		}
 	}
 	if !r.IsInitial() && changesServer(r.Changes) {
-		blocks = append(blocks, "> **Server update required.** This release changes mods that run on the server.")
+		blocks = append(blocks, st.callout("> **Server update required.** This release changes mods that run on the server."))
 	}
 
 	for _, s := range sections {
@@ -74,9 +104,9 @@ func RenderRelease(r Release) string {
 
 		lines := make([]string, len(changes))
 		for i, c := range changes {
-			lines[i] = "- " + describe(c)
+			lines[i] = "- " + describeStyled(c, st)
 		}
-		blocks = append(blocks, "### "+s.title+"\n\n"+strings.Join(lines, "\n"))
+		blocks = append(blocks, st.subheading("### "+s.title)+"\n\n"+strings.Join(lines, "\n"))
 	}
 	return strings.Join(blocks, "\n\n") + "\n"
 }
@@ -147,34 +177,38 @@ func plural(n int, noun string) string {
 
 // describe summarises a change on one line, e.g. "**Sodium** 0.5.7 → 0.5.8 (client)"
 func describe(c Change) string {
+	return describeStyled(c, style{})
+}
+
+func describeStyled(c Change, st style) string {
 	switch c.Kind {
 	case FileAdded:
-		return fmt.Sprintf("Added `%s`", c.Path)
+		return "Added " + st.code("`"+c.Path+"`")
 	case FileChanged:
-		return fmt.Sprintf("Changed `%s`", c.Path)
+		return "Changed " + st.code("`"+c.Path+"`")
 	case FileRemoved:
-		return fmt.Sprintf("Removed `%s`", c.Path)
+		return "Removed " + st.code("`"+c.Path+"`")
 	case Note:
 		text := escapeMarkdown(c.Text)
 		if c.Scope != "" && c.Scope != "config" {
-			text = "**" + escapeMarkdown(c.Scope) + ":** " + text
+			text = st.name("**"+escapeMarkdown(c.Scope)+":**") + " " + text
 		}
 		if c.Breaking {
-			text = "**Breaking:** " + text
+			text = st.breaking("**Breaking:**") + " " + text
 		}
 		return text
 	}
 
-	parts := []string{"**" + escapeMarkdown(c.Name) + "**"}
+	parts := []string{st.name("**" + escapeMarkdown(c.Name) + "**")}
 	switch {
 	case c.From != "" && c.To != "":
-		parts = append(parts, escapeMarkdown(c.From)+" → "+escapeMarkdown(c.To))
+		parts = append(parts, st.removed(escapeMarkdown(c.From))+" → "+st.added(escapeMarkdown(c.To)))
 	case c.To != "":
-		parts = append(parts, escapeMarkdown(c.To))
+		parts = append(parts, st.added(escapeMarkdown(c.To)))
 	case c.From != "":
-		parts = append(parts, escapeMarkdown(c.From))
+		parts = append(parts, st.removed(escapeMarkdown(c.From)))
 	}
-	parts = append(parts, "("+sideLabel(c.Side)+")")
+	parts = append(parts, st.side("("+sideLabel(c.Side)+")"))
 	return strings.Join(parts, " ")
 }
 

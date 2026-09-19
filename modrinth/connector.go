@@ -1,10 +1,10 @@
 package modrinth
 
 import (
-	"fmt"
 	"slices"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	modrinthApi "github.com/evictedcucumber/packwiz/modrinth/api"
 )
 
@@ -44,6 +44,6 @@ func needsConnector(version *modrinthApi.Version, pack core.Pack) bool {
 // noticeFabricMod tells the user when a mod that is being added is one for Fabric, as it doesn't run by itself
 func noticeFabricMod(name string, version *modrinthApi.Version, pack core.Pack) {
 	if needsConnector(version, pack) {
-		fmt.Printf("Notice: %s is a Fabric mod; it runs on NeoForge through Sinytra Connector\n", name)
+		ui.Info.Printf("Notice: %s is a Fabric mod; it runs on NeoForge through Sinytra Connector\n", name)
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	modrinthApi "github.com/evictedcucumber/packwiz/modrinth/api"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -419,7 +420,7 @@ func latestVersionFor(projectID string, name string, gameVersions []string, load
 	// TODO: ask user which one to use?
 	latest := findLatestVersion(result, gameVersions, false)
 	if higher := findHigherNumbered(latest, result, gameVersions); higher != nil {
-		fmt.Printf("Warning: using the newest version of %s, %s, although %s has a higher version number\n", name, describeVersion(latest), describeVersion(higher))
+		ui.Warning.Printf("Warning: using the newest version of %s, %s, although %s has a higher version number\n", name, describeVersion(latest), describeVersion(higher))
 	}
 
 	return latest, nil
@@ -532,7 +533,7 @@ func getInstalledProjectIDs(index *core.Index) []string {
 	// Get modids of all mods
 	mods, err := index.LoadAllMods()
 	if err != nil {
-		fmt.Printf("Failed to determine existing projects: %v\n", err)
+		ui.Error.Printf("Failed to determine existing projects: %v\n", err)
 	} else {
 		for _, mod := range mods {
 			data, ok := mod.GetParsedUpdateData("modrinth")
@@ -607,7 +608,7 @@ func buildDependencyList(version *modrinthApi.Version) []core.ModDependency {
 	if len(versionIDsToResolve) > 0 {
 		versions, err := mrDefaultClient.Versions.GetMultiple(versionIDsToResolve)
 		if err != nil {
-			fmt.Printf("Warning: failed to resolve dependency version IDs: %v\n", err)
+			ui.Warning.Printf("Warning: failed to resolve dependency version IDs: %v\n", err)
 		} else {
 			for _, v := range versions {
 				if v.ID != nil && v.ProjectID != nil {

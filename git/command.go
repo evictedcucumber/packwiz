@@ -9,6 +9,7 @@ import (
 	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -38,7 +39,7 @@ valid pack (though mods go in alphabetical order, so one can come before a mod i
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runCommit(dryRunFlag); err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 	},
@@ -53,7 +54,7 @@ result as "chore(release): X.Y.Z" and tags it "vX.Y.Z".`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runRelease(releaseVersionFlag, sinceFlag); err != nil {
-			fmt.Println(err)
+			ui.Error.Println(err)
 			os.Exit(1)
 		}
 	},
@@ -99,7 +100,7 @@ func runRelease(versionOverride, since string) error {
 	if !released {
 		// Nothing was released, but that can still change the changelog, and this command isn't going to commit it
 		if dirty, err := r.dirty(); err == nil && dirty {
-			fmt.Println(`The pack changed; commit it with "packwiz git commit".`)
+			ui.Info.Println(`The pack changed; commit it with "packwiz git commit".`)
 		}
 		return nil
 	}
@@ -112,7 +113,7 @@ func runRelease(versionOverride, since string) error {
 	if err := r.tag(tag, "Release "+release.Version); err != nil {
 		return fmt.Errorf("released and committed %s, but couldn't tag it: %w\nTag the commit %s yourself", release.Version, err, tag)
 	}
-	fmt.Printf("Committed and tagged %s\n", tag)
+	ui.Success.Printf("Committed and tagged %s\n", ui.Bold.Sprint(tag))
 	return nil
 }
 

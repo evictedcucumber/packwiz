@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -37,15 +38,15 @@ var serveCmd = &cobra.Command{
 		if viper.GetBool("serve.basic") {
 			http.Handle("/", http.FileServer(http.Dir(".")))
 		} else {
-			fmt.Println("Loading modpack...")
+			ui.Muted.Println("Loading modpack...")
 			pack, err := core.LoadPack()
 			if err != nil {
-				fmt.Println(err)
+				ui.Error.Println(err)
 				os.Exit(1)
 			}
 			index, err := pack.LoadIndex()
 			if err != nil {
-				fmt.Println(err)
+				ui.Error.Println(err)
 				os.Exit(1)
 			}
 			packServeDir := filepath.Dir(viper.GetString("pack-file"))
@@ -53,7 +54,7 @@ var serveCmd = &cobra.Command{
 
 			t, err := template.New("index-page").Parse(indexPage)
 			if err != nil {
-				fmt.Println(err)
+				ui.Error.Println(err)
 				os.Exit(1)
 			}
 
@@ -65,7 +66,7 @@ var serveCmd = &cobra.Command{
 
 			// Force-disable no-internal-hashes mode (equiv to --build flag in refresh) for serving over HTTP
 			if viper.GetBool("no-internal-hashes") {
-				fmt.Println("Note: no-internal-hashes mode is set; still writing hashes for use with packwiz-installer - run packwiz refresh to remove them.")
+				ui.Info.Println("Note: no-internal-hashes mode is set; still writing hashes for use with packwiz-installer - run packwiz refresh to remove them.")
 				viper.Set("no-internal-hashes", false)
 			}
 
@@ -84,7 +85,7 @@ var serveCmd = &cobra.Command{
 				// Relative to index.toml ("pack root")
 				indexRelPath, err := index.RelIndexPath(destPath)
 				if err != nil {
-					fmt.Println("Failed to parse path", err)
+					ui.Error.Println("Failed to parse path", err)
 					return
 				}
 
@@ -98,7 +99,7 @@ var serveCmd = &cobra.Command{
 						// Reload pack and index (might have changed on disk)
 						err = doServeRefresh(&pack, &index)
 						if err != nil {
-							fmt.Println("Failed to refresh pack", err)
+							ui.Error.Println("Failed to refresh pack", err)
 							return
 						}
 
@@ -110,7 +111,7 @@ var serveCmd = &cobra.Command{
 					refreshMutex.RLock()
 					// Only allow indexed files
 					if _, found := index.Files[indexRelPath]; !found {
-						fmt.Printf("File not found: %s\n", destPath)
+						ui.Warning.Printf("File not found: %s\n", destPath)
 						refreshMutex.RUnlock()
 						w.WriteHeader(404)
 						_, _ = w.Write([]byte("File not found"))
@@ -121,7 +122,7 @@ var serveCmd = &cobra.Command{
 
 				f, err := os.Open(destPath)
 				if err != nil {
-					fmt.Printf("Error reading file \"%s\": %s\n", destPath, err)
+					ui.Error.Printf("Error reading file \"%s\": %s\n", destPath, err)
 					w.WriteHeader(404)
 					_, _ = w.Write([]byte("File not found"))
 					return
@@ -132,7 +133,7 @@ var serveCmd = &cobra.Command{
 					err = err2
 				}
 				if err != nil {
-					fmt.Printf("Error reading file \"%s\": %s\n", destPath, err)
+					ui.Error.Printf("Error reading file \"%s\": %s\n", destPath, err)
 					w.WriteHeader(500)
 					_, _ = w.Write([]byte("Failed to read file"))
 					return
@@ -140,10 +141,10 @@ var serveCmd = &cobra.Command{
 			})
 		}
 
-		fmt.Println("Running on port " + port)
+		ui.Success.Println("Running on port " + ui.Bold.Sprint(port))
 		err := http.ListenAndServe(":"+port, nil)
 		if err != nil {
-			fmt.Printf("Error running server: %s\n", err)
+			ui.Error.Printf("Error running server: %s\n", err)
 			os.Exit(1)
 		}
 	},
@@ -175,7 +176,7 @@ func doServeRefresh(pack *core.Pack, index *core.Index) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Index refreshed!")
+	ui.Success.Println("Index refreshed!")
 
 	return nil
 }
