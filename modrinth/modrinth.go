@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/core"
@@ -235,22 +236,67 @@ func compareLoaderLists(a []string, b []string) int32 {
 	return 0
 }
 
+// versionReleaseType returns the release type of a Modrinth version; one without a type is treated as a release
+func versionReleaseType(v *modrinthApi.Version) string {
+	if v.VersionType != nil && *v.VersionType != "" {
+		return *v.VersionType
+	}
+	return core.ReleaseTypeRelease
+}
+
 // filterVersionsByReleaseType returns only the versions whose release type is at least as stable as releaseType
 func filterVersionsByReleaseType(versions []*modrinthApi.Version, releaseType string) []*modrinthApi.Version {
 	var filtered []*modrinthApi.Version
 	for _, v := range versions {
-		fileReleaseType := core.ReleaseTypeRelease
-		if v.VersionType != nil && *v.VersionType != "" {
-			fileReleaseType = *v.VersionType
-		}
-		if core.ReleaseTypeAccepts(releaseType, fileReleaseType) {
+		if core.ReleaseTypeAccepts(releaseType, versionReleaseType(v)) {
 			filtered = append(filtered, v)
 		}
 	}
 	return filtered
 }
 
+// versionNumberSeparators are what authors put between the parts of a version number, e.g. "neoforge_1.21-2.0.8"
+const versionNumberSeparators = "-_+ "
+
+// comparableVersionNumber returns the version number of v as it should be ordered against those of other versions.
+//
+// Authors tag their version numbers with the loader ("neoforge_1.21-2.0.8", "1.21-2.0.15-neoforge") and change how
+// they do it from one release to the next. The loader is a field of its own, so it is left out here rather than let
+// it decide which number is higher: FlexVer orders text against a number by comparing characters, so it would rank
+// "neoforge_1.21-2.0.8" above "1.21-2.1.10" because 'n' sorts after '1'.
+func comparableVersionNumber(v *modrinthApi.Version) string {
+	number := versionNumberOf(v)
+	var loaders []string
+	for _, loader := range v.Loaders {
+		if loader != "" {
+			loaders = append(loaders, regexp.QuoteMeta(loader))
+		}
+	}
+	if len(loaders) == 0 {
+		return number
+	}
+
+	// A loader is a tag when it stands on its own between separators (or the ends), which go with it
+	tag := regexp.MustCompile(`(?i)(^|[` + versionNumberSeparators + `])(?:` + strings.Join(loaders, "|") + `)([` + versionNumberSeparators + `]|$)`)
+	stripped := tag.ReplaceAllString(number, "${1}")
+	if stripped == number {
+		return number
+	}
+	// Don't leave nothing behind for a version number that is only a loader
+	if stripped = strings.Trim(stripped, versionNumberSeparators); stripped == "" {
+		return number
+	}
+	return stripped
+}
+
 func findLatestVersion(versions []*modrinthApi.Version, gameVersions []string, useFlexVer bool) *modrinthApi.Version {
+	numbers := make(map[*modrinthApi.Version]string, len(versions))
+	if useFlexVer {
+		for _, v := range versions {
+			numbers[v] = comparableVersionNumber(v)
+		}
+	}
+
 	latestValidVersion := versions[0]
 	bestGameVersion := core.HighestSliceIndex(gameVersions, versions[0].GameVersions)
 	for _, v := range versions[1:] {
@@ -259,7 +305,7 @@ func findLatestVersion(versions []*modrinthApi.Version, gameVersions []string, u
 		var compare int32
 		if useFlexVer {
 			// Use FlexVer to compare versions
-			compare = flexver.Compare(*v.VersionNumber, *latestValidVersion.VersionNumber)
+			compare = flexver.Compare(numbers[v], numbers[latestValidVersion])
 		}
 
 		if compare == 0 {
@@ -322,13 +368,34 @@ func getLatestVersion(projectID string, name string, pack core.Pack, releaseType
 
 	// TODO: option to always compare using flexver?
 	// TODO: ask user which one to use?
-	flexverLatest := findLatestVersion(result, gameVersions, true)
-	releaseDateLatest := findLatestVersion(result, gameVersions, false)
-	if flexverLatest != releaseDateLatest && releaseDateLatest.VersionNumber != nil && flexverLatest.VersionNumber != nil {
-		fmt.Printf("Warning: Modrinth versions for %s inconsistent between latest version number and newest release date (%s vs %s)\n", name, *flexverLatest.VersionNumber, *releaseDateLatest.VersionNumber)
+	latest := findLatestVersion(result, gameVersions, false)
+	if higher := findHigherNumbered(latest, result, gameVersions); higher != nil {
+		fmt.Printf("Warning: using the newest version of %s, %s, although %s has a higher version number\n", name, describeVersion(latest), describeVersion(higher))
 	}
 
-	return releaseDateLatest, nil
+	return latest, nil
+}
+
+// findHigherNumbered returns the version with the highest version number if that number is higher than the one of
+// latest, the version picked as the newest, or nil if latest is as high as any. Only versions at least as stable as
+// latest are compared with it: a beta running ahead of the newest release is what betas are, and doesn't say that
+// the release is the wrong pick.
+func findHigherNumbered(latest *modrinthApi.Version, versions []*modrinthApi.Version, gameVersions []string) *modrinthApi.Version {
+	peers := filterVersionsByReleaseType(versions, versionReleaseType(latest))
+	highest := findLatestVersion(peers, gameVersions, true)
+	if highest == latest || flexver.Compare(comparableVersionNumber(highest), comparableVersionNumber(latest)) <= 0 {
+		return nil
+	}
+	return highest
+}
+
+// describeVersion describes a version by what tells it apart from the others: its number, release type and date
+func describeVersion(v *modrinthApi.Version) string {
+	description := versionNumberOf(v) + " (" + versionReleaseType(v)
+	if v.DatePublished != nil {
+		description += ", published " + v.DatePublished.Format("2006-01-02")
+	}
+	return description + ")"
 }
 
 func getSide(mod *modrinthApi.Project) string {

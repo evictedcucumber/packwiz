@@ -601,6 +601,57 @@ func TestInstallProjectLooksForUpdatesWithTheReleaseTypeItWasAddedWith(t *testin
 	}
 }
 
+func TestGetLatestVersionWarnsWhenTheNewestHasALowerVersionNumber(t *testing.T) {
+	pack, _ := setupPackFixture(t)
+	major := testVersion("v1", "3.0.0")
+	major.DatePublished = timePtr(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	backport := testVersion("v2", "2.9.1")
+	backport.DatePublished = timePtr(time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC))
+	serveProjectVersions(t, major, backport)
+
+	var latest *modrinthApi.Version
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { latest, err = getLatestVersion("p1", "Test Project", pack, "") })
+
+	if err != nil {
+		t.Fatalf("getLatestVersion() returned error: %v", err)
+	}
+	if *latest.ID != "v2" {
+		t.Errorf("latest = %s, want the newest version, v2", *latest.ID)
+	}
+	want := "Warning: using the newest version of Test Project, 2.9.1 (release, published 2024-02-01), although 3.0.0 (release, published 2024-01-01) has a higher version number"
+	if !strings.Contains(out, want) {
+		t.Errorf("output = %q, want it to contain %q", out, want)
+	}
+}
+
+// Amendments tagged its version numbers with the loader, "neoforge_1.21-2.0.8", and later stopped: that isn't a
+// version that is higher than the newest
+func TestGetLatestVersionDoesNotWarnWhenOnlyTheLoaderTagChanged(t *testing.T) {
+	pack, _ := setupPackFixture(t)
+	tagged := testVersion("v1", "neoforge_1.21-2.0.8")
+	tagged.Loaders = []string{"neoforge"}
+	tagged.DatePublished = timePtr(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	untagged := testVersion("v2", "1.21-2.1.10")
+	untagged.Loaders = []string{"neoforge"}
+	untagged.DatePublished = timePtr(time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC))
+	serveProjectVersions(t, tagged, untagged)
+
+	var latest *modrinthApi.Version
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { latest, err = getLatestVersion("p1", "Test Project", pack, "") })
+
+	if err != nil {
+		t.Fatalf("getLatestVersion() returned error: %v", err)
+	}
+	if *latest.ID != "v2" {
+		t.Errorf("latest = %s, want the newest version, v2", *latest.ID)
+	}
+	if strings.Contains(out, "Warning") {
+		t.Errorf("output = %q, want no warning", out)
+	}
+}
+
 // setFlag sets one of the flags of 'mr add' for the duration of the test
 func setFlag(t *testing.T, flag *string, value string) {
 	t.Helper()

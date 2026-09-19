@@ -393,6 +393,159 @@ func TestFilterVersionsByReleaseTypeMissingTypeTreatedAsRelease(t *testing.T) {
 	}
 }
 
+// --- comparableVersionNumber ---
+
+func TestComparableVersionNumber(t *testing.T) {
+	cases := []struct {
+		name    string
+		number  string
+		loaders []string
+		want    string
+	}{
+		{"loader before", "neoforge_1.21-2.0.8", []string{"neoforge"}, "1.21-2.0.8"},
+		{"loader after", "1.21-2.0.15-neoforge", []string{"neoforge"}, "1.21-2.0.15"},
+		{"loader in between", "1.21.1-neoforge-2.0.0", []string{"neoforge"}, "1.21.1-2.0.0"},
+		{"loader in the appendix", "2.0.15+neoforge", []string{"neoforge"}, "2.0.15"},
+		{"case is ignored", "NeoForge-1.0", []string{"neoforge"}, "1.0"},
+		{"any of the loaders", "forge_1.0", []string{"forge", "neoforge"}, "1.0"},
+		{"no tag", "1.21-2.1.10", []string{"neoforge"}, "1.21-2.1.10"},
+		{"loader the version isn't for", "fabric_1.0", []string{"neoforge"}, "fabric_1.0"},
+		{"loader that is part of a word", "neoforge_1.0", []string{"forge"}, "neoforge_1.0"},
+		{"no loaders", "neoforge_1.0", nil, "neoforge_1.0"},
+		{"nothing but a loader", "neoforge", []string{"neoforge"}, "neoforge"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			v := &modrinthApi.Version{VersionNumber: strPtr(c.number), Loaders: c.loaders}
+			if got := comparableVersionNumber(v); got != c.want {
+				t.Errorf("comparableVersionNumber(%q, loaders %v) = %q, want %q", c.number, c.loaders, got, c.want)
+			}
+		})
+	}
+}
+
+func TestComparableVersionNumberMissingNumber(t *testing.T) {
+	v := &modrinthApi.Version{Loaders: []string{"neoforge"}}
+	if got := comparableVersionNumber(v); got != "" {
+		t.Errorf("comparableVersionNumber() = %q, want an empty number", got)
+	}
+}
+
+// neoForgeVersion is a NeoForge version of a project, with the given number, release type and date of publication
+func neoForgeVersion(number, releaseType string, published time.Time) *modrinthApi.Version {
+	return &modrinthApi.Version{
+		VersionNumber: strPtr(number),
+		VersionType:   strPtr(releaseType),
+		GameVersions:  []string{"1.21.1"},
+		Loaders:       []string{"neoforge"},
+		DatePublished: timePtr(published),
+	}
+}
+
+func at(month time.Month, day int) time.Time {
+	return time.Date(2025, month, day, 0, 0, 0, 0, time.UTC)
+}
+
+// Amendments numbered its versions "neoforge_1.21-2.0.8", then "1.21-2.0.15-neoforge", then "1.21-2.1.10"
+func TestFindLatestVersionFlexVerIgnoresLoaderTagsInVersionNumbers(t *testing.T) {
+	tagged := neoForgeVersion("neoforge_1.21-2.0.8", "release", at(time.October, 1))
+	suffixed := neoForgeVersion("1.21-2.0.15-neoforge", "release", at(time.November, 1))
+	untagged := neoForgeVersion("1.21-2.1.10", "release", at(time.December, 1))
+
+	result := findLatestVersion([]*modrinthApi.Version{tagged, suffixed, untagged}, []string{"1.21.1"}, true)
+	if result != untagged {
+		t.Errorf("expected 1.21-2.1.10 (the highest version number) to be picked, got %s", versionNumberOf(result))
+	}
+}
+
+func TestFindLatestVersionFlexVerToleratesMissingVersionNumber(t *testing.T) {
+	numbered := neoForgeVersion("1.0.0", "release", at(time.January, 1))
+	unnumbered := neoForgeVersion("", "release", at(time.February, 1))
+	unnumbered.VersionNumber = nil
+
+	result := findLatestVersion([]*modrinthApi.Version{unnumbered, numbered}, []string{"1.21.1"}, true)
+	if result != numbered {
+		t.Errorf("expected the version with a number to be picked over the one without")
+	}
+}
+
+// --- findHigherNumbered ---
+
+func TestFindHigherNumberedIgnoresChangedLoaderTags(t *testing.T) {
+	tagged := neoForgeVersion("neoforge_1.21-2.0.8", "release", at(time.October, 1))
+	suffixed := neoForgeVersion("1.21-2.0.15-neoforge", "release", at(time.November, 1))
+	latest := neoForgeVersion("1.21-2.1.10", "release", at(time.December, 1))
+
+	if higher := findHigherNumbered(latest, []*modrinthApi.Version{latest, suffixed, tagged}, []string{"1.21.1"}); higher != nil {
+		t.Errorf("expected no higher version number, got %s", versionNumberOf(higher))
+	}
+}
+
+func TestFindHigherNumberedFindsHigherNumberPublishedEarlier(t *testing.T) {
+	major := neoForgeVersion("3.0.0", "release", at(time.January, 1))
+	backport := neoForgeVersion("2.9.1", "release", at(time.February, 1))
+
+	higher := findHigherNumbered(backport, []*modrinthApi.Version{major, backport}, []string{"1.21.1"})
+	if higher != major {
+		t.Errorf("expected 3.0.0 to have the higher version number than the newer 2.9.1, got %v", higher)
+	}
+}
+
+func TestFindHigherNumberedNoneWhenNewestIsHighest(t *testing.T) {
+	older := neoForgeVersion("2.0.0", "release", at(time.January, 1))
+	latest := neoForgeVersion("3.0.0", "release", at(time.February, 1))
+
+	if higher := findHigherNumbered(latest, []*modrinthApi.Version{older, latest}, []string{"1.21.1"}); higher != nil {
+		t.Errorf("expected no higher version number, got %s", versionNumberOf(higher))
+	}
+}
+
+func TestFindHigherNumberedNoneForEqualVersionNumbers(t *testing.T) {
+	older := neoForgeVersion("1.0.0", "release", at(time.January, 1))
+	latest := neoForgeVersion("1.0.0", "release", at(time.February, 1))
+
+	if higher := findHigherNumbered(latest, []*modrinthApi.Version{older, latest}, []string{"1.21.1"}); higher != nil {
+		t.Errorf("expected no higher version number for equal numbers, got %s", versionNumberOf(higher))
+	}
+}
+
+// A beta of the next version is ahead of the newest release by nature, so it isn't compared with the release
+func TestFindHigherNumberedIgnoresLessStableVersions(t *testing.T) {
+	beta := neoForgeVersion("2.1.0-beta.1", "beta", at(time.January, 1))
+	latest := neoForgeVersion("2.0.0", "release", at(time.February, 1))
+
+	if higher := findHigherNumbered(latest, []*modrinthApi.Version{beta, latest}, []string{"1.21.1"}); higher != nil {
+		t.Errorf("expected the beta not to count against the release, got %s", versionNumberOf(higher))
+	}
+}
+
+// A release with a higher number than the newest version, which is a beta, is a sign that the beta may be the wrong pick
+func TestFindHigherNumberedCountsMoreStableVersions(t *testing.T) {
+	release := neoForgeVersion("3.0.0", "release", at(time.January, 1))
+	latest := neoForgeVersion("2.1.0-beta.2", "beta", at(time.February, 1))
+
+	higher := findHigherNumbered(latest, []*modrinthApi.Version{release, latest}, []string{"1.21.1"})
+	if higher != release {
+		t.Errorf("expected the release 3.0.0 to count against the beta 2.1.0-beta.2, got %v", higher)
+	}
+}
+
+// --- describeVersion ---
+
+func TestDescribeVersion(t *testing.T) {
+	v := neoForgeVersion("1.21-2.1.10", "beta", at(time.September, 6))
+	if got, want := describeVersion(v), "1.21-2.1.10 (beta, published 2025-09-06)"; got != want {
+		t.Errorf("describeVersion() = %q, want %q", got, want)
+	}
+}
+
+func TestDescribeVersionWithoutTypeOrDate(t *testing.T) {
+	v := &modrinthApi.Version{VersionNumber: strPtr("1.0.0")}
+	if got, want := describeVersion(v), "1.0.0 (release)"; got != want {
+		t.Errorf("describeVersion() = %q, want %q", got, want)
+	}
+}
+
 // --- getSide ---
 
 func TestGetSideUniversal(t *testing.T) {
