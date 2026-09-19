@@ -82,6 +82,9 @@ var exportCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Found now, from the mods as they are in the pack, and said once the files are listed
+		promotions := sidePromotions(mods)
+
 		ui.Muted.Printf("Retrieving %v external files...\n", len(mods))
 
 		restrictDomains := viper.GetBool("modrinth.export.restrictDomains")
@@ -102,6 +105,7 @@ var exportCmd = &cobra.Command{
 		cmdshared.ListManualDownloads(session)
 
 		manifestFiles := make([]PackFile, 0)
+		var exported []exportedFile
 		for dl := range session.StartDownloads() {
 			if canBeIncludedDirectly(dl.Mod, restrictDomains) {
 				if dl.Error != nil {
@@ -128,23 +132,7 @@ var exportCmd = &cobra.Command{
 				}
 
 				// Create env options based on configured optional/side
-				var envInstalled string
-				if dl.Mod.Option != nil && dl.Mod.Option.Optional {
-					envInstalled = "optional"
-				} else {
-					envInstalled = "required"
-				}
-				var clientEnv, serverEnv string
-				if dl.Mod.Side == core.UniversalSide || dl.Mod.Side == core.EmptySide {
-					clientEnv = envInstalled
-					serverEnv = envInstalled
-				} else if dl.Mod.Side == core.ClientSide {
-					clientEnv = envInstalled
-					serverEnv = "unsupported"
-				} else if dl.Mod.Side == core.ServerSide {
-					clientEnv = "unsupported"
-					serverEnv = envInstalled
-				}
+				clientEnv, serverEnv := exportEnv(dl.Mod.Side, dl.Mod.Option != nil && dl.Mod.Option.Optional)
 
 				// Modrinth URLs must be RFC3986
 				u, err := core.ReencodeURL(dl.Mod.Download.URL)
@@ -164,14 +152,17 @@ var exportCmd = &cobra.Command{
 					FileSize:  fileSize,
 				})
 
+				exported = append(exported, exportedFile{name: dl.Mod.Name, path: path, client: clientEnv, server: serverEnv, size: fileSize})
 				fmt.Printf("%s %s added to manifest\n", ui.Bold.Sprint(dl.Mod.Name), ui.Muted.Sprintf("(%s)", dl.Mod.FileName))
 			} else {
+				folder := "overrides"
 				if dl.Mod.Side == core.ClientSide {
-					_ = cmdshared.AddToZip(dl, exp, "client-overrides", &index)
+					folder = "client-overrides"
 				} else if dl.Mod.Side == core.ServerSide {
-					_ = cmdshared.AddToZip(dl, exp, "server-overrides", &index)
-				} else {
-					_ = cmdshared.AddToZip(dl, exp, "overrides", &index)
+					folder = "server-overrides"
+				}
+				if cmdshared.AddToZip(dl, exp, folder, &index) {
+					exported = append(exported, bundledFile(dl, folder, &index))
 				}
 			}
 		}
@@ -179,6 +170,12 @@ var exportCmd = &cobra.Command{
 		sort.Slice(manifestFiles, func(i, j int) bool {
 			return manifestFiles[i].Path < manifestFiles[j].Path
 		})
+
+		fmt.Println()
+		fmt.Print(breakdown(exported))
+		for _, p := range promotions {
+			ui.Warning.Printf("Warning: %s is only exported for the server, but %s needs it on the client; 'packwiz modrinth validate' says more\n", ui.Bold.Sprint(p.mod.Name), ui.Bold.Sprint(p.neededBy.Name))
+		}
 
 		err = session.SaveIndex()
 		if err != nil {

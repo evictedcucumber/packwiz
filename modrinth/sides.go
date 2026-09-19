@@ -68,6 +68,23 @@ func widenSides(mods []*core.Mod) []sidePromotion {
 	return promotions
 }
 
+// sidePromotions is what widenSides would change in mods, found without changing them
+func sidePromotions(mods []*core.Mod) []sidePromotion {
+	copies := make([]*core.Mod, len(mods))
+	originals := make(map[*core.Mod]*core.Mod, len(mods))
+	for i, mod := range mods {
+		c := *mod
+		copies[i] = &c
+		originals[&c] = mod
+	}
+
+	promotions := widenSides(copies)
+	for i, p := range promotions {
+		promotions[i] = sidePromotion{mod: originals[p.mod], neededBy: originals[p.neededBy]}
+	}
+	return promotions
+}
+
 // promoteSides puts the mods in the pack that others need on the client on both sides (see widenSides), saving their
 // metadata files and saying what it changed. The index is updated but not written, which is for the caller to do.
 func promoteSides(index *core.Index) error {

@@ -388,3 +388,22 @@ func TestPromoteSidesWithNothingToDoIsQuiet(t *testing.T) {
 		t.Errorf("metadata changed:\n%s\nwas:\n%s", after, before)
 	}
 }
+
+// Export and validate want to know what would be promoted, without it happening: what export writes is what the pack says
+func TestSidePromotionsFindsWhatWidenSidesWouldChangeWithoutChangingIt(t *testing.T) {
+	lib := sideMod(t, "lib", core.ServerSide)
+	user := sideMod(t, "user", core.UniversalSide, requires("lib"))
+	mods := []*core.Mod{lib, user}
+
+	promotions := sidePromotions(mods)
+
+	if len(promotions) != 1 || promotions[0].mod != lib || promotions[0].neededBy != user {
+		t.Fatalf("promotions = %v, want the library needed by the user, as the mods that were given", promotions)
+	}
+	if lib.Side != core.ServerSide || user.Side != core.UniversalSide {
+		t.Errorf("sides = %q and %q, want them left as they were", lib.Side, user.Side)
+	}
+	if got := len(widenSides(mods)); got != 1 || lib.Side != core.UniversalSide {
+		t.Errorf("widenSides() after it changed %d mods and the library's side is %q, want it still to have the one to do", got, lib.Side)
+	}
+}

@@ -23,7 +23,8 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - MultiMC pack installer/updater, with support for optional mods and fast automatic updates - perfect for servers!
 - Pack distribution with HTTP servers, with a built in local server for testing
 - Easy installation and updating of multiple mods at once from Modrinth
-- Exporting to Modrinth packs
+- Exporting to Modrinth packs, listing what goes in each one and which sides it is for
+- `packwiz mr validate` checks a pack's mods, dependencies and sides before you export it
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
 - Configured Defaults support: a pack that has the mod keeps its config, and any other default files, in `configureddefaults/`
@@ -115,6 +116,29 @@ fix(config): change configureddefaults/config/sodium.json
 ```
 
 Files anywhere else, such as `config/` (which would replace players' own settings on every update), aren't tracked, and `.packwizignore` can't bring them back. The first `packwiz refresh` after adding the mod says how many files left the index; move them into `configureddefaults/` to keep them in the pack. Removing the mod makes every file trackable again.
+
+## Checking a pack
+
+`packwiz mr export` lists the files it put in the pack once they are downloaded, with the sides each is needed on (`required`, `optional` or `unsupported` on the client and on the server, which is what the launcher goes by), its size, and where it goes:
+
+```
+Exported files:
+Mod                                     Client       Server        Size  File
+Farmer's Delight                        required     required   3.0 MiB  mods/FarmersDelight-1.21.1-1.3.4.jar
+Lib Mod                                 unsupported  required  19.5 KiB  mods/lib.jar
+Repurposed Structures - Neoforge/Forge  required     required   8.0 MiB  mods/repurposed_structures-7.5.22+1.21.1-neoforge.jar
+3 files, 11.0 MiB: 2 on both sides, 1 server only
+```
+
+`packwiz mr validate` checks the pack, without changing it, for what would go wrong once it is exported or played, and fails (exit status 1) if it finds an error, so it can be used in a script:
+
+- every mod's `.pw.toml` can be read and has what it needs: a name, file name, download URL and hash, a side, and the Modrinth project and version it came from (some things a pack can do without, like a name or a recorded version, are warnings, which don't fail it)
+- no two mods are the same Modrinth project, or install to the same file
+- every required dependency is in the pack, and nothing in it is incompatible with something else
+- every mod that a mod on the client requires is on the client too: Modrinth lists some libraries, mostly for world generation, as unsupported on the client, but a mod that requires one crashes the game without it. `packwiz mr add` puts such a mod on both sides, and `validate` (and a warning from `export`) finds one that isn't
+- `pack.toml` has a Minecraft version, a NeoForge version and a version for the pack
+
+What a mod depends on is what its `.pw.toml` records. A mod that records nothing is looked up on Modrinth, so that needs the network; if it can't be reached, those mods' dependencies aren't checked, and it says so, but the rest of the checks are made.
 
 ## Coloured output
 
