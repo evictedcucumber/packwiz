@@ -150,7 +150,8 @@ func installProject(project *modrinthApi.Project, versionFilename string, pack c
 		}
 	}
 
-	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, lookupReleaseType)
+	acceptFabric := runsFabricMods(pack, getInstalledProjectIDs(index))
+	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, lookupReleaseType, acceptFabric)
 	if err != nil {
 		return fmt.Errorf("failed to get latest version: %v", err)
 	}
@@ -197,9 +198,18 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		}
 	}
 
+	installedProjects := getInstalledProjectIDs(index)
+	acceptFabric := runsFabricMods(pack, installedProjects)
+	if acceptFabric {
+		noticeFabricMod(*project.Title, version, pack)
+	}
+
 	if len(version.Dependencies) > 0 {
 		// TODO: could get installed version IDs, and compare to install the newest - i.e. preferring pinned versions over getting absolute latest?
-		installedProjects := getInstalledProjectIDs(index)
+		if acceptFabric {
+			// Forgified Fabric API takes the place of Fabric API, which can't be added next to it
+			installedProjects = append(installedProjects, fabricAPIProjectID)
+		}
 
 		var depMetadata []depMetadataStore
 		var depProjectIDPendingQueue []string
@@ -273,11 +283,13 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 					}
 					// Get latest version - could reuse version lookup data but it's not as easy (particularly since the version won't necessarily be the latest)
 					// Dependencies use the pack's default release type rather than inheriting the flag passed for the mod being added
-					latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, "")
+					latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, "", acceptFabric)
 					if err != nil {
 						fmt.Printf("Failed to get latest version of dependency %v: %v\n", *project.Title, err)
 						continue
 					}
+					// Only got a Fabric version because the pack runs Fabric mods
+					noticeFabricMod(*project.Title, latestVersion, pack)
 
 					for _, dep := range latestVersion.Dependencies {
 						// TODO: recommend optional dependencies?

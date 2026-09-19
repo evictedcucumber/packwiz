@@ -350,10 +350,19 @@ func findLatestVersion(versions []*modrinthApi.Version, gameVersions []string, u
 	return latestValidVersion
 }
 
+// noVersionsError says that a project has no version that can be used, as opposed to looking them up having failed
+type noVersionsError struct{ message string }
+
+func (e noVersionsError) Error() string { return e.message }
+
 // getLatestVersion finds the latest version of a project that is compatible with the pack, and whose
 // release type is at least as stable as releaseType. If releaseType is empty, the pack's default
 // release type is used (see Pack.GetReleaseType).
-func getLatestVersion(projectID string, name string, pack core.Pack, releaseType string) (*modrinthApi.Version, error) {
+//
+// With acceptFabric (see runsFabricMods), a project that has nothing for the pack's loader is looked up again for
+// Fabric, whose versions Sinytra Connector runs. A version for the pack's loader is always preferred to one for Fabric,
+// however old, and Fabric API is never taken, as Forgified Fabric API stands in for it.
+func getLatestVersion(projectID string, name string, pack core.Pack, releaseType string, acceptFabric bool) (*modrinthApi.Version, error) {
 	if releaseType == "" {
 		releaseType = pack.GetReleaseType()
 	}
@@ -369,6 +378,26 @@ func getLatestVersion(projectID string, name string, pack core.Pack, releaseType
 		loaders = append(pack.GetCompatibleLoaders(), defaultMRLoaders...)
 	}
 
+	latest, err := latestVersionFor(projectID, name, gameVersions, loaders, releaseType)
+	var noVersions noVersionsError
+	if !acceptFabric || !errors.As(err, &noVersions) {
+		return latest, err
+	}
+
+	if projectID == fabricAPIProjectID {
+		return nil, errors.New("the pack has Forgified Fabric API, which takes the place of Fabric API, so Fabric API can't be added next to it")
+	}
+	fabric, fabricErr := latestVersionFor(projectID, name, gameVersions, []string{"fabric"}, releaseType)
+	if errors.As(fabricErr, &noVersions) {
+		// It has nothing for Fabric either, so why it has nothing for the pack's loader is what to say
+		return nil, err
+	}
+	return fabric, fabricErr
+}
+
+// latestVersionFor finds the latest version of a project for any of loaders, out of those for the game versions whose
+// release type is at least as stable as releaseType. Having none is a noVersionsError.
+func latestVersionFor(projectID string, name string, gameVersions []string, loaders []string, releaseType string) (*modrinthApi.Version, error) {
 	result, err := mrDefaultClient.Versions.ListVersions(projectID, modrinthApi.ListVersionsOptions{
 		GameVersions: gameVersions,
 		Loaders:      loaders,
@@ -378,12 +407,12 @@ func getLatestVersion(projectID string, name string, pack core.Pack, releaseType
 	}
 	if len(result) == 0 {
 		// TODO: retry with datapack specified, to determine what the issue is? or just request all and filter afterwards
-		return nil, errors.New("no valid versions found\n\tUse the 'packwiz settings acceptable-versions' command to accept more game versions\n\tTo use datapacks, add a datapack loader mod and specify the datapack-folder option with the folder this mod loads datapacks from")
+		return nil, noVersionsError{"no valid versions found\n\tUse the 'packwiz settings acceptable-versions' command to accept more game versions\n\tTo use datapacks, add a datapack loader mod and specify the datapack-folder option with the folder this mod loads datapacks from"}
 	}
 
 	result = filterVersionsByReleaseType(result, releaseType)
 	if len(result) == 0 {
-		return nil, fmt.Errorf("no versions found matching release type %q or more stable\n\tUse the 'packwiz settings release-type' command to change the pack default, or the --release-type flag to override it for this mod", releaseType)
+		return nil, noVersionsError{fmt.Sprintf("no versions found matching release type %q or more stable\n\tUse the 'packwiz settings release-type' command to change the pack default, or the --release-type flag to override it for this mod", releaseType)}
 	}
 
 	// TODO: option to always compare using flexver?

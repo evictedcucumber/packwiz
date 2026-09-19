@@ -611,7 +611,7 @@ func TestGetLatestVersionWarnsWhenTheNewestHasALowerVersionNumber(t *testing.T) 
 
 	var latest *modrinthApi.Version
 	var err error
-	out := cmdtest.CaptureStdout(t, func() { latest, err = getLatestVersion("p1", "Test Project", pack, "") })
+	out := cmdtest.CaptureStdout(t, func() { latest, err = getLatestVersion("p1", "Test Project", pack, "", false) })
 
 	if err != nil {
 		t.Fatalf("getLatestVersion() returned error: %v", err)
@@ -639,7 +639,7 @@ func TestGetLatestVersionDoesNotWarnWhenOnlyTheLoaderTagChanged(t *testing.T) {
 
 	var latest *modrinthApi.Version
 	var err error
-	out := cmdtest.CaptureStdout(t, func() { latest, err = getLatestVersion("p1", "Test Project", pack, "") })
+	out := cmdtest.CaptureStdout(t, func() { latest, err = getLatestVersion("p1", "Test Project", pack, "", false) })
 
 	if err != nil {
 		t.Fatalf("getLatestVersion() returned error: %v", err)
@@ -665,7 +665,7 @@ func TestGetLatestVersionDoesNotWarnWhenVersionNumbersAreWrittenDifferently(t *t
 
 	var latest *modrinthApi.Version
 	var err error
-	out := cmdtest.CaptureStdout(t, func() { latest, err = getLatestVersion("p1", "Test Project", pack, "") })
+	out := cmdtest.CaptureStdout(t, func() { latest, err = getLatestVersion("p1", "Test Project", pack, "", false) })
 
 	if err != nil {
 		t.Fatalf("getLatestVersion() returned error: %v", err)

@@ -48,6 +48,12 @@ type cachedStateStore struct {
 func (u mrUpdater) CheckUpdate(mods []*core.Mod, pack core.Pack) ([]core.UpdateCheck, error) {
 	results := make([]core.UpdateCheck, len(mods))
 
+	// Not from mods, which can be just the one being updated
+	acceptFabric, err := packRunsFabricMods(pack)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read what the pack has added: %w", err)
+	}
+
 	for i, mod := range mods {
 		rawData, ok := mod.GetParsedUpdateData("modrinth")
 		if !ok {
@@ -57,7 +63,7 @@ func (u mrUpdater) CheckUpdate(mods []*core.Mod, pack core.Pack) ([]core.UpdateC
 
 		data := rawData.(mrUpdateData)
 
-		newVersion, err := getLatestVersion(data.ProjectID, mod.Name, pack, data.ReleaseType)
+		newVersion, err := getLatestVersion(data.ProjectID, mod.Name, pack, data.ReleaseType, acceptFabric)
 		if err != nil {
 			results[i] = core.UpdateCheck{Error: fmt.Errorf("failed to get latest version: %v", err)}
 			continue

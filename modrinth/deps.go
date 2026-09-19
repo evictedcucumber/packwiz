@@ -2,6 +2,7 @@ package modrinth
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"sort"
@@ -54,6 +55,11 @@ var depsCmd = &cobra.Command{
 		if len(mrMods) == 0 {
 			fmt.Println("No Modrinth-managed mods found.")
 			return
+		}
+
+		// Forgified Fabric API takes the place of Fabric API, so what needs Fabric API has it
+		if runsFabricMods(pack, slices.Collect(maps.Keys(installedNames))) {
+			installedNames[fabricAPIProjectID] = installedNames[forgifiedFabricAPIProjectID]
 		}
 
 		refresh := viper.GetBool("deps.refresh")
