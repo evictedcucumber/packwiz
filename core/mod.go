@@ -29,7 +29,8 @@ type Mod struct {
 	Option *ModOption `toml:"option,omitempty"`
 
 	// Dependencies lists the other projects this mod depends on, as last reported by its source.
-	// This is metadata for reporting/cross-referencing purposes only; it is not used to resolve installs.
+	// This is metadata for reporting/cross-referencing purposes; it is not used to resolve installs. The Modrinth source
+	// also uses it to put a server-only mod on both sides when a mod on the client requires it.
 	Dependencies []ModDependency `toml:"dependencies,omitempty"`
 
 	// AddedAsDependency marks this mod as having been added because another mod depends on it,

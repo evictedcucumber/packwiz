@@ -356,6 +356,12 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		return err
 	}
 
+	// After both the mod and its dependencies are in the pack, so that it doesn't matter which was added first
+	err = promoteSides(index)
+	if err != nil {
+		return err
+	}
+
 	err = index.Write()
 	if err != nil {
 		return err
