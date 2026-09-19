@@ -61,7 +61,6 @@ func AddToZip(dl core.CompletedDownload, exp *zip.Writer, dir string, index *cor
 		return false
 	}
 
-	fmt.Printf("%s %s added to zip\n", ui.Bold.Sprint(dl.Mod.Name), ui.Muted.Sprintf("(%s)", dl.Mod.FileName))
 	return true
 }
 
@@ -97,7 +96,7 @@ func AddNonMetafileOverrides(index *core.Index, exp *zip.Writer) {
 }
 
 func PrintDisclaimer() {
-	ui.Warning.Println("Disclaimer: you are responsible for ensuring you comply with ALL the licenses, or obtain appropriate permissions, for the files \"added to zip\" below")
+	ui.Warning.Println("Disclaimer: you are responsible for ensuring you comply with ALL the licenses, or obtain appropriate permissions, for the files stored in the pack, which are listed below with paths in overrides/, client-overrides/ or server-overrides/")
 	ui.Warning.Println("packwiz is currently unable to match metadata between mod sites - if any of these are available from Modrinth you should change them to use Modrinth metadata (e.g. by re-adding them using the mr commands)")
 	fmt.Println()
 }

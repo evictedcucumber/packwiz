@@ -153,7 +153,6 @@ var exportCmd = &cobra.Command{
 				})
 
 				exported = append(exported, exportedFile{name: dl.Mod.Name, path: path, client: clientEnv, server: serverEnv, size: fileSize})
-				fmt.Printf("%s %s added to manifest\n", ui.Bold.Sprint(dl.Mod.Name), ui.Muted.Sprintf("(%s)", dl.Mod.FileName))
 			} else {
 				folder := "overrides"
 				if dl.Mod.Side == core.ClientSide {

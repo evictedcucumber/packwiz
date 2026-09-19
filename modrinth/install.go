@@ -171,6 +171,111 @@ type depMetadataStore struct {
 	fileInfo    *modrinthApi.File
 }
 
+// findDependencies finds what has to be added to the pack for the required dependencies given, by project ID and by
+// version ID, and for what those need in turn, at their latest versions. installedProjects are the projects the pack
+// has already, and acceptFabric says whether it runs Fabric mods (see runsFabricMods). A dependency it can't find a
+// version of is said so and left out.
+func findDependencies(pack core.Pack, projectIDs, versionIDs, installedProjects []string, acceptFabric bool) ([]depMetadataStore, error) {
+	var depMetadata []depMetadataStore
+	depProjectIDPendingQueue := slices.Clone(projectIDs)
+	depVersionIDPendingQueue := slices.Clone(versionIDs)
+
+	cycles := 0
+	for len(depProjectIDPendingQueue)+len(depVersionIDPendingQueue) > 0 && cycles < maxCycles {
+		// Look up version IDs
+		if len(depVersionIDPendingQueue) > 0 {
+			depVersions, err := mrDefaultClient.Versions.GetMultiple(depVersionIDPendingQueue)
+			if err == nil {
+				for _, v := range depVersions {
+					// Add project ID to queue
+					depProjectIDPendingQueue = append(depProjectIDPendingQueue, *v.ProjectID)
+				}
+			} else {
+				ui.Error.Printf("Error retrieving dependency data: %s\n", err.Error())
+			}
+			depVersionIDPendingQueue = depVersionIDPendingQueue[:0]
+		}
+
+		// Remove installed project IDs from dep queue
+		i := 0
+		for _, id := range depProjectIDPendingQueue {
+			contains := slices.Contains(installedProjects, id)
+			for _, dep := range depMetadata {
+				if *dep.projectInfo.ID == id {
+					contains = true
+					break
+				}
+			}
+			if !contains {
+				depProjectIDPendingQueue[i] = id
+				i++
+			}
+		}
+		depProjectIDPendingQueue = depProjectIDPendingQueue[:i]
+
+		// Clean up duplicates from dep queue
+		slices.Sort(depProjectIDPendingQueue)
+		depProjectIDPendingQueue = slices.Compact(depProjectIDPendingQueue)
+
+		if len(depProjectIDPendingQueue) == 0 {
+			break
+		}
+		depProjects, err := mrDefaultClient.Projects.GetMultiple(depProjectIDPendingQueue)
+		if err != nil {
+			ui.Error.Printf("Error retrieving dependency data: %s\n", err.Error())
+		}
+		depProjectIDPendingQueue = depProjectIDPendingQueue[:0]
+
+		for _, project := range depProjects {
+			if project.ID == nil {
+				return nil, errors.New("failed to get dependency data: invalid response")
+			}
+			// Get latest version - could reuse version lookup data but it's not as easy (particularly since the version won't necessarily be the latest)
+			// Dependencies use the pack's default release type rather than inheriting the flag passed for the mod being added
+			latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, "", acceptFabric)
+			if err != nil {
+				ui.Error.Printf("Failed to get latest version of dependency %v: %v\n", *project.Title, err)
+				continue
+			}
+			// Only got a Fabric version because the pack runs Fabric mods
+			noticeFabricMod(*project.Title, latestVersion, pack)
+
+			for _, dep := range latestVersion.Dependencies {
+				// TODO: recommend optional dependencies?
+				if dep.DependencyType != nil && *dep.DependencyType == "required" {
+					if dep.ProjectID != nil {
+						depProjectIDPendingQueue = append(depProjectIDPendingQueue, *dep.ProjectID)
+					}
+					if dep.VersionID != nil {
+						depVersionIDPendingQueue = append(depVersionIDPendingQueue, *dep.VersionID)
+					}
+				}
+			}
+
+			var file = latestVersion.Files[0]
+			// Prefer the primary file
+			for _, v := range latestVersion.Files {
+				if isPrimary(v) {
+					file = v
+				}
+			}
+
+			depMetadata = append(depMetadata, depMetadataStore{
+				projectInfo: project,
+				versionInfo: latestVersion,
+				fileInfo:    file,
+			})
+		}
+
+		cycles++
+	}
+	if cycles >= maxCycles {
+		return nil, errors.New("dependencies recurse too deeply, try increasing maxCycles")
+	}
+
+	return depMetadata, nil
+}
+
 func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
 	if len(version.Files) == 0 {
 		return errors.New("version doesn't have any files attached")
@@ -212,7 +317,6 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 			installedProjects = append(installedProjects, fabricAPIProjectID)
 		}
 
-		var depMetadata []depMetadataStore
 		var depProjectIDPendingQueue []string
 		var depVersionIDPendingQueue []string
 
@@ -232,97 +336,9 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		if len(depProjectIDPendingQueue)+len(depVersionIDPendingQueue) > 0 {
 			ui.Muted.Println("Finding dependencies...")
 
-			cycles := 0
-			for len(depProjectIDPendingQueue)+len(depVersionIDPendingQueue) > 0 && cycles < maxCycles {
-				// Look up version IDs
-				if len(depVersionIDPendingQueue) > 0 {
-					depVersions, err := mrDefaultClient.Versions.GetMultiple(depVersionIDPendingQueue)
-					if err == nil {
-						for _, v := range depVersions {
-							// Add project ID to queue
-							depProjectIDPendingQueue = append(depProjectIDPendingQueue, *v.ProjectID)
-						}
-					} else {
-						ui.Error.Printf("Error retrieving dependency data: %s\n", err.Error())
-					}
-					depVersionIDPendingQueue = depVersionIDPendingQueue[:0]
-				}
-
-				// Remove installed project IDs from dep queue
-				i := 0
-				for _, id := range depProjectIDPendingQueue {
-					contains := slices.Contains(installedProjects, id)
-					for _, dep := range depMetadata {
-						if *dep.projectInfo.ID == id {
-							contains = true
-							break
-						}
-					}
-					if !contains {
-						depProjectIDPendingQueue[i] = id
-						i++
-					}
-				}
-				depProjectIDPendingQueue = depProjectIDPendingQueue[:i]
-
-				// Clean up duplicates from dep queue
-				slices.Sort(depProjectIDPendingQueue)
-				depProjectIDPendingQueue = slices.Compact(depProjectIDPendingQueue)
-
-				if len(depProjectIDPendingQueue) == 0 {
-					break
-				}
-				depProjects, err := mrDefaultClient.Projects.GetMultiple(depProjectIDPendingQueue)
-				if err != nil {
-					ui.Error.Printf("Error retrieving dependency data: %s\n", err.Error())
-				}
-				depProjectIDPendingQueue = depProjectIDPendingQueue[:0]
-
-				for _, project := range depProjects {
-					if project.ID == nil {
-						return errors.New("failed to get dependency data: invalid response")
-					}
-					// Get latest version - could reuse version lookup data but it's not as easy (particularly since the version won't necessarily be the latest)
-					// Dependencies use the pack's default release type rather than inheriting the flag passed for the mod being added
-					latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, "", acceptFabric)
-					if err != nil {
-						ui.Error.Printf("Failed to get latest version of dependency %v: %v\n", *project.Title, err)
-						continue
-					}
-					// Only got a Fabric version because the pack runs Fabric mods
-					noticeFabricMod(*project.Title, latestVersion, pack)
-
-					for _, dep := range latestVersion.Dependencies {
-						// TODO: recommend optional dependencies?
-						if dep.DependencyType != nil && *dep.DependencyType == "required" {
-							if dep.ProjectID != nil {
-								depProjectIDPendingQueue = append(depProjectIDPendingQueue, *dep.ProjectID)
-							}
-							if dep.VersionID != nil {
-								depVersionIDPendingQueue = append(depVersionIDPendingQueue, *dep.VersionID)
-							}
-						}
-					}
-
-					var file = latestVersion.Files[0]
-					// Prefer the primary file
-					for _, v := range latestVersion.Files {
-						if isPrimary(v) {
-							file = v
-						}
-					}
-
-					depMetadata = append(depMetadata, depMetadataStore{
-						projectInfo: project,
-						versionInfo: latestVersion,
-						fileInfo:    file,
-					})
-				}
-
-				cycles++
-			}
-			if cycles >= maxCycles {
-				return errors.New("dependencies recurse too deeply, try increasing maxCycles")
+			depMetadata, err := findDependencies(pack, depProjectIDPendingQueue, depVersionIDPendingQueue, installedProjects, acceptFabric)
+			if err != nil {
+				return err
 			}
 
 			if len(depMetadata) > 0 {
@@ -428,7 +444,29 @@ func updateFileMeta(mod *core.Mod, version *modrinthApi.Version, file *modrinthA
 	return index.RefreshFileWithHash(mod.GetFilePath(), format, hash, true)
 }
 
+// createFileMeta adds a project to the pack, at version, by writing its metadata file and putting it in the index
 func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, index *core.Index, releaseType string, isDependency bool) error {
+	modMeta, err := newFileMeta(project, version, file, pack, releaseType, isDependency)
+	if err != nil {
+		return err
+	}
+
+	// If a file already exists here, this will overwrite it!!! A project that is already in the pack is updated in
+	// place by installVersion instead of coming here, so that would be an unrelated file.
+	// TODO: Should this be improved?
+	// Current strategy is to go ahead and do stuff without asking, with the assumption that you are using
+	// VCS anyway.
+
+	format, hash, err := modMeta.Write()
+	if err != nil {
+		return err
+	}
+	return index.RefreshFileWithHash(modMeta.GetFilePath(), format, hash, true)
+}
+
+// newFileMeta is the metadata a project would be added to the pack with, at version, and where it would be saved. It
+// isn't saved, so it can be shown, or changed, first.
+func newFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, file *modrinthApi.File, pack core.Pack, releaseType string, isDependency bool) (core.Mod, error) {
 	updateMap := make(map[string]map[string]interface{})
 
 	var err error
@@ -439,7 +477,7 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		ReleaseType: releaseType,
 	}.ToMap()
 	if err != nil {
-		return err
+		return core.Mod{}, err
 	}
 
 	side := getSide(project)
@@ -450,7 +488,7 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 
 	algorithm, hash := getBestHash(file)
 	if algorithm == "" {
-		return errors.New("file doesn't have a hash")
+		return core.Mod{}, errors.New("file doesn't have a hash")
 	}
 
 	modMeta := core.Mod{
@@ -467,31 +505,19 @@ func createFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, 
 		Dependencies:      buildDependencyList(version),
 		AddedAsDependency: isDependency,
 	}
-	var path string
 	folder := viper.GetString("meta-folder")
 	if folder == "" {
 		folder, err = getProjectTypeFolder(*project.ProjectType, version.Loaders, pack.GetCompatibleLoaders())
 		if err != nil {
-			return err
+			return core.Mod{}, err
 		}
 	}
 	if project.Slug != nil {
-		path = modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, *project.Slug+core.MetaExtension))
+		modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, *project.Slug+core.MetaExtension))
 	} else {
-		path = modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, core.SlugifyName(*project.Title)+core.MetaExtension))
+		modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, core.SlugifyName(*project.Title)+core.MetaExtension))
 	}
-
-	// If a file already exists here, this will overwrite it!!! A project that is already in the pack is updated in
-	// place by installVersion instead of coming here, so that would be an unrelated file.
-	// TODO: Should this be improved?
-	// Current strategy is to go ahead and do stuff without asking, with the assumption that you are using
-	// VCS anyway.
-
-	format, hash, err := modMeta.Write()
-	if err != nil {
-		return err
-	}
-	return index.RefreshFileWithHash(path, format, hash, true)
+	return modMeta, nil
 }
 
 var projectIDFlag string

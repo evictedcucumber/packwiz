@@ -24,7 +24,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Pack distribution with HTTP servers, with a built in local server for testing
 - Easy installation and updating of multiple mods at once from Modrinth
 - Exporting to Modrinth packs, listing what goes in each one and which sides it is for
-- `packwiz mr validate` checks a pack's mods, dependencies and sides before you export it
+- `packwiz mr validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz mr fix` fixes what it can, showing the changes and asking first
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
 - Configured Defaults support: a pack that has the mod keeps its config, and any other default files, in `configureddefaults/`
@@ -139,6 +139,23 @@ Repurposed Structures - Neoforge/Forge  required     required   8.0 MiB  mods/re
 - `pack.toml` has a Minecraft version, a NeoForge version and a version for the pack
 
 What a mod depends on is what its `.pw.toml` records. A mod that records nothing is looked up on Modrinth, so that needs the network; if it can't be reached, those mods' dependencies aren't checked, and it says so, but the rest of the checks are made.
+
+`packwiz mr fix` runs `validate`, works out what can be done about what it finds, shows the changes, and asks before making any (with `--yes` it goes ahead without asking; the changes are still shown). Afterwards it checks the pack again, and fails if errors are left:
+
+```
+Changes to make:
+Repurposed Structures - Neoforge/Forge (mods/repurposed-structures-forge.pw.toml):
+  add: version 7.5.22+1.21.1-neoforge (repurposed_structures-7.5.22+1.21.1-neoforge.jar), which "Repurposed Structures - Farmer's Delight Compat" requires
+  side: server -> both, as "Repurposed Structures - Farmer's Delight Compat" needs it on the client
+
+Would you like to make these changes? [Y/n]:
+```
+
+- a mod that is only on the server, but that a mod on the client requires, is put on both sides
+- a required dependency that isn't in the pack is added, at its latest version, as `packwiz mr add` would add it, and put on both sides if a mod on the client requires it (one that can't be found a version of, or whose file name is already taken, is left and reported)
+- a mod with no side is given one (`both`, which it was treated as having), and a mod that doesn't record its version has it recorded
+
+Everything else `validate` finds, such as a mod that is incompatible with another, needs a decision, so it is left for you.
 
 ## Coloured output
 

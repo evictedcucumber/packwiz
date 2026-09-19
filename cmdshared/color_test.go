@@ -63,7 +63,8 @@ func TestAddToZipSaysWhatWentWrongInRed(t *testing.T) {
 	}
 }
 
-func TestAddToZipSaysWhatItAddedWithTheModPickedOut(t *testing.T) {
+// Export lists what went into the pack once it is done, so adding a file to it says nothing
+func TestAddToZipSaysNothingWhenItAdds(t *testing.T) {
 	idx, dir := newTestIndex(t)
 	if err := os.MkdirAll(filepath.Join(dir, "mods"), 0755); err != nil {
 		t.Fatalf("failed to create mods dir: %v", err)
@@ -71,23 +72,19 @@ func TestAddToZipSaysWhatItAddedWithTheModPickedOut(t *testing.T) {
 	mod := &core.Mod{Name: "Test Mod", FileName: "test.jar"}
 	mod.SetMetaPath(filepath.Join(dir, "mods", "test.pw.toml"))
 	exp := zip.NewWriter(&bytes.Buffer{})
-
-	add := func() {
-		file, err := os.CreateTemp(dir, "download-*")
-		if err != nil {
-			t.Fatalf("failed to create temp download file: %v", err)
-		}
-		if !AddToZip(core.CompletedDownload{Mod: mod, File: file}, exp, "overrides", &idx) {
-			t.Fatal("AddToZip() = false, want true")
-		}
+	file, err := os.CreateTemp(dir, "download-*")
+	if err != nil {
+		t.Fatalf("failed to create temp download file: %v", err)
 	}
-	plain, coloured := cmdtest.AssertColourOnlyAdds(t, add)
 
-	if want := "Test Mod (test.jar) added to zip\n"; plain != want {
-		t.Errorf("plain output = %q, want %q", plain, want)
+	var added bool
+	out := cmdtest.CaptureStdout(t, func() { added = AddToZip(core.CompletedDownload{Mod: mod, File: file}, exp, "overrides", &idx) })
+
+	if !added {
+		t.Error("AddToZip() = false, want true")
 	}
-	if want := ui.Bold.Sprint("Test Mod") + " " + ui.Muted.Sprint("(test.jar)") + " added to zip\n"; coloured != want {
-		t.Errorf("coloured output = %q, want %q", coloured, want)
+	if out != "" {
+		t.Errorf("output = %q, want none", out)
 	}
 }
 

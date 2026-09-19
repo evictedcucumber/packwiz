@@ -26,6 +26,17 @@ func runsOnClient(side string) bool {
 	return side != core.ServerSide
 }
 
+// projectIDOf is the Modrinth project a mod is from, or "" if it isn't from one. A mod that was made in memory rather
+// than read from a file (see newFileMeta) has no parsed update data yet, so its project is read from the data it would
+// be saved with.
+func projectIDOf(mod *core.Mod) string {
+	if data, ok := modrinthUpdateData(mod); ok {
+		return data.ProjectID
+	}
+	id, _ := mod.Update["modrinth"]["mod-id"].(string)
+	return id
+}
+
 // widenSides puts every server-only mod on both sides when a mod that runs on the client requires it. What a mod that
 // is put on the client requires is then needed there too, so this goes on until nothing more changes, and a chain of
 // dependencies is followed all the way. Only required dependencies count, and only ones that are in mods.
@@ -35,8 +46,8 @@ func runsOnClient(side string) bool {
 func widenSides(mods []*core.Mod) []sidePromotion {
 	byProject := make(map[string]*core.Mod, len(mods))
 	for _, mod := range mods {
-		if data, ok := modrinthUpdateData(mod); ok && data.ProjectID != "" {
-			byProject[data.ProjectID] = mod
+		if id := projectIDOf(mod); id != "" {
+			byProject[id] = mod
 		}
 	}
 
@@ -68,16 +79,22 @@ func widenSides(mods []*core.Mod) []sidePromotion {
 	return promotions
 }
 
-// sidePromotions is what widenSides would change in mods, found without changing them
-func sidePromotions(mods []*core.Mod) []sidePromotion {
-	copies := make([]*core.Mod, len(mods))
-	originals := make(map[*core.Mod]*core.Mod, len(mods))
+// copyMods copies mods, so that what is done to the copies (such as widenSides) leaves the mods as they were. It also
+// returns the mods each copy is of.
+func copyMods(mods []*core.Mod) (copies []*core.Mod, originals map[*core.Mod]*core.Mod) {
+	copies = make([]*core.Mod, len(mods))
+	originals = make(map[*core.Mod]*core.Mod, len(mods))
 	for i, mod := range mods {
 		c := *mod
 		copies[i] = &c
 		originals[&c] = mod
 	}
+	return copies, originals
+}
 
+// sidePromotions is what widenSides would change in mods, found without changing them
+func sidePromotions(mods []*core.Mod) []sidePromotion {
+	copies, originals := copyMods(mods)
 	promotions := widenSides(copies)
 	for i, p := range promotions {
 		promotions[i] = sidePromotion{mod: originals[p.mod], neededBy: originals[p.neededBy]}

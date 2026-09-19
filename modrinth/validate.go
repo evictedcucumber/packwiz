@@ -31,7 +31,9 @@ var validateCmd = &cobra.Command{
 What a mod depends on is what its metadata records. For a mod that records nothing it is looked up on Modrinth, which
 needs the network; if that fails, those mods' dependencies aren't checked, and it says so.
 
-The command fails if it finds errors. Warnings are about things that don't stop the pack from working, and don't.`,
+The command fails if it finds errors. Warnings are about things that don't stop the pack from working, and don't.
+
+'packwiz modrinth fix' fixes what can be fixed of what this finds.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		pack, err := core.LoadPack()
@@ -84,6 +86,12 @@ type entry struct {
 // packEntry is what problems with the pack as a whole are about, rather than one of its mods
 var packEntry = entry{name: "The pack"}
 
+// dependencyNeed is a mod that requires a project that the pack doesn't have
+type dependencyNeed struct {
+	by entry
+	id string
+}
+
 // validation is what was found wrong with a pack. Nothing is saved: the mods it reads are only changed in memory, to
 // have what Modrinth says they depend on.
 type validation struct {
@@ -91,6 +99,10 @@ type validation struct {
 	mods int
 	// subjects are the metadata files, and the pack under "", that have anything wrong with them, by path
 	subjects map[string]*subject
+	// entries are the metadata files that could be read, in the order of their paths, with the dependencies that
+	// were looked up, and missing is what they require that isn't in the pack: what fixing the pack goes by
+	entries []entry
+	missing []dependencyNeed
 }
 
 // validatePack checks a pack for problems, looking up on Modrinth what mods that record no dependencies depend on
@@ -99,6 +111,7 @@ func validatePack(pack core.Pack, index core.Index) *validation {
 	v.checkPack(pack)
 
 	entries := v.readMods(index)
+	v.entries = entries
 	for _, e := range entries {
 		v.checkMod(e)
 	}
@@ -226,7 +239,7 @@ func (v *validation) checkMod(e entry) {
 	}
 
 	if mod.Version == "" {
-		v.warnf(e, "doesn't record its version; 'packwiz git commit' saves it")
+		v.warnf(e, "doesn't record its version; 'packwiz modrinth fix' and 'packwiz git commit' save it")
 	}
 }
 
@@ -259,38 +272,30 @@ func (v *validation) checkDuplicates(entries []entry) {
 func (v *validation) checkDependencies(pack core.Pack, entries []entry) {
 	// Only the mods that come from Modrinth have dependencies
 	var managed []entry
-	installed := make(map[string]string) // project IDs to the name of the mod that is that project
 	for _, e := range entries {
-		if data, ok := modrinthUpdateData(e.mod); ok && data.ProjectID != "" {
+		if projectIDOf(e.mod) != "" {
 			managed = append(managed, e)
-			installed[data.ProjectID] = e.name
 		}
 	}
-	// Forgified Fabric API takes the place of Fabric API, so what needs Fabric API has it
-	if runsFabricMods(pack, slices.Collect(maps.Keys(installed))) {
-		installed[fabricAPIProjectID] = installed[forgifiedFabricAPIProjectID]
-	}
+	installed := installedProjects(pack, entries)
 
 	v.lookUpDependencies(managed)
 
-	type need struct {
-		by entry
-		id string
-	}
-	var missing []need
+	var missing []dependencyNeed
 	var missingIDs []string
 	for _, e := range managed {
 		for _, dep := range e.mod.Dependencies {
 			name, present := installed[dep.ID]
 			switch {
 			case dep.Type == "required" && !present:
-				missing = append(missing, need{by: e, id: dep.ID})
+				missing = append(missing, dependencyNeed{by: e, id: dep.ID})
 				missingIDs = append(missingIDs, dep.ID)
 			case dep.Type == "incompatible" && present:
 				v.errorf(e, "is incompatible with %q, which is in the pack", name)
 			}
 		}
 	}
+	v.missing = missing
 	names := projectNames(missingIDs)
 	for _, m := range missing {
 		v.errorf(m.by, "requires %q, which isn't in the pack", names[m.id])
@@ -305,6 +310,21 @@ func (v *validation) checkDependencies(pack core.Pack, entries []entry) {
 	for _, p := range sidePromotions(mods) {
 		v.errorf(byMod[p.mod], "is only on the server, but %q needs it on the client; its side should be %q", p.neededBy.Name, core.UniversalSide)
 	}
+}
+
+// installedProjects is the projects the pack has, by ID, with the name of the mod that is each. Forgified Fabric API
+// takes the place of Fabric API, so a pack that runs Fabric mods has that too.
+func installedProjects(pack core.Pack, entries []entry) map[string]string {
+	installed := make(map[string]string)
+	for _, e := range entries {
+		if id := projectIDOf(e.mod); id != "" {
+			installed[id] = e.name
+		}
+	}
+	if runsFabricMods(pack, slices.Collect(maps.Keys(installed))) {
+		installed[fabricAPIProjectID] = installed[forgifiedFabricAPIProjectID]
+	}
+	return installed
 }
 
 // lookUpDependencies gives the mods that record no dependencies what Modrinth says their installed version depends on,
