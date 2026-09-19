@@ -118,13 +118,8 @@ func (in *Index) updateFile(path string) error {
 		hashString = h.HashToString(h.Sum(nil))
 	}
 
-	markAsMetaFile := false
-	// If the file has an extension of pw.toml, set markAsMetaFile to true
-	if strings.HasSuffix(filepath.Base(path), MetaExtension) {
-		markAsMetaFile = true
-	}
-
-	return in.updateFileHashGiven(path, "sha256", hashString, markAsMetaFile)
+	// If the file has an extension of pw.toml, mark it as a metafile
+	return in.updateFileHashGiven(path, "sha256", hashString, hasMetaExtension(path))
 }
 
 // ResolveIndexPath turns a path from the index into a file path on disk
@@ -246,6 +241,13 @@ func (in *Index) Refresh() error {
 		fileList = append(fileList, path)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// A pack with a mod that reads the pack's files from a folder of its own (see ConfigDirResolver) tracks only that
+	// folder and its metadata files
+	fileList, err = in.keepConfigDirFiles(fileList)
 	if err != nil {
 		return err
 	}

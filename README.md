@@ -26,6 +26,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Exporting to Modrinth packs
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
+- Configured Defaults support: a pack that has the mod keeps its config, and any other default files, in `configureddefaults/`
 - Coloured output in the terminal: successes, warnings and errors are easy to tell apart, and updates show what changes
 
 ## Changelog and releases
@@ -96,6 +97,18 @@ The first release has no log to read, so it describes the pack as it is, and kee
 ```
 
 Mods added before `version` was recorded have it looked up from Modrinth and saved to their `.pw.toml` the next time you run `packwiz changelog release` or `packwiz git commit` (`packwiz changelog` shows the versions but saves nothing), so that needs the network once. Releases made before then show file names, which are replaced with the versions too wherever the mod is still on that file.
+
+## Configured Defaults
+
+[Configured Defaults](https://modrinth.com/mod/configured-defaults) copies the files in a `configureddefaults` folder into the game directory when they are missing there, so a pack update doesn't overwrite what players changed. The folder can hold any file or folder of the game directory, not just `config/`.
+
+A pack that has the mod added keeps all of its files there. `packwiz refresh` tracks only the mods' metadata files and what is in `configureddefaults/`, so the folder's files are what the index lists, what `packwiz serve` hands out, what `packwiz mr export` puts in the pack, and what `packwiz git commit` and the changelog describe as config:
+
+```
+fix(config): change configureddefaults/config/sodium.json
+```
+
+Files anywhere else, such as `config/` (which would replace players' own settings on every update), aren't tracked, and `.packwizignore` can't bring them back. The first `packwiz refresh` after adding the mod says how many files left the index; move them into `configureddefaults/` to keep them in the pack. Removing the mod makes every file trackable again.
 
 ## Coloured output
 

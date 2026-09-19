@@ -251,6 +251,77 @@ func TestCommitDescribesEachKindOfChange(t *testing.T) {
 	}
 }
 
+// A pack with a mod that reads its files from a folder keeps them there: they are what commits and the changelog call
+// config, whatever they are (they needn't be in config/), and files outside the folder aren't tracked at all.
+func TestCommitAndReleaseFollowTheConfigDir(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	src := cmdtest.RegisterConfigDirSource(t, "testdefaults", "configureddefaults")
+	p.modFile(t, core.Mod{
+		Name: "Defaults", FileName: "defaults-1.0.jar", Version: "1.0", Side: core.ClientSide,
+		Download: core.ModDownload{HashFormat: "sha256", Hash: "hash-1.0"},
+		Update:   src.UpdateData(),
+	})
+	p.write(t, "configureddefaults/config/sodium.json", "{}")
+	p.write(t, "config/sodium.json", "{}")
+	release(t, "")
+
+	if index := git(t, "show", "HEAD:index.toml"); strings.Contains(index, `"config/sodium.json"`) ||
+		!strings.Contains(index, `"configureddefaults/config/sodium.json"`) {
+		t.Errorf("the committed index should list only the file in configureddefaults/:\n%s", index)
+	}
+
+	steps := []struct {
+		name   string
+		change func()
+		want   string
+	}{
+		{
+			"config in the folder changed",
+			func() { p.write(t, "configureddefaults/config/sodium.json", `{"a": 1}`) },
+			"fix(config): change configureddefaults/config/sodium.json",
+		},
+		{
+			"a file in the folder that isn't in config/ added",
+			func() { p.write(t, "configureddefaults/options.txt", "fov:90") },
+			"fix(config): add configureddefaults/options.txt",
+		},
+		{
+			"a file outside the folder changed, which the pack doesn't have",
+			func() { p.write(t, "config/sodium.json", `{"a": 2}`) },
+			"chore(pack): update pack files",
+		},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			step.change()
+
+			commit(t)
+
+			if got := headMessage(t); got != step.want {
+				t.Errorf("commit message =\n%s\nwant\n%s", got, step.want)
+			}
+			requireClean(t)
+		})
+	}
+
+	release(t, "")
+
+	changelogMD := git(t, "show", "HEAD:CHANGELOG.md")
+	for _, want := range []string{
+		"### Config\n\n",
+		"- Changed `configureddefaults/config/sodium.json`",
+		"- Added `configureddefaults/options.txt`",
+	} {
+		if !strings.Contains(changelogMD, want) {
+			t.Errorf("the committed changelog is missing %q:\n%s", want, changelogMD)
+		}
+	}
+	if strings.Contains(changelogMD, "`config/sodium.json`") {
+		t.Errorf("the committed changelog mentions a file that is outside the folder:\n%s", changelogMD)
+	}
+}
+
 func TestCommitIncludesTheRefreshedIndex(t *testing.T) {
 	// The index on disk knows nothing about this config file, as if "packwiz refresh" hadn't been run
 	setUpRepo(t)
