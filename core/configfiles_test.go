@@ -6,9 +6,12 @@ import (
 	"testing"
 )
 
-// modAt builds a Mod with its metadata file at metaPath, destination fileName, and the given config-files
-func modAt(metaPath, fileName string, configFiles ...string) *Mod {
-	m := &Mod{FileName: fileName, ConfigFiles: configFiles}
+// modAt builds a Mod with a name, its metadata file at metaPath, destination fileName, and the given config-files
+func modAt(name, metaPath, fileName string, configFiles ...string) *Mod {
+	m := &Mod{Name: name, FileName: fileName}
+	if len(configFiles) > 0 {
+		m.ConfigFiles = &configFiles
+	}
 	m.SetMetaPath(metaPath)
 	return m
 }
@@ -19,128 +22,139 @@ func newIndexFixture(t *testing.T) *Index {
 	return idx
 }
 
-func TestConfigFilesExcludesMetaFilesAndAModsOwnDestFile(t *testing.T) {
-	idx := newIndexFixture(t)
-	if err := idx.RefreshFileWithHash("mods/alpha.pw.toml", "sha256", "h", true); err != nil {
-		t.Fatalf("RefreshFileWithHash() returned error: %v", err)
-	}
-	if err := idx.RefreshFileWithHash("mods/alpha.jar", "sha256", "h", false); err != nil {
-		t.Fatalf("RefreshFileWithHash() returned error: %v", err)
-	}
-
-	mods := []*Mod{modAt("mods/alpha.pw.toml", "alpha.jar")}
-	files, err := idx.ConfigFiles(mods)
-	if err != nil {
-		t.Fatalf("ConfigFiles() returned error: %v", err)
-	}
-	if len(files) != 0 {
-		t.Errorf("ConfigFiles() = %v, want none (the metadata file and the mod's own jar shouldn't be listed)", files)
-	}
-}
-
-func TestConfigFilesReportsWhatIsClaimed(t *testing.T) {
-	idx := newIndexFixture(t)
-	for _, p := range []string{
-		"mods/alpha.pw.toml", "mods/alpha.jar",
-		"config/alpha.json", "config/alpha/sub.json", "config/orphan.json",
-	} {
-		meta := p == "mods/alpha.pw.toml"
-		if err := idx.RefreshFileWithHash(p, "sha256", "h", meta); err != nil {
-			t.Fatalf("RefreshFileWithHash(%q) returned error: %v", p, err)
-		}
-	}
-
-	mods := []*Mod{modAt("mods/alpha.pw.toml", "alpha.jar", "config/alpha.json", "config/alpha/")}
-	files, err := idx.ConfigFiles(mods)
-	if err != nil {
-		t.Fatalf("ConfigFiles() returned error: %v", err)
-	}
-
-	got := make(map[string]bool)
-	for _, f := range files {
-		got[f.Path] = f.Claimed
-	}
-	want := map[string]bool{
-		"config/alpha.json":     true,  // claimed exactly
-		"config/alpha/sub.json": true,  // claimed by the "config/alpha/" folder entry
-		"config/orphan.json":    false, // nothing claims it
-	}
-	if !mapsEqual(got, want) {
-		t.Errorf("ConfigFiles() = %v, want %v", got, want)
-	}
-}
-
-func mapsEqual(a, b map[string]bool) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
-// TestConfigFilesResolvedAgainstTheConfigDir checks that config-files entries are written as if the pack kept its
-// files at the root of the game directory (as it normally does), and are resolved against a mod's ConfigDir (e.g.
-// Configured Defaults) when the pack has one: "config/alpha.json" claims "configureddefaults/config/alpha.json".
-func TestConfigFilesResolvedAgainstTheConfigDir(t *testing.T) {
-	registerConfigDirSource(t, "defaults", "configureddefaults")
-
-	idx := newIndexFixture(t)
-	for _, p := range []string{
-		"mods/defaults.pw.toml", "mods/alpha.pw.toml",
-		"configureddefaults/config/alpha.json", "configureddefaults/config/alpha/sub.json",
-		"configureddefaults/config/orphan.json",
-	} {
+// track adds paths to the index, given as metadata file paths (by their ".pw.toml" extension) or plain files
+func track(t *testing.T, idx *Index, paths ...string) {
+	t.Helper()
+	for _, p := range paths {
 		meta := strings.HasSuffix(p, ".pw.toml")
 		if err := idx.RefreshFileWithHash(p, "sha256", "h", meta); err != nil {
 			t.Fatalf("RefreshFileWithHash(%q) returned error: %v", p, err)
 		}
 	}
+}
 
-	defaultsMod := &Mod{Update: map[string]map[string]interface{}{"defaults": {}}}
-	defaultsMod.SetMetaPath("mods/defaults.pw.toml")
-	alphaMod := modAt("mods/alpha.pw.toml", "alpha.jar", "config/alpha.json", "config/alpha/")
+func TestConfigFileTreeExcludesMetaFilesAndAModsOwnDestFile(t *testing.T) {
+	idx := newIndexFixture(t)
+	track(t, idx, "mods/alpha.pw.toml", "mods/alpha.jar")
 
-	files, err := idx.ConfigFiles([]*Mod{defaultsMod, alphaMod})
+	mods := []*Mod{modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar")}
+	tree, err := idx.ConfigFileTree(mods)
 	if err != nil {
-		t.Fatalf("ConfigFiles() returned error: %v", err)
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
-
-	got := make(map[string]bool)
-	for _, f := range files {
-		got[f.Path] = f.Claimed
-	}
-	want := map[string]bool{
-		"configureddefaults/config/alpha.json":     true,
-		"configureddefaults/config/alpha/sub.json": true,
-		"configureddefaults/config/orphan.json":    false,
-	}
-	if !mapsEqual(got, want) {
-		t.Errorf("ConfigFiles() = %v, want %v", got, want)
+	if len(tree.Mods) != 0 || len(tree.Unclaimed) != 0 {
+		t.Errorf("ConfigFileTree() = %+v, want none (the metadata file and the mod's own jar shouldn't be listed)", tree)
 	}
 }
 
-func TestConfigFilesSortedByPath(t *testing.T) {
+func TestConfigFileTreeGroupsFilesByMod(t *testing.T) {
 	idx := newIndexFixture(t)
-	for _, p := range []string{"config/z.json", "config/a.json", "config/m.json"} {
-		if err := idx.RefreshFileWithHash(p, "sha256", "h", false); err != nil {
-			t.Fatalf("RefreshFileWithHash(%q) returned error: %v", p, err)
-		}
+	track(t, idx, "mods/alpha.pw.toml", "mods/alpha.jar", "config/alpha.json", "config/alpha/sub.json", "config/orphan.json")
+
+	mods := []*Mod{modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json", "config/alpha/")}
+	tree, err := idx.ConfigFileTree(mods)
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
 
-	files, err := idx.ConfigFiles(nil)
-	if err != nil {
-		t.Fatalf("ConfigFiles() returned error: %v", err)
+	if len(tree.Mods) != 1 || tree.Mods[0].Mod.Name != "Alpha" {
+		t.Fatalf("Mods = %+v, want just Alpha", tree.Mods)
 	}
-	var paths []string
-	for _, f := range files {
-		paths = append(paths, f.Path)
+	want := []string{"config/alpha.json", "config/alpha/sub.json"}
+	if !slices.Equal(tree.Mods[0].Files, want) {
+		t.Errorf("Alpha's files = %v, want %v", tree.Mods[0].Files, want)
+	}
+	if want := []string{"config/orphan.json"}; !slices.Equal(tree.Unclaimed, want) {
+		t.Errorf("Unclaimed = %v, want %v", tree.Unclaimed, want)
+	}
+}
+
+func TestConfigFileTreeSortsModsByName(t *testing.T) {
+	idx := newIndexFixture(t)
+	track(t, idx, "mods/zeta.pw.toml", "mods/alpha.pw.toml", "config/zeta.json", "config/alpha.json")
+
+	mods := []*Mod{
+		modAt("Zeta Mod", "mods/zeta.pw.toml", "zeta.jar", "config/zeta.json"),
+		modAt("alpha mod", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json"),
+	}
+	tree, err := idx.ConfigFileTree(mods)
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
+	}
+
+	if len(tree.Mods) != 2 {
+		t.Fatalf("Mods = %+v, want 2", tree.Mods)
+	}
+	if tree.Mods[0].Mod.Name != "alpha mod" || tree.Mods[1].Mod.Name != "Zeta Mod" {
+		t.Errorf("Mods in order = %q, %q, want alpha mod then Zeta Mod (case-insensitive)", tree.Mods[0].Mod.Name, tree.Mods[1].Mod.Name)
+	}
+}
+
+func TestConfigFileTreeGivesASharedClaimToTheFirstModByName(t *testing.T) {
+	idx := newIndexFixture(t)
+	track(t, idx, "mods/alpha.pw.toml", "mods/beta.pw.toml", "config/shared.json")
+
+	mods := []*Mod{
+		modAt("Beta", "mods/beta.pw.toml", "beta.jar", "config/shared.json"),
+		modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/shared.json"),
+	}
+	tree, err := idx.ConfigFileTree(mods)
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
+	}
+
+	if len(tree.Mods) != 1 || tree.Mods[0].Mod.Name != "Alpha" {
+		t.Errorf("Mods = %+v, want the file to go to Alpha, the first by name", tree.Mods)
+	}
+	if len(tree.Unclaimed) != 0 {
+		t.Errorf("Unclaimed = %v, want none", tree.Unclaimed)
+	}
+}
+
+// TestConfigFileTreeResolvedAgainstTheConfigDir checks that config-files entries are written as if the pack kept its
+// files at the root of the game directory (as it normally does), and are resolved against a mod's ConfigDir (e.g.
+// Configured Defaults) when the pack has one: "config/alpha.json" claims "configureddefaults/config/alpha.json".
+func TestConfigFileTreeResolvedAgainstTheConfigDir(t *testing.T) {
+	registerConfigDirSource(t, "defaults", "configureddefaults")
+
+	idx := newIndexFixture(t)
+	track(t, idx,
+		"mods/defaults.pw.toml", "mods/alpha.pw.toml",
+		"configureddefaults/config/alpha.json", "configureddefaults/config/alpha/sub.json",
+		"configureddefaults/config/orphan.json",
+	)
+
+	defaultsMod := &Mod{Name: "Configured Defaults", Update: map[string]map[string]interface{}{"defaults": {}}}
+	defaultsMod.SetMetaPath("mods/defaults.pw.toml")
+	alphaMod := modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json", "config/alpha/")
+
+	tree, err := idx.ConfigFileTree([]*Mod{defaultsMod, alphaMod})
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
+	}
+
+	if len(tree.Mods) != 1 || tree.Mods[0].Mod.Name != "Alpha" {
+		t.Fatalf("Mods = %+v, want just Alpha", tree.Mods)
+	}
+	want := []string{"configureddefaults/config/alpha.json", "configureddefaults/config/alpha/sub.json"}
+	if !slices.Equal(tree.Mods[0].Files, want) {
+		t.Errorf("Alpha's files = %v, want %v", tree.Mods[0].Files, want)
+	}
+	if want := []string{"configureddefaults/config/orphan.json"}; !slices.Equal(tree.Unclaimed, want) {
+		t.Errorf("Unclaimed = %v, want %v", tree.Unclaimed, want)
+	}
+}
+
+func TestConfigFileTreeUnclaimedSortedByPath(t *testing.T) {
+	idx := newIndexFixture(t)
+	track(t, idx, "config/z.json", "config/a.json", "config/m.json")
+
+	tree, err := idx.ConfigFileTree(nil)
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
 	want := []string{"config/a.json", "config/m.json", "config/z.json"}
-	if !slices.Equal(paths, want) {
-		t.Errorf("paths = %v, want %v", paths, want)
+	if !slices.Equal(tree.Unclaimed, want) {
+		t.Errorf("Unclaimed = %v, want %v", tree.Unclaimed, want)
 	}
 }

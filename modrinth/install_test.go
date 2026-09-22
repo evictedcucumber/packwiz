@@ -200,6 +200,25 @@ func TestInstallVersionNoDependenciesWritesPackAndIndex(t *testing.T) {
 	}
 }
 
+// A newly created mod's config-files is empty rather than absent, so its file shows the field is there to fill in
+// (see "packwiz config relate")
+func TestInstallVersionGivesTheNewModAnEmptyConfigFiles(t *testing.T) {
+	pack, index := setupPackFixture(t)
+	project, version, _ := testProjectAndFile()
+
+	if err := installVersion(project, version, "", pack, &index, ""); err != nil {
+		t.Fatalf("installVersion() returned error: %v", err)
+	}
+
+	mod := loadTestMod(t)
+	if mod.ConfigFiles == nil || len(*mod.ConfigFiles) != 0 {
+		t.Errorf("ConfigFiles = %v, want a non-nil empty slice", mod.ConfigFiles)
+	}
+	if data := readFile(t, testMetaPath); !strings.Contains(data, "config-files = []") {
+		t.Errorf("expected an explicit empty config-files key, got:\n%s", data)
+	}
+}
+
 // testVersion is a version of the test project (see testProjectAndFile), whose one file is named after its number
 func testVersion(id, number string) *modrinthApi.Version {
 	return &modrinthApi.Version{

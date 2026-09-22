@@ -101,6 +101,44 @@ func TestListColourOnlyAddsToItsOutput(t *testing.T) {
 	}
 }
 
+func TestConfigListColourOnlyAddsToItsOutput(t *testing.T) {
+	setUpConfigFixture(t)
+
+	plain, coloured := cmdtest.AssertColourOnlyAdds(t, func() { configListCmd.Run(configListCmd, nil) })
+
+	want := "Alpha Mod\n├── config/alpha.json\n└── config/alpha/sub.json\n\nInvalid\n└── config/orphan.json\n"
+	if plain != want {
+		t.Errorf("plain output = %q, want %q", plain, want)
+	}
+	if want := ui.Bold.Sprint("Alpha Mod"); !strings.Contains(coloured, want) {
+		t.Errorf("output missing the mod heading in bold %q:\n%q", want, coloured)
+	}
+	if want := ui.Bold.Sprint(ui.Warning.Sprint("Invalid")); !strings.Contains(coloured, want) {
+		t.Errorf("output missing the Invalid heading styled as a warning %q:\n%q", want, coloured)
+	}
+	if want := ui.Warning.Sprint("└── config/orphan.json"); !strings.Contains(coloured, want) {
+		t.Errorf("output missing the unclaimed file styled as a warning %q:\n%q", want, coloured)
+	}
+	if strings.Contains(coloured, ui.Warning.Sprint("├── config/alpha.json")) {
+		t.Errorf("a claimed file shouldn't be styled as a warning:\n%q", coloured)
+	}
+}
+
+func TestConfigListStateInvalidColourOnlyAddsToItsOutput(t *testing.T) {
+	setUpConfigFixture(t)
+	setConfigListFlag(t, "state", "invalid")
+
+	plain, coloured := cmdtest.AssertColourOnlyAdds(t, func() { configListCmd.Run(configListCmd, nil) })
+
+	if want := "Invalid\n└── config/orphan.json\n"; plain != want {
+		t.Errorf("plain output = %q, want %q", plain, want)
+	}
+	want := ui.Bold.Sprint(ui.Warning.Sprint("Invalid")) + "\n" + ui.Warning.Sprint("└── config/orphan.json") + "\n"
+	if coloured != want {
+		t.Errorf("coloured output = %q, want %q", coloured, want)
+	}
+}
+
 func TestPinReportsSuccessInGreenWithTheNameInBold(t *testing.T) {
 	setUpListFixture(t)
 	cmdtest.SetColor(t, ui.Always)

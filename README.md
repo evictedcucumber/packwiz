@@ -26,7 +26,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Exporting to Modrinth packs, listing what goes in each one and which sides it is for
 - `packwiz list --markdown` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
 - `packwiz mr validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz mr fix` fixes what it can, showing the changes and asking first
-- `packwiz config list --invalid` finds config files nothing claims: a mod records what it owns in its `.pw.toml`'s `config-files`, and `packwiz mr validate` checks it too
+- `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, and `packwiz mr validate` checks the same
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
 - Configured Defaults support: a pack that has the mod keeps its config, and any other default files, in `configureddefaults/`
@@ -147,15 +147,38 @@ The names are in alphabetical order under a heading for each kind of file, going
 
 ## Config files
 
-`packwiz config list` prints the pack's tracked files that aren't a mod's own metadata or destination file - normally what is in `config/`. A mod records which of these it owns in its `.pw.toml`'s `config-files`, a path, or a path ending in `/` to claim everything under it:
+`packwiz config list` shows the pack's tracked files that aren't a mod's own metadata or destination file - normally what is in `config/` - as a tree of the mod each belongs to, with the files nothing claims under "Invalid" at the end:
+
+```
+Sodium
+└── config/sodium-options.json
+Iris
+└── config/iris/
+
+Invalid
+└── config/lithium.json
+```
+
+A mod records which files it owns in its `.pw.toml`'s `config-files`, a path, or a path ending in `/` to claim everything under it:
 
 ```
 config-files = ["config/sodium-options.json", "config/iris/"]
 ```
 
-This is written by hand; nothing derives it. `--invalid` lists only the files nothing claims: a config file left behind by a mod that has since been removed, or never linked to the mod that installed it. `packwiz mr validate` reports the same as a warning.
+This is written by hand, with `packwiz config relate`; nothing derives it. `--state valid` shows only what is claimed, and `--state invalid` only what isn't - the same as the "Invalid" section, for example a config file left behind by a mod that has since been removed, or never linked to the mod that installed it (as `--only main` does for `packwiz list`). `packwiz mr validate` reports the same files as a warning.
 
 Entries are always written as above, as if the pack kept its files at the root of the game directory. A pack that has [Configured Defaults](#configured-defaults) instead keeps everything in `configureddefaults/`, and `config-files` follows it there too: `config/sodium-options.json` claims `configureddefaults/config/sodium-options.json` once the mod is installed, with no need to rewrite it either way.
+
+`packwiz config relate <mod> <config file/dir>` adds a path to a mod's config-files, given the name of its `.pw.toml` file (as `packwiz pin` and `packwiz remove` take) and a file or folder that exists in the pack:
+
+```
+packwiz config relate sodium config/sodium-options.json
+packwiz config relate iris config/iris
+```
+
+A folder is given a trailing `/` automatically. If the pack has Configured Defaults, the path is written as if it didn't - the same normalizing `packwiz config list` does - so it reads the same whether or not the mod is installed. Running it again with the same arguments does nothing more.
+
+Every mod gets an empty `config-files = []` when it is added with `packwiz mr add`, and `packwiz mr fix` adds one to any mod that doesn't have one yet, so a `.pw.toml` file always shows the field is there to fill in with `packwiz config relate`.
 
 ## Checking a pack
 
@@ -177,7 +200,7 @@ Repurposed Structures - Neoforge/Forge  required     required   8.0 MiB  mods/re
 - every required dependency is in the pack, and nothing in it is incompatible with something else
 - every mod that a mod on the client requires is on the client too: Modrinth lists some libraries, mostly for world generation, as unsupported on the client, but a mod that requires one crashes the game without it. `packwiz mr add` puts such a mod on both sides, and `validate` (and a warning from `export`) finds one that isn't
 - `pack.toml` has a Minecraft version, a NeoForge version and a version for the pack
-- every tracked config file is claimed by a mod's `config-files` (see [Config files](#config-files) and `packwiz config list --invalid`)
+- every tracked config file is claimed by a mod's `config-files` (see [Config files](#config-files) and `packwiz config list --state invalid`)
 
 What a mod depends on is what its `.pw.toml` records. A mod that records nothing is looked up on Modrinth, so that needs the network; if it can't be reached, those mods' dependencies aren't checked, and it says so, but the rest of the checks are made.
 
@@ -195,6 +218,7 @@ Would you like to make these changes? [Y/n]:
 - a mod that is only on the server, but that a mod on the client requires, is put on both sides
 - a required dependency that isn't in the pack is added, at its latest version, as `packwiz mr add` would add it, and put on both sides if a mod on the client requires it (one that can't be found a version of, or whose file name is already taken, is left and reported)
 - a mod with no side is given one (`both`, which it was treated as having), and a mod that doesn't record its version has it recorded
+- a mod with no `config-files` gets an empty one, ready for `packwiz config relate` to fill in
 
 Everything else `validate` finds, such as a mod that is incompatible with another, needs a decision, so it is left for you.
 

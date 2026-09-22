@@ -31,12 +31,13 @@ func configDir(metaFiles []string) (string, error) {
 		}
 		mods[i] = &mod
 	}
-	return configDirOfMods(mods), nil
+	return ConfigDirOfMods(mods), nil
 }
 
-// configDirOfMods is configDir for mods already loaded, so callers that have them (e.g. ConfigFiles) don't read the
-// metadata files again: the folder of the first mod, in the order given, that has one, or "" if no mod does.
-func configDirOfMods(mods []*Mod) string {
+// ConfigDirOfMods is configDir for mods already loaded, so a caller that has them (e.g. ConfigFileTree, or
+// "packwiz config relate") doesn't read the metadata files again: the folder of the first mod, in the order given,
+// that has one, or "" if no mod does.
+func ConfigDirOfMods(mods []*Mod) string {
 	for _, mod := range mods {
 		for _, name := range slices.Sorted(maps.Keys(mod.Update)) {
 			if resolver, ok := Updaters[name].(ConfigDirResolver); ok {

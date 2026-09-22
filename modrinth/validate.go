@@ -27,7 +27,7 @@ var validateCmd = &cobra.Command{
   - every required dependency is in the pack, and nothing in it is incompatible with something else
   - every mod that a mod on the client requires is on the client too (see 'packwiz modrinth add')
   - pack.toml has a Minecraft version, a NeoForge version and a version for the pack
-  - every tracked config file is claimed by a mod's config-files (see 'packwiz config list --invalid')
+  - every tracked config file is claimed by a mod's config-files (see 'packwiz config list --state invalid')
 
 What a mod depends on is what its metadata records. For a mod that records nothing it is looked up on Modrinth, which
 needs the network; if that fails, those mods' dependencies aren't checked, and it says so.
@@ -321,26 +321,20 @@ func (v *validation) checkConfigFiles(index core.Index, entries []entry) {
 	for i, e := range entries {
 		mods[i] = e.mod
 	}
-	files, err := index.ConfigFiles(mods)
+	tree, err := index.ConfigFileTree(mods)
 	if err != nil {
 		v.warnf(packEntry, "config files couldn't be checked: %v", err)
 		return
 	}
 
-	var orphaned []string
-	for _, f := range files {
-		if !f.Claimed {
-			orphaned = append(orphaned, f.Path)
-		}
-	}
-	if len(orphaned) == 0 {
+	if len(tree.Unclaimed) == 0 {
 		return
 	}
 	noun, verb := "files", "aren't"
-	if len(orphaned) == 1 {
+	if len(tree.Unclaimed) == 1 {
 		noun, verb = "file", "isn't"
 	}
-	v.warnf(packEntry, "%d %s %s claimed by any mod's config-files: %s", len(orphaned), noun, verb, listNames(orphaned, 5))
+	v.warnf(packEntry, "%d %s %s claimed by any mod's config-files: %s", len(tree.Unclaimed), noun, verb, listNames(tree.Unclaimed, 5))
 }
 
 // installedProjects is the projects the pack has, by ID, with the name of the mod that is each. Forgified Fabric API

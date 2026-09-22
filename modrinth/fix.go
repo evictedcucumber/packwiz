@@ -26,6 +26,7 @@ changes that would fix them, and ask before making any:
     it (and put on both sides if a mod on the client requires it)
   - a mod that has no side is given one (both, which is what it is treated as having)
   - a mod that doesn't record its version has it recorded
+  - a mod that doesn't have a config-files gets an empty one, ready for 'packwiz config relate' to fill in
 
 Everything else that is found needs a decision that only you can make, so it is left alone and reported. Once the
 changes are made the pack is checked again, and the command fails if any errors are left.
@@ -72,6 +73,8 @@ type fileChange struct {
 	side       *sideChange
 	// version is the version to record
 	version string
+	// addConfigFiles is whether to give the mod an empty config-files, as it doesn't have one yet
+	addConfigFiles bool
 }
 
 // fixPlan is what fixing a pack would do
@@ -199,6 +202,12 @@ func planFixes(pack core.Pack, index core.Index, v *validation) *fixPlan {
 		}
 	}
 
+	for _, e := range v.entries {
+		if e.mod.ConfigFiles == nil {
+			changeOf(e.path, e.name).addConfigFiles = true
+		}
+	}
+
 	plan.planVersions(v, changeOf)
 
 	slices.SortFunc(plan.changes, func(a, b *fileChange) int { return strings.Compare(a.path, b.path) })
@@ -316,6 +325,9 @@ func (c *fileChange) describe() []string {
 	if c.version != "" {
 		lines = append(lines, "version: "+ui.Transition("(not recorded)", c.version))
 	}
+	if c.addConfigFiles {
+		lines = append(lines, "config-files: added, empty")
+	}
 	return lines
 }
 
@@ -354,6 +366,9 @@ func (p *fixPlan) apply(pack *core.Pack, index *core.Index) (int, error) {
 			}
 			if c.version != "" && mod.Version == "" {
 				mod.Version = c.version
+			}
+			if c.addConfigFiles {
+				mod.EnsureConfigFiles()
 			}
 		}
 

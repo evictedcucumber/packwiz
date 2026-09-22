@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -78,35 +79,197 @@ func setConfigListFlag(t *testing.T, name string, value string) {
 	})
 }
 
-func TestConfigListListsTrackedConfigFilesNotModsOwnFiles(t *testing.T) {
+func TestConfigListShowsATreeOfEachModsFilesThenInvalidOnes(t *testing.T) {
 	setUpConfigFixture(t)
 
 	out := cmdtest.CaptureStdout(t, func() {
 		configListCmd.Run(configListCmd, nil)
 	})
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	want := []string{"config/alpha.json", "config/alpha/sub.json", "config/orphan.json"}
-	if len(lines) != len(want) {
-		t.Fatalf("got %d lines, want %d: %q", len(lines), len(want), out)
-	}
-	for i, w := range want {
-		if lines[i] != w {
-			t.Errorf("line %d = %q, want %q", i, lines[i], w)
-		}
-	}
-	if strings.Contains(out, "mods/alpha.jar") {
-		t.Errorf("output = %q, shouldn't list the mod's own file", out)
+	want := "Alpha Mod\n├── config/alpha.json\n└── config/alpha/sub.json\n\nInvalid\n└── config/orphan.json\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
 	}
 }
 
-func TestConfigListInvalidOnlyListsUnclaimedFiles(t *testing.T) {
+func TestConfigListStateValidOnlyShowsClaimedFiles(t *testing.T) {
 	setUpConfigFixture(t)
-	setConfigListFlag(t, "invalid", "true")
+	setConfigListFlag(t, "state", "valid")
 
 	out := cmdtest.CaptureStdout(t, func() {
 		configListCmd.Run(configListCmd, nil)
 	})
-	if strings.TrimSpace(out) != "config/orphan.json" {
-		t.Errorf("output = %q, want only config/orphan.json", out)
+	want := "Alpha Mod\n├── config/alpha.json\n└── config/alpha/sub.json\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+func TestConfigListStateInvalidOnlyShowsUnclaimedFiles(t *testing.T) {
+	setUpConfigFixture(t)
+	setConfigListFlag(t, "state", "invalid")
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configListCmd.Run(configListCmd, nil)
+	})
+	want := "Invalid\n└── config/orphan.json\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+func TestConfigListOmitsInvalidHeadingWhenNothingIsUnclaimed(t *testing.T) {
+	setUpConfigFixture(t)
+	// Claim the last file too, so nothing is left unclaimed
+	if err := os.WriteFile("mods/alpha.pw.toml", []byte(`name = "Alpha Mod"
+filename = "alpha.jar"
+config-files = ["config/alpha.json", "config/alpha/", "config/orphan.json"]
+
+[download]
+hash-format = "sha256"
+hash = "a"
+`), 0644); err != nil {
+		t.Fatalf("failed to rewrite mod fixture: %v", err)
+	}
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configListCmd.Run(configListCmd, nil)
+	})
+	want := "Alpha Mod\n├── config/alpha.json\n├── config/alpha/sub.json\n└── config/orphan.json\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+// setUpConfigRelateFixture builds a pack with one mod (Alpha Mod, with no config-files yet) and a real config/new.json
+// file and config/sub/ folder on disk, for "packwiz config relate" to link it to.
+func setUpConfigRelateFixture(t *testing.T) {
+	t.Helper()
+	cmdtest.Chdir(t)
+	cmdtest.WritePackFile(t, core.Pack{
+		Name: "Test Pack", PackFormat: core.CurrentPackFormat,
+		Versions: map[string]string{"minecraft": "1.20.1"},
+	})
+
+	if err := os.MkdirAll("mods", 0755); err != nil {
+		t.Fatalf("failed to create mods dir: %v", err)
+	}
+	alpha := `name = "Alpha Mod"
+filename = "alpha.jar"
+
+[download]
+hash-format = "sha256"
+hash = "a"
+`
+	if err := os.WriteFile("mods/alpha.pw.toml", []byte(alpha), 0644); err != nil {
+		t.Fatalf("failed to write mod fixture: %v", err)
+	}
+	if err := os.WriteFile("index.toml", []byte(`hash-format = "sha256"
+
+[[files]]
+file = "mods/alpha.pw.toml"
+hash = "irrelevant"
+metafile = true
+`), 0644); err != nil {
+		t.Fatalf("failed to write index.toml fixture: %v", err)
+	}
+
+	if err := os.MkdirAll("config/sub", 0755); err != nil {
+		t.Fatalf("failed to create config/sub dir: %v", err)
+	}
+	if err := os.WriteFile("config/new.json", []byte("{}"), 0644); err != nil {
+		t.Fatalf("failed to write config/new.json: %v", err)
+	}
+}
+
+func TestConfigRelateAddsAFileToAModsConfigFiles(t *testing.T) {
+	setUpConfigRelateFixture(t)
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configRelateCmd.Run(configRelateCmd, []string{"alpha", "config/new.json"})
+	})
+	if !strings.Contains(out, "Alpha Mod now claims config/new.json") {
+		t.Errorf("output = %q, want a success message", out)
+	}
+
+	mod, err := core.LoadMod("mods/alpha.pw.toml")
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if mod.ConfigFiles == nil || !slices.Contains(*mod.ConfigFiles, "config/new.json") {
+		t.Errorf("ConfigFiles = %v, want it to contain config/new.json", mod.ConfigFiles)
+	}
+}
+
+func TestConfigRelateAddsATrailingSlashForAFolder(t *testing.T) {
+	setUpConfigRelateFixture(t)
+
+	cmdtest.CaptureStdout(t, func() {
+		configRelateCmd.Run(configRelateCmd, []string{"alpha", "config/sub"})
+	})
+
+	mod, err := core.LoadMod("mods/alpha.pw.toml")
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if mod.ConfigFiles == nil || !slices.Contains(*mod.ConfigFiles, "config/sub/") {
+		t.Errorf("ConfigFiles = %v, want it to contain config/sub/ (with a trailing slash)", mod.ConfigFiles)
+	}
+}
+
+func TestConfigRelateDoesNothingWhenAlreadyClaimed(t *testing.T) {
+	setUpConfigRelateFixture(t)
+	cmdtest.CaptureStdout(t, func() {
+		configRelateCmd.Run(configRelateCmd, []string{"alpha", "config/new.json"})
+	})
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configRelateCmd.Run(configRelateCmd, []string{"alpha", "config/new.json"})
+	})
+	if !strings.Contains(out, "already claims") {
+		t.Errorf("output = %q, want a notice that it already claims the file", out)
+	}
+
+	mod, err := core.LoadMod("mods/alpha.pw.toml")
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if got := len(*mod.ConfigFiles); got != 1 {
+		t.Errorf("ConfigFiles = %v, want just the one entry, not a duplicate", *mod.ConfigFiles)
+	}
+}
+
+func TestConfigRelateResolvedAgainstTheConfigDir(t *testing.T) {
+	setUpConfigRelateFixture(t)
+	cmdtest.RegisterConfigDirSource(t, "defaults", "configureddefaults")
+	alpha := `name = "Alpha Mod"
+filename = "alpha.jar"
+
+[download]
+hash-format = "sha256"
+hash = "a"
+
+[update.defaults]
+version = "any"
+`
+	if err := os.WriteFile("mods/alpha.pw.toml", []byte(alpha), 0644); err != nil {
+		t.Fatalf("failed to rewrite mod fixture: %v", err)
+	}
+	if err := os.MkdirAll("configureddefaults/config", 0755); err != nil {
+		t.Fatalf("failed to create configureddefaults/config dir: %v", err)
+	}
+	if err := os.WriteFile("configureddefaults/config/new.json", []byte("{}"), 0644); err != nil {
+		t.Fatalf("failed to write configureddefaults/config/new.json: %v", err)
+	}
+
+	cmdtest.CaptureStdout(t, func() {
+		configRelateCmd.Run(configRelateCmd, []string{"alpha", "configureddefaults/config/new.json"})
+	})
+
+	mod, err := core.LoadMod("mods/alpha.pw.toml")
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if mod.ConfigFiles == nil || !slices.Contains(*mod.ConfigFiles, "config/new.json") {
+		t.Errorf("ConfigFiles = %v, want config/new.json, with the configureddefaults/ folder taken back out", mod.ConfigFiles)
 	}
 }

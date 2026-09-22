@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -147,6 +148,107 @@ func TestModVersionOmittedWhenEmpty(t *testing.T) {
 	// Packs written before Version existed must stay byte-identical
 	if strings.Contains(string(data), "version") {
 		t.Errorf("expected no version key when Version is empty, got:\n%s", data)
+	}
+}
+
+func TestModConfigFilesOmittedWhenNil(t *testing.T) {
+	metaPath := filepath.Join(t.TempDir(), "test-mod.pw.toml")
+
+	mod := Mod{Name: "Test Mod", FileName: "test-mod.jar"}
+	mod.SetMetaPath(metaPath)
+	if _, _, err := mod.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("failed to read mod file: %v", err)
+	}
+	if strings.Contains(string(data), "config-files") {
+		t.Errorf("expected no config-files key for a mod that has never had one, got:\n%s", data)
+	}
+
+	loaded, err := LoadMod(metaPath)
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if loaded.ConfigFiles != nil {
+		t.Errorf("loaded.ConfigFiles = %v, want nil", loaded.ConfigFiles)
+	}
+}
+
+func TestModConfigFilesWrittenAsEmptyArrayWhenSetButEmpty(t *testing.T) {
+	metaPath := filepath.Join(t.TempDir(), "test-mod.pw.toml")
+
+	mod := Mod{Name: "Test Mod", FileName: "test-mod.jar", ConfigFiles: &[]string{}}
+	mod.SetMetaPath(metaPath)
+	if _, _, err := mod.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("failed to read mod file: %v", err)
+	}
+	if !strings.Contains(string(data), "config-files = []") {
+		t.Errorf("expected an explicit empty config-files key, got:\n%s", data)
+	}
+
+	loaded, err := LoadMod(metaPath)
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if loaded.ConfigFiles == nil || len(*loaded.ConfigFiles) != 0 {
+		t.Errorf("loaded.ConfigFiles = %v, want a non-nil empty slice", loaded.ConfigFiles)
+	}
+}
+
+func TestModConfigFilesRoundTrip(t *testing.T) {
+	metaPath := filepath.Join(t.TempDir(), "test-mod.pw.toml")
+
+	want := []string{"config/a.json", "config/b/"}
+	mod := Mod{Name: "Test Mod", FileName: "test-mod.jar", ConfigFiles: &want}
+	mod.SetMetaPath(metaPath)
+	if _, _, err := mod.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
+	loaded, err := LoadMod(metaPath)
+	if err != nil {
+		t.Fatalf("LoadMod() returned error: %v", err)
+	}
+	if loaded.ConfigFiles == nil || !slices.Equal(*loaded.ConfigFiles, want) {
+		t.Errorf("loaded.ConfigFiles = %v, want %v", loaded.ConfigFiles, want)
+	}
+}
+
+func TestModEnsureConfigFilesAllocatesOnlyWhenNil(t *testing.T) {
+	mod := Mod{}
+	mod.EnsureConfigFiles()
+	if mod.ConfigFiles == nil || len(*mod.ConfigFiles) != 0 {
+		t.Fatalf("ConfigFiles = %v, want a non-nil empty slice", mod.ConfigFiles)
+	}
+
+	*mod.ConfigFiles = append(*mod.ConfigFiles, "config/a.json")
+	mod.EnsureConfigFiles()
+	if want := []string{"config/a.json"}; !slices.Equal(*mod.ConfigFiles, want) {
+		t.Errorf("ConfigFiles = %v, want %v (an existing list must be left alone)", *mod.ConfigFiles, want)
+	}
+}
+
+func TestModClaimConfigFileAddsAndDedupes(t *testing.T) {
+	mod := Mod{}
+	if !mod.ClaimConfigFile("config/a.json") {
+		t.Error("ClaimConfigFile() = false, want true for a new entry")
+	}
+	if mod.ClaimConfigFile("config/a.json") {
+		t.Error("ClaimConfigFile() = true, want false for an entry already claimed")
+	}
+	if !mod.ClaimConfigFile("config/b.json") {
+		t.Error("ClaimConfigFile() = false, want true for a second new entry")
+	}
+	if want := []string{"config/a.json", "config/b.json"}; mod.ConfigFiles == nil || !slices.Equal(*mod.ConfigFiles, want) {
+		t.Errorf("ConfigFiles = %v, want %v", mod.ConfigFiles, want)
 	}
 }
 

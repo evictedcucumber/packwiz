@@ -127,9 +127,11 @@ func fixPackWithAServerModAModNeeds(t *testing.T) (pack core.Pack, index core.In
 	pack, index = validatablePack(t)
 	lib := validMod("lib")
 	lib.side = core.ServerSide
+	lib.configFiles = []string{"config/lib.json"}
 	libPath = addMod(t, &index, lib)
 	alpha := validMod("alpha")
 	alpha.deps = []core.ModDependency{{ID: projectOf("lib"), Type: "required"}}
+	alpha.configFiles = []string{"config/alpha.json"}
 	alphaPath = addMod(t, &index, alpha)
 	return pack, index, libPath, alphaPath
 }
@@ -224,8 +226,12 @@ func TestFixWithYesMakesTheChangesWithoutAsking(t *testing.T) {
 
 func TestFixHasNothingToDoForAPackThatIsValid(t *testing.T) {
 	pack, index := validatablePack(t)
-	addMod(t, &index, validMod("alpha"))
-	addMod(t, &index, validMod("beta"))
+	alpha := validMod("alpha")
+	alpha.configFiles = []string{"config/alpha.json"}
+	addMod(t, &index, alpha)
+	beta := validMod("beta")
+	beta.configFiles = []string{"config/beta.json"}
+	addMod(t, &index, beta)
 
 	after, out, err := fix(t, pack, index)
 	if err != nil {
@@ -244,6 +250,7 @@ func TestFixSaysWhenNothingThatWasFoundCanBeFixed(t *testing.T) {
 	pack, index := validatablePack(t)
 	bad := validMod("alpha")
 	bad.side = "sideways"
+	bad.configFiles = []string{"config/alpha.json"}
 	path := addMod(t, &index, bad)
 	before := readFile(t, path)
 
@@ -268,6 +275,7 @@ func TestFixAddsARequiredDependencyThePackLacks(t *testing.T) {
 	serveModrinth(t, []mrProject{libraryOnModrinth("lib1")}, nil)
 	alpha := validMod("alpha")
 	alpha.deps = []core.ModDependency{{ID: "lib1", Type: "required"}}
+	alpha.configFiles = []string{"config/alpha.json"}
 	alphaPath := addMod(t, &index, alpha)
 	alphaBefore := readFile(t, alphaPath)
 	cmdtest.SetStdin(t, "y\n")
@@ -309,6 +317,7 @@ func TestFixAddsWhatADependencyRequiresToo(t *testing.T) {
 	serveModrinth(t, []mrProject{libraryOnModrinth("lib1", "lib2"), libraryOnModrinth("lib2")}, nil)
 	alpha := validMod("alpha")
 	alpha.deps = []core.ModDependency{{ID: "lib1", Type: "required"}}
+	alpha.configFiles = []string{"config/alpha.json"}
 	addMod(t, &index, alpha)
 	cmdtest.SetStdin(t, "y\n")
 
@@ -367,6 +376,7 @@ func TestFixLeavesADependencyItCannotFindAVersionOf(t *testing.T) {
 	serveModrinth(t, []mrProject{missing}, nil)
 	alpha := validMod("alpha")
 	alpha.deps = []core.ModDependency{{ID: "lib1", Type: "required"}}
+	alpha.configFiles = []string{"config/alpha.json"}
 	addMod(t, &index, alpha)
 
 	after, out, err := fix(t, pack, index)
@@ -388,8 +398,11 @@ func TestFixDoesNotReplaceAFileThatIsWhereADependencyWouldGo(t *testing.T) {
 	serveModrinth(t, []mrProject{libraryOnModrinth("lib1")}, nil)
 	alpha := validMod("alpha")
 	alpha.deps = []core.ModDependency{{ID: "lib1", Type: "required"}}
+	alpha.configFiles = []string{"config/alpha.json"}
 	addMod(t, &index, alpha)
-	inTheWay := addModFile(t, &index, "lib1-slug", validMod("other").toml())
+	other := validMod("other")
+	other.configFiles = []string{"config/other.json"}
+	inTheWay := addModFile(t, &index, "lib1-slug", other.toml())
 	before := readFile(t, inTheWay)
 	cmdtest.SetStdin(t, "y\n") // Only asked if it were to go on, which it mustn't
 
@@ -414,6 +427,7 @@ func TestFixRecordsTheVersionOfAModThatDoesNotRecordIt(t *testing.T) {
 	serveModrinth(t, nil, map[string]string{"v-alpha": "2.0.0"})
 	alpha := validMod("alpha")
 	alpha.version = ""
+	alpha.configFiles = []string{"config/alpha.json"}
 	path := addMod(t, &index, alpha)
 	cmdtest.SetStdin(t, "y\n")
 
@@ -430,6 +444,48 @@ func TestFixRecordsTheVersionOfAModThatDoesNotRecordIt(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, "The mod is valid!\n") || len(after.subjects) != 0 {
 		t.Errorf("the pack isn't valid afterwards: %v\n%s", after.subjects, out)
+	}
+}
+
+func TestFixGivesAModWithNoConfigFilesAnEmptyOne(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	path := addMod(t, &index, alpha)
+	cmdtest.SetStdin(t, "y\n")
+
+	after, out, err := fix(t, pack, index)
+	if err != nil {
+		t.Fatalf("runFix() returned error: %v", err)
+	}
+
+	if want := "Changes to make:\nalpha (mods/alpha.pw.toml):\n  config-files: added, empty\n\n"; !strings.Contains(out, want) {
+		t.Errorf("output missing\n%s\nin\n%s", want, out)
+	}
+	if got := loadModAt(t, path).ConfigFiles; got == nil || len(*got) != 0 {
+		t.Errorf("ConfigFiles = %v, want a non-nil empty slice", got)
+	}
+	if !strings.HasSuffix(out, "The mod is valid!\n") || len(after.subjects) != 0 {
+		t.Errorf("the pack isn't valid afterwards: %v\n%s", after.subjects, out)
+	}
+}
+
+// A mod that already has config-files, even an empty one, is left alone
+func TestFixLeavesAModsExistingConfigFilesAlone(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.configFiles = []string{"config/alpha.json"}
+	addMod(t, &index, alpha)
+
+	after, out, err := fix(t, pack, index)
+	if err != nil {
+		t.Fatalf("runFix() returned error: %v", err)
+	}
+
+	if want := "Checking the pack...\nThe mod is valid!\n"; out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+	if after.errors() != 0 {
+		t.Errorf("errors = %d, want none", after.errors())
 	}
 }
 
@@ -462,6 +518,7 @@ func TestFixMakesAllTheChangesToAFileTogether(t *testing.T) {
 	serveModrinth(t, nil, map[string]string{"v-lib": "3.0.0"})
 	lib := validMod("lib")
 	lib.side, lib.version = core.ServerSide, ""
+	lib.configFiles = []string{"config/lib.json"}
 	addMod(t, &index, lib)
 	cmdtest.SetStdin(t, "y\n")
 
@@ -564,6 +621,7 @@ func TestFixCommandExitStatus(t *testing.T) {
 		case "unfixable":
 			bad := validMod("alpha")
 			bad.side = "sideways"
+			bad.configFiles = []string{"config/alpha.json"}
 			addMod(t, &index, bad)
 		case "fixed":
 			lib := validMod("lib")

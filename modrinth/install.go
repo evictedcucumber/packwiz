@@ -504,6 +504,7 @@ func newFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, fil
 		Update:            updateMap,
 		Dependencies:      buildDependencyList(version),
 		AddedAsDependency: isDependency,
+		ConfigFiles:       &[]string{},
 	}
 	folder := viper.GetString("meta-folder")
 	if folder == "" {
