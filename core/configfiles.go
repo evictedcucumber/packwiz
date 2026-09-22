@@ -16,7 +16,7 @@ type ModConfigFiles struct {
 // is in its config/ folder - by the mod that claims each one.
 type ConfigFileTree struct {
 	// Mods are the mods that claim at least one tracked file, in alphabetical order of their name. A file that more
-	// than one mod's ConfigFiles claims belongs to whichever of them comes first here.
+	// than one mod's ConfigFiles claims is listed under each of them.
 	Mods []ModConfigFiles
 	// Unclaimed are the tracked files (sorted) that no mod's ConfigFiles claims: e.g. left behind by a mod that has
 	// since been removed, or never linked to the mod that installed it.
@@ -83,9 +83,6 @@ func (in Index) ConfigFileTree(mods []*Mod) (ConfigFileTree, error) {
 
 		var files []string
 		for _, p := range paths {
-			if claimed[p] {
-				continue
-			}
 			if slices.ContainsFunc(claims, func(entry string) bool { return claimsPath(entry, p) }) {
 				claimed[p] = true
 				files = append(files, p)

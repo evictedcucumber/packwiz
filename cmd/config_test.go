@@ -140,6 +140,40 @@ hash = "a"
 	}
 }
 
+func TestConfigListListsAFileClaimedByTwoModsUnderBoth(t *testing.T) {
+	setUpConfigFixture(t)
+	// Beta also claims config/alpha.json, alongside Alpha
+	beta := `name = "Beta Mod"
+filename = "beta.jar"
+config-files = ["config/alpha.json"]
+
+[download]
+hash-format = "sha256"
+hash = "b"
+`
+	if err := os.WriteFile("mods/beta.pw.toml", []byte(beta), 0644); err != nil {
+		t.Fatalf("failed to write second mod fixture: %v", err)
+	}
+	index, err := os.ReadFile("index.toml")
+	if err != nil {
+		t.Fatalf("failed to read index.toml fixture: %v", err)
+	}
+	entry := "\n[[files]]\nfile = \"mods/beta.pw.toml\"\nhash = \"irrelevant\"\nmetafile = true\n"
+	if err := os.WriteFile("index.toml", append(index, entry...), 0644); err != nil {
+		t.Fatalf("failed to rewrite index.toml fixture: %v", err)
+	}
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configListCmd.Run(configListCmd, nil)
+	})
+	want := "Alpha Mod\n├── config/alpha.json\n└── config/alpha/sub.json\n\n" +
+		"Beta Mod\n└── config/alpha.json\n\n" +
+		"Invalid\n└── config/orphan.json\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
 // setUpConfigRelateFixture builds a pack with one mod (Alpha Mod, with no config-files yet) and a real config/new.json
 // file and config/sub/ folder on disk, for "packwiz config relate" to link it to.
 func setUpConfigRelateFixture(t *testing.T) {

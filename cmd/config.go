@@ -70,7 +70,7 @@ example, a config file left behind by a mod that has since been removed, or neve
 				if printed {
 					fmt.Println()
 				}
-				printGroup(ui.Bold.Sprint(m.Mod.Name), m.Files, false)
+				printGroup(ui.Bold.Sprint(m.Mod.Name), m.Files, ui.Success)
 				printed = true
 			}
 		}
@@ -78,7 +78,7 @@ example, a config file left behind by a mod that has since been removed, or neve
 			if printed {
 				fmt.Println()
 			}
-			printGroup(ui.Bold.Sprint(ui.Warning.Sprint("Invalid")), tree.Unclaimed, true)
+			printGroup(ui.Bold.Sprint(ui.Warning.Sprint("Invalid")), tree.Unclaimed, ui.Warning)
 		}
 	},
 }
@@ -183,20 +183,15 @@ func relateConfigPath(index core.Index, mods []*core.Mod, path string, isDir boo
 	return rel, nil
 }
 
-// printGroup prints a heading and its files as a tree, styling each file as a warning if invalid says to.
-func printGroup(heading string, files []string, invalid bool) {
+// printGroup prints a heading and its files as a tree, each file in style.
+func printGroup(heading string, files []string, style ui.Style) {
 	fmt.Println(heading)
 	for i, f := range files {
 		branch := "├── "
 		if i == len(files)-1 {
 			branch = "└── "
 		}
-		line := branch + f
-		if invalid {
-			ui.Warning.Println(line)
-		} else {
-			fmt.Println(line)
-		}
+		style.Println(branch + f)
 	}
 }
 

@@ -90,7 +90,7 @@ func TestConfigFileTreeSortsModsByName(t *testing.T) {
 	}
 }
 
-func TestConfigFileTreeGivesASharedClaimToTheFirstModByName(t *testing.T) {
+func TestConfigFileTreeListsAFileUnderEveryModThatClaimsIt(t *testing.T) {
 	idx := newIndexFixture(t)
 	track(t, idx, "mods/alpha.pw.toml", "mods/beta.pw.toml", "config/shared.json")
 
@@ -103,8 +103,15 @@ func TestConfigFileTreeGivesASharedClaimToTheFirstModByName(t *testing.T) {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
 
-	if len(tree.Mods) != 1 || tree.Mods[0].Mod.Name != "Alpha" {
-		t.Errorf("Mods = %+v, want the file to go to Alpha, the first by name", tree.Mods)
+	if len(tree.Mods) != 2 || tree.Mods[0].Mod.Name != "Alpha" || tree.Mods[1].Mod.Name != "Beta" {
+		t.Fatalf("Mods = %+v, want the file to go to both Alpha and Beta, in name order", tree.Mods)
+	}
+	want := []string{"config/shared.json"}
+	if !slices.Equal(tree.Mods[0].Files, want) {
+		t.Errorf("Alpha's files = %v, want %v", tree.Mods[0].Files, want)
+	}
+	if !slices.Equal(tree.Mods[1].Files, want) {
+		t.Errorf("Beta's files = %v, want %v", tree.Mods[1].Files, want)
 	}
 	if len(tree.Unclaimed) != 0 {
 		t.Errorf("Unclaimed = %v, want none", tree.Unclaimed)

@@ -119,8 +119,28 @@ func TestConfigListColourOnlyAddsToItsOutput(t *testing.T) {
 	if want := ui.Warning.Sprint("└── config/orphan.json"); !strings.Contains(coloured, want) {
 		t.Errorf("output missing the unclaimed file styled as a warning %q:\n%q", want, coloured)
 	}
+	if want := ui.Success.Sprint("├── config/alpha.json"); !strings.Contains(coloured, want) {
+		t.Errorf("output missing the claimed file styled as a success %q:\n%q", want, coloured)
+	}
 	if strings.Contains(coloured, ui.Warning.Sprint("├── config/alpha.json")) {
 		t.Errorf("a claimed file shouldn't be styled as a warning:\n%q", coloured)
+	}
+}
+
+func TestConfigListStateValidColourOnlyAddsToItsOutput(t *testing.T) {
+	setUpConfigFixture(t)
+	setConfigListFlag(t, "state", "valid")
+
+	plain, coloured := cmdtest.AssertColourOnlyAdds(t, func() { configListCmd.Run(configListCmd, nil) })
+
+	if want := "Alpha Mod\n├── config/alpha.json\n└── config/alpha/sub.json\n"; plain != want {
+		t.Errorf("plain output = %q, want %q", plain, want)
+	}
+	want := ui.Bold.Sprint("Alpha Mod") + "\n" +
+		ui.Success.Sprint("├── config/alpha.json") + "\n" +
+		ui.Success.Sprint("└── config/alpha/sub.json") + "\n"
+	if coloured != want {
+		t.Errorf("coloured output = %q, want %q", coloured, want)
 	}
 }
 
