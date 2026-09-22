@@ -83,20 +83,34 @@ example, a config file left behind by a mod that has since been removed, or neve
 	},
 }
 
+// relatedMod is a mod loaded for "packwiz config relate", alongside its metadata file's path (for RefreshFileWithHash).
+type relatedMod struct {
+	path string
+	data *core.Mod
+}
+
 // configRelateCmd represents the config relate command
 var configRelateCmd = &cobra.Command{
-	Use:   "relate <mod> <config file/dir>",
-	Short: "Record that a mod owns a config file or folder",
-	Long: `Add a path to a mod's metadata file's config-files, recording that it owns that config file or folder (see
-"packwiz config list"). A folder is given a trailing "/", to claim everything under it; running this again with the
-same arguments does nothing more.
+	Use:   "relate --mod <mod> [--mod <mod>...] <config file/dir>...",
+	Short: "Record that one or more mods own one or more config files or folders",
+	Long: `Add paths to each given mod's metadata file's config-files, recording that it owns those config files or
+folders (see "packwiz config list"). A folder is given a trailing "/", to claim everything under it; running this
+again with the same arguments does nothing more.
 
-<mod> is its slug (unless it was renamed), the name of its .pw.toml file, or a path to that file, the same as
-"packwiz pin" and "packwiz remove" take. <config file/dir> is a path to a file or folder that exists in the pack,
-from the current directory or the pack's root; if the pack keeps its files in a mod's own folder (see Configured
-Defaults), it is written as if that folder didn't exist, the same way every other config-files entry is.`,
-	Args: cobra.ExactArgs(2),
+--mod is its slug (unless it was renamed), the name of its .pw.toml file, or a path to that file, the same as
+"packwiz pin" and "packwiz remove" take; give it once per mod. Every <config file/dir> is then added to every mod
+given, so a config file shared between several mods can be related to all of them in one command. <config file/dir>
+is a path to a file or folder that exists in the pack, from the current directory or the pack's root; if the pack
+keeps its files in a mod's own folder (see Configured Defaults), it is written as if that folder didn't exist, the
+same way every other config-files entry is.`,
+	Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		modRefs := viper.GetStringSlice("config.relate.mod")
+		if len(modRefs) == 0 {
+			ui.Error.Println("--mod is required; specify at least one mod to relate the config file(s) to")
+			os.Exit(1)
+		}
+
 		ui.Muted.Println("Loading modpack...")
 		pack, err := core.LoadPack()
 		if err != nil {
@@ -108,47 +122,88 @@ Defaults), it is written as if that folder didn't exist, the same way every othe
 			ui.Error.Println(err)
 			os.Exit(1)
 		}
-		modPath, ok := index.FindMod(args[0])
-		if !ok {
-			ui.Error.Println("Can't find this file; please ensure you have run packwiz refresh and specify its slug, its .pw.toml file name, or a path to that file")
-			os.Exit(1)
-		}
-		modData, err := core.LoadMod(modPath)
-		if err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
+
+		var relatedMods []relatedMod
+		seenModPaths := make(map[string]bool, len(modRefs))
+		for _, ref := range modRefs {
+			modPath, ok := index.FindMod(ref)
+			if !ok {
+				ui.Error.Printf("Can't find %s; please ensure you have run packwiz refresh and specify its slug, its .pw.toml file name, or a path to that file\n", ui.Bold.Sprint(ref))
+				os.Exit(1)
+			}
+			if seenModPaths[modPath] {
+				continue
+			}
+			seenModPaths[modPath] = true
+			modData, err := core.LoadMod(modPath)
+			if err != nil {
+				ui.Error.Println(err)
+				os.Exit(1)
+			}
+			relatedMods = append(relatedMods, relatedMod{path: modPath, data: &modData})
 		}
 
-		info, err := os.Stat(args[1])
-		if err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
 		mods, err := index.LoadAllMods()
 		if err != nil {
 			ui.Error.Println(err)
 			os.Exit(1)
 		}
-		rel, err := relateConfigPath(index, mods, args[1], info.IsDir())
-		if err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
+
+		var rels []string
+		seenRels := make(map[string]bool, len(args))
+		for _, arg := range args {
+			info, err := os.Stat(arg)
+			if err != nil {
+				ui.Error.Println(err)
+				os.Exit(1)
+			}
+			rel, err := relateConfigPath(index, mods, arg, info.IsDir())
+			if err != nil {
+				ui.Error.Println(err)
+				os.Exit(1)
+			}
+			if seenRels[rel] {
+				continue
+			}
+			seenRels[rel] = true
+			rels = append(rels, rel)
 		}
 
-		if !modData.ClaimConfigFile(rel) {
-			ui.Info.Printf("%s already claims %s\n", ui.Bold.Sprint(modData.Name), ui.Bold.Sprint(rel))
+		changed := false
+		for _, rm := range relatedMods {
+			var newlyClaimed, alreadyClaimed []string
+			for _, rel := range rels {
+				if rm.data.ClaimConfigFile(rel) {
+					newlyClaimed = append(newlyClaimed, rel)
+				} else {
+					alreadyClaimed = append(alreadyClaimed, rel)
+				}
+			}
+			if len(alreadyClaimed) > 0 {
+				ui.Info.Printf("%s already claims %s\n", ui.Bold.Sprint(rm.data.Name), ui.Bold.Sprint(strings.Join(alreadyClaimed, ", ")))
+			}
+			if len(newlyClaimed) == 0 {
+				continue
+			}
+			changed = true
+
+			format, hash, err := rm.data.Write()
+			if err != nil {
+				ui.Error.Println(err)
+				os.Exit(1)
+			}
+			if err := index.RefreshFileWithHash(rm.path, format, hash, true); err != nil {
+				ui.Error.Println(err)
+				os.Exit(1)
+			}
+
+			ui.Success.Printf("%s now claims %s\n", ui.Bold.Sprint(rm.data.Name), ui.Bold.Sprint(strings.Join(newlyClaimed, ", ")))
+		}
+
+		if !changed {
 			return
 		}
 
-		format, hash, err := modData.Write()
-		if err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
-		if err := index.RefreshFileWithHash(modPath, format, hash, true); err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
 		if err := index.Write(); err != nil {
 			ui.Error.Println(err)
 			os.Exit(1)
@@ -161,8 +216,6 @@ Defaults), it is written as if that folder didn't exist, the same way every othe
 			ui.Error.Println(err)
 			os.Exit(1)
 		}
-
-		ui.Success.Printf("%s now claims %s\n", ui.Bold.Sprint(modData.Name), ui.Bold.Sprint(rel))
 	},
 }
 
@@ -202,4 +255,7 @@ func init() {
 
 	configListCmd.Flags().String("state", "", "Only show config files in this state: valid or invalid")
 	_ = viper.BindPFlag("config.list.state", configListCmd.Flags().Lookup("state"))
+
+	configRelateCmd.Flags().StringArrayP("mod", "m", nil, "A mod (slug, .pw.toml file name, or path) to relate the config file(s) to; repeat for multiple mods")
+	_ = viper.BindPFlag("config.relate.mod", configRelateCmd.Flags().Lookup("mod"))
 }

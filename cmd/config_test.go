@@ -1,13 +1,16 @@
 package cmd
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
+	"github.com/spf13/pflag"
 )
 
 // setUpConfigFixture builds a pack with one mod, whose config-files claims config/alpha.json and everything under
@@ -75,6 +78,32 @@ func setConfigListFlag(t *testing.T, name string, value string) {
 	}
 	t.Cleanup(func() {
 		_ = configListCmd.Flags().Set(name, oldValue)
+		flag.Changed = oldChanged
+	})
+}
+
+// setConfigRelateModFlag gives configRelateCmd's --mod flag exactly these values for the duration of the test,
+// restoring its previous value on cleanup. --mod is a StringArray flag, whose Set appends rather than replaces (so
+// that "--mod a --mod b" builds up a list), so this goes through its SliceValue.Replace instead to set the whole
+// list in one go, both here and when restoring it.
+func setConfigRelateModFlag(t *testing.T, values ...string) {
+	t.Helper()
+	flag := configRelateCmd.Flags().Lookup("mod")
+	if flag == nil {
+		t.Fatalf("no such flag --mod on configRelateCmd")
+	}
+	sv, ok := flag.Value.(pflag.SliceValue)
+	if !ok {
+		t.Fatalf("--mod isn't a slice flag")
+	}
+	oldValues := sv.GetSlice()
+	oldChanged := flag.Changed
+	if err := sv.Replace(values); err != nil {
+		t.Fatalf("failed to set --mod: %v", err)
+	}
+	flag.Changed = true
+	t.Cleanup(func() {
+		_ = sv.Replace(oldValues)
 		flag.Changed = oldChanged
 	})
 }
@@ -217,9 +246,10 @@ metafile = true
 
 func TestConfigRelateAddsAFileToAModsConfigFiles(t *testing.T) {
 	setUpConfigRelateFixture(t)
+	setConfigRelateModFlag(t, "alpha")
 
 	out := cmdtest.CaptureStdout(t, func() {
-		configRelateCmd.Run(configRelateCmd, []string{"alpha", "config/new.json"})
+		configRelateCmd.Run(configRelateCmd, []string{"config/new.json"})
 	})
 	if !strings.Contains(out, "Alpha Mod now claims config/new.json") {
 		t.Errorf("output = %q, want a success message", out)
@@ -236,9 +266,10 @@ func TestConfigRelateAddsAFileToAModsConfigFiles(t *testing.T) {
 
 func TestConfigRelateAddsATrailingSlashForAFolder(t *testing.T) {
 	setUpConfigRelateFixture(t)
+	setConfigRelateModFlag(t, "alpha")
 
 	cmdtest.CaptureStdout(t, func() {
-		configRelateCmd.Run(configRelateCmd, []string{"alpha", "config/sub"})
+		configRelateCmd.Run(configRelateCmd, []string{"config/sub"})
 	})
 
 	mod, err := core.LoadMod("mods/alpha.pw.toml")
@@ -252,12 +283,13 @@ func TestConfigRelateAddsATrailingSlashForAFolder(t *testing.T) {
 
 func TestConfigRelateDoesNothingWhenAlreadyClaimed(t *testing.T) {
 	setUpConfigRelateFixture(t)
+	setConfigRelateModFlag(t, "alpha")
 	cmdtest.CaptureStdout(t, func() {
-		configRelateCmd.Run(configRelateCmd, []string{"alpha", "config/new.json"})
+		configRelateCmd.Run(configRelateCmd, []string{"config/new.json"})
 	})
 
 	out := cmdtest.CaptureStdout(t, func() {
-		configRelateCmd.Run(configRelateCmd, []string{"alpha", "config/new.json"})
+		configRelateCmd.Run(configRelateCmd, []string{"config/new.json"})
 	})
 	if !strings.Contains(out, "already claims") {
 		t.Errorf("output = %q, want a notice that it already claims the file", out)
@@ -274,6 +306,7 @@ func TestConfigRelateDoesNothingWhenAlreadyClaimed(t *testing.T) {
 
 func TestConfigRelateResolvedAgainstTheConfigDir(t *testing.T) {
 	setUpConfigRelateFixture(t)
+	setConfigRelateModFlag(t, "alpha")
 	cmdtest.RegisterConfigDirSource(t, "defaults", "configureddefaults")
 	alpha := `name = "Alpha Mod"
 filename = "alpha.jar"
@@ -296,7 +329,7 @@ version = "any"
 	}
 
 	cmdtest.CaptureStdout(t, func() {
-		configRelateCmd.Run(configRelateCmd, []string{"alpha", "configureddefaults/config/new.json"})
+		configRelateCmd.Run(configRelateCmd, []string{"configureddefaults/config/new.json"})
 	})
 
 	mod, err := core.LoadMod("mods/alpha.pw.toml")
@@ -305,5 +338,82 @@ version = "any"
 	}
 	if mod.ConfigFiles == nil || !slices.Contains(*mod.ConfigFiles, "config/new.json") {
 		t.Errorf("ConfigFiles = %v, want config/new.json, with the configureddefaults/ folder taken back out", mod.ConfigFiles)
+	}
+}
+
+func TestConfigRelateFailsWithoutAModFlag(t *testing.T) {
+	if os.Getenv("PACKWIZ_TEST_CONFIG_RELATE_NO_MOD") == "1" {
+		setUpConfigRelateFixture(t)
+		configRelateCmd.Run(configRelateCmd, []string{"config/new.json"})
+		return // The command didn't end, so the process doesn't fail, which is what the test looks for
+	}
+
+	process := exec.Command(os.Args[0], "-test.run=^TestConfigRelateFailsWithoutAModFlag$")
+	process.Env = append(os.Environ(), "PACKWIZ_TEST_CONFIG_RELATE_NO_MOD=1")
+	out, err := process.CombinedOutput()
+
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("the command ended with %v, want it to fail with exit status 1\noutput: %s", err, out)
+	}
+	if want := "--mod is required"; !strings.Contains(string(out), want) {
+		t.Errorf("output missing %q:\n%s", want, out)
+	}
+}
+
+// setUpConfigRelateSecondModFixture adds a second mod (Beta Mod, with no config-files yet) to the pack that
+// setUpConfigRelateFixture built, for tests of relating config files to several mods at once.
+func setUpConfigRelateSecondModFixture(t *testing.T) {
+	t.Helper()
+	beta := `name = "Beta Mod"
+filename = "beta.jar"
+
+[download]
+hash-format = "sha256"
+hash = "b"
+`
+	if err := os.WriteFile("mods/beta.pw.toml", []byte(beta), 0644); err != nil {
+		t.Fatalf("failed to write second mod fixture: %v", err)
+	}
+	index, err := os.ReadFile("index.toml")
+	if err != nil {
+		t.Fatalf("failed to read index.toml fixture: %v", err)
+	}
+	entry := "\n[[files]]\nfile = \"mods/beta.pw.toml\"\nhash = \"irrelevant\"\nmetafile = true\n"
+	if err := os.WriteFile("index.toml", append(index, entry...), 0644); err != nil {
+		t.Fatalf("failed to rewrite index.toml fixture: %v", err)
+	}
+}
+
+func TestConfigRelateAddsEveryConfigFileToEveryModGiven(t *testing.T) {
+	setUpConfigRelateFixture(t)
+	setUpConfigRelateSecondModFixture(t)
+	setConfigRelateModFlag(t, "alpha", "beta")
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configRelateCmd.Run(configRelateCmd, []string{"config/new.json", "config/sub"})
+	})
+	for _, want := range []string{
+		"Alpha Mod now claims config/new.json, config/sub/",
+		"Beta Mod now claims config/new.json, config/sub/",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	}
+
+	for _, fixture := range []struct{ file, name string }{
+		{"mods/alpha.pw.toml", "Alpha"},
+		{"mods/beta.pw.toml", "Beta"},
+	} {
+		mod, err := core.LoadMod(fixture.file)
+		if err != nil {
+			t.Fatalf("LoadMod(%q) returned error: %v", fixture.file, err)
+		}
+		for _, want := range []string{"config/new.json", "config/sub/"} {
+			if mod.ConfigFiles == nil || !slices.Contains(*mod.ConfigFiles, want) {
+				t.Errorf("%s's ConfigFiles = %v, want it to contain %s", fixture.name, mod.ConfigFiles, want)
+			}
+		}
 	}
 }
