@@ -27,6 +27,7 @@ var validateCmd = &cobra.Command{
   - every required dependency is in the pack, and nothing in it is incompatible with something else
   - every mod that a mod on the client requires is on the client too (see 'packwiz modrinth add')
   - pack.toml has a Minecraft version, a NeoForge version and a version for the pack
+  - every tracked config file is claimed by a mod's config-files (see 'packwiz config list --invalid')
 
 What a mod depends on is what its metadata records. For a mod that records nothing it is looked up on Modrinth, which
 needs the network; if that fails, those mods' dependencies aren't checked, and it says so.
@@ -117,6 +118,7 @@ func validatePack(pack core.Pack, index core.Index) *validation {
 	}
 	v.checkDuplicates(entries)
 	v.checkDependencies(pack, entries)
+	v.checkConfigFiles(index, entries)
 	return v
 }
 
@@ -310,6 +312,35 @@ func (v *validation) checkDependencies(pack core.Pack, entries []entry) {
 	for _, p := range sidePromotions(mods) {
 		v.errorf(byMod[p.mod], "is only on the server, but %q needs it on the client; its side should be %q", p.neededBy.Name, core.UniversalSide)
 	}
+}
+
+// checkConfigFiles warns about tracked files that no mod's config-files claims: normally something in the pack's
+// config/ folder left behind by a mod that has since been removed, or never linked to the mod that installed it.
+func (v *validation) checkConfigFiles(index core.Index, entries []entry) {
+	mods := make([]*core.Mod, len(entries))
+	for i, e := range entries {
+		mods[i] = e.mod
+	}
+	files, err := index.ConfigFiles(mods)
+	if err != nil {
+		v.warnf(packEntry, "config files couldn't be checked: %v", err)
+		return
+	}
+
+	var orphaned []string
+	for _, f := range files {
+		if !f.Claimed {
+			orphaned = append(orphaned, f.Path)
+		}
+	}
+	if len(orphaned) == 0 {
+		return
+	}
+	noun, verb := "files", "aren't"
+	if len(orphaned) == 1 {
+		noun, verb = "file", "isn't"
+	}
+	v.warnf(packEntry, "%d %s %s claimed by any mod's config-files: %s", len(orphaned), noun, verb, listNames(orphaned, 5))
 }
 
 // installedProjects is the projects the pack has, by ID, with the name of the mod that is each. Forgified Fabric API

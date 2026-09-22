@@ -26,6 +26,7 @@ type modFile struct {
 	modrinth           bool
 	project, versionID string
 	deps               []core.ModDependency
+	configFiles        []string
 }
 
 // validMod is a mod that has everything a metadata file needs. It records a dependency, as a mod that records none is
@@ -45,6 +46,13 @@ func (m modFile) toml() string {
 		if field.value != "" {
 			fmt.Fprintf(&b, "%s = %q\n", field.key, field.value)
 		}
+	}
+	if len(m.configFiles) > 0 {
+		quoted := make([]string, len(m.configFiles))
+		for i, cf := range m.configFiles {
+			quoted[i] = fmt.Sprintf("%q", cf)
+		}
+		fmt.Fprintf(&b, "config-files = [%s]\n", strings.Join(quoted, ", "))
 	}
 	b.WriteString("\n[download]\n")
 	for _, field := range []struct{ key, value string }{{"url", m.url}, {"mode", m.mode}, {"hash-format", m.hashFormat}, {"hash", m.hash}} {
@@ -243,6 +251,48 @@ func TestValidateFindsTheSameProjectAndTheSameFileTwice(t *testing.T) {
 	assertProblems(t, v, first)
 	assertProblems(t, v, secondPath, "error: is the same Modrinth project as "+first)
 	assertProblems(t, v, thirdPath, "error: installs to the same file as "+first)
+}
+
+func TestValidateWarnsAboutConfigFilesNothingClaims(t *testing.T) {
+	pack, index := validatablePack(t)
+	addMod(t, &index, validMod("alpha"))
+	if err := index.RefreshFileWithHash("config/orphan.json", "sha256", "unchecked", false); err != nil {
+		t.Fatalf("RefreshFileWithHash() returned error: %v", err)
+	}
+
+	v := validatePack(pack, index)
+
+	assertProblems(t, v, "", "warning: 1 file isn't claimed by any mod's config-files: config/orphan.json")
+}
+
+func TestValidateDoesNotWarnAboutClaimedConfigFiles(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.configFiles = []string{"config/alpha.json", "config/alpha/"}
+	addMod(t, &index, alpha)
+	for _, p := range []string{"config/alpha.json", "config/alpha/sub.json"} {
+		if err := index.RefreshFileWithHash(p, "sha256", "unchecked", false); err != nil {
+			t.Fatalf("RefreshFileWithHash(%q) returned error: %v", p, err)
+		}
+	}
+
+	v := validatePack(pack, index)
+
+	assertProblems(t, v, "")
+}
+
+func TestValidateCombinesSeveralOrphanedConfigFilesIntoOneWarning(t *testing.T) {
+	pack, index := validatablePack(t)
+	addMod(t, &index, validMod("alpha"))
+	for _, p := range []string{"config/a.json", "config/b.json"} {
+		if err := index.RefreshFileWithHash(p, "sha256", "unchecked", false); err != nil {
+			t.Fatalf("RefreshFileWithHash(%q) returned error: %v", p, err)
+		}
+	}
+
+	v := validatePack(pack, index)
+
+	assertProblems(t, v, "", "warning: 2 files aren't claimed by any mod's config-files: config/a.json, config/b.json")
 }
 
 // serveProjects answers Modrinth's project lookup with the titles given, by project ID

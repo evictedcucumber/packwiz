@@ -37,6 +37,16 @@ type Mod struct {
 	// rather than being a main mod the user explicitly wanted. This is metadata for
 	// reporting/cross-referencing purposes only; it does not affect how the mod is installed or updated.
 	AddedAsDependency bool `toml:"added-as-dependency,omitempty"`
+
+	// ConfigFiles lists the paths, relative to the pack and written with forward slashes, of the config files this
+	// mod owns. An entry ending in "/" claims everything under that folder; any other entry claims only that exact
+	// path. This is written by hand (nothing derives it), so that a config file nothing claims - e.g. left behind by
+	// a mod that has since been removed - can be reported by "packwiz config list --invalid" and "packwiz mr validate".
+	//
+	// Entries are written as if the pack kept its files at the root of the game directory, as it normally does: for
+	// a pack that instead keeps them all in a mod's own folder (see ConfigDirResolver, e.g. Configured Defaults),
+	// Index.ConfigFiles resolves entries against that folder too, so they don't need rewriting either way.
+	ConfigFiles []string `toml:"config-files,omitempty"`
 }
 
 // ModDependency represents another project that this mod depends on, as reported by its source.

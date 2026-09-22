@@ -23,20 +23,30 @@ type ConfigDirResolver interface {
 // first mod, in the order given, that has one. It is "" if no mod does, which leaves the pack free to keep its files
 // anywhere.
 func configDir(metaFiles []string) (string, error) {
-	for _, p := range metaFiles {
+	mods := make([]*Mod, len(metaFiles))
+	for i, p := range metaFiles {
 		mod, err := LoadMod(p)
 		if err != nil {
 			return "", fmt.Errorf("failed to read metadata file %s: %w", p, err)
 		}
+		mods[i] = &mod
+	}
+	return configDirOfMods(mods), nil
+}
+
+// configDirOfMods is configDir for mods already loaded, so callers that have them (e.g. ConfigFiles) don't read the
+// metadata files again: the folder of the first mod, in the order given, that has one, or "" if no mod does.
+func configDirOfMods(mods []*Mod) string {
+	for _, mod := range mods {
 		for _, name := range slices.Sorted(maps.Keys(mod.Update)) {
 			if resolver, ok := Updaters[name].(ConfigDirResolver); ok {
-				if dir := resolver.ConfigDir(&mod); dir != "" {
-					return dir, nil
+				if dir := resolver.ConfigDir(mod); dir != "" {
+					return dir
 				}
 			}
 		}
 	}
-	return "", nil
+	return ""
 }
 
 // inDir reports whether a path relative to the index, written with forward slashes, is inside a folder of it

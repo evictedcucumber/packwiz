@@ -26,6 +26,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Exporting to Modrinth packs, listing what goes in each one and which sides it is for
 - `packwiz list --markdown` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
 - `packwiz mr validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz mr fix` fixes what it can, showing the changes and asking first
+- `packwiz config list --invalid` finds config files nothing claims: a mod records what it owns in its `.pw.toml`'s `config-files`, and `packwiz mr validate` checks it too
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
 - Configured Defaults support: a pack that has the mod keeps its config, and any other default files, in `configureddefaults/`
@@ -144,6 +145,18 @@ A relaxed pack for exploring, building & farming
 
 The names are in alphabetical order under a heading for each kind of file, going by the folder its `.pw.toml` is in. There are no versions, and nothing marks the mods that were added as dependencies; `--only main` leaves those out of the list instead, and `--side client` or `--side server` lists what is needed on one side, as they do for the plain list. `--output docs/mods.md` writes the file somewhere else (`--output -` prints it), and doesn't need `--markdown`. `MODS.md` isn't distributed with the pack, so if you choose another name inside the pack's folder, add it to `.packwizignore`.
 
+## Config files
+
+`packwiz config list` prints the pack's tracked files that aren't a mod's own metadata or destination file - normally what is in `config/`. A mod records which of these it owns in its `.pw.toml`'s `config-files`, a path, or a path ending in `/` to claim everything under it:
+
+```
+config-files = ["config/sodium-options.json", "config/iris/"]
+```
+
+This is written by hand; nothing derives it. `--invalid` lists only the files nothing claims: a config file left behind by a mod that has since been removed, or never linked to the mod that installed it. `packwiz mr validate` reports the same as a warning.
+
+Entries are always written as above, as if the pack kept its files at the root of the game directory. A pack that has [Configured Defaults](#configured-defaults) instead keeps everything in `configureddefaults/`, and `config-files` follows it there too: `config/sodium-options.json` claims `configureddefaults/config/sodium-options.json` once the mod is installed, with no need to rewrite it either way.
+
 ## Checking a pack
 
 `packwiz mr export` lists the files it put in the pack once they are downloaded, with the sides each is needed on (`required`, `optional` or `unsupported` on the client and on the server, which is what the launcher goes by), its size, and where it goes:
@@ -164,6 +177,7 @@ Repurposed Structures - Neoforge/Forge  required     required   8.0 MiB  mods/re
 - every required dependency is in the pack, and nothing in it is incompatible with something else
 - every mod that a mod on the client requires is on the client too: Modrinth lists some libraries, mostly for world generation, as unsupported on the client, but a mod that requires one crashes the game without it. `packwiz mr add` puts such a mod on both sides, and `validate` (and a warning from `export`) finds one that isn't
 - `pack.toml` has a Minecraft version, a NeoForge version and a version for the pack
+- every tracked config file is claimed by a mod's `config-files` (see [Config files](#config-files) and `packwiz config list --invalid`)
 
 What a mod depends on is what its `.pw.toml` records. A mod that records nothing is looked up on Modrinth, so that needs the network; if it can't be reached, those mods' dependencies aren't checked, and it says so, but the rest of the checks are made.
 
