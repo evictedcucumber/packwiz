@@ -221,6 +221,76 @@ func TestIndexFindMod(t *testing.T) {
 	if found {
 		t.Error("did not expect to find 'nonexistent'")
 	}
+
+	path, found = idx.FindMod("foo.pw.toml")
+	if !found {
+		t.Error("expected to find mod 'foo.pw.toml' (name with extension)")
+	}
+	if path != idx.ResolveIndexPath("mods/foo.pw.toml") {
+		t.Errorf("FindMod('foo.pw.toml') path = %q, want %q", path, idx.ResolveIndexPath("mods/foo.pw.toml"))
+	}
+
+	path, found = idx.FindMod("bar.toml")
+	if !found {
+		t.Error("expected to find mod 'bar.toml' (old extension, given explicitly)")
+	}
+	if path != idx.ResolveIndexPath("mods/bar.toml") {
+		t.Errorf("FindMod('bar.toml') path = %q, want %q", path, idx.ResolveIndexPath("mods/bar.toml"))
+	}
+}
+
+func TestIndexFindModByPath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "mods"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	idx := Index{
+		packRoot: dir,
+		Files: IndexFiles{
+			"mods/foo.pw.toml": &indexFile{File: "mods/foo.pw.toml", MetaFile: true},
+		},
+	}
+	wantPath := idx.ResolveIndexPath("mods/foo.pw.toml")
+
+	path, found := idx.FindMod(wantPath)
+	if !found {
+		t.Error("expected to find mod by its absolute path")
+	}
+	if path != wantPath {
+		t.Errorf("FindMod(absolute path) = %q, want %q", path, wantPath)
+	}
+
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(origWd); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	path, found = idx.FindMod(filepath.Join("mods", "foo.pw.toml"))
+	if !found {
+		t.Error("expected to find mod by a path relative to the working directory")
+	}
+	if path != wantPath {
+		t.Errorf("FindMod(relative path) = %q, want %q", path, wantPath)
+	}
+
+	if err := os.Chdir(filepath.Join(dir, "mods")); err != nil {
+		t.Fatal(err)
+	}
+	path, found = idx.FindMod("foo.pw.toml")
+	if !found {
+		t.Error("expected to find mod by its bare file name when the working directory is its containing folder")
+	}
+	if path != wantPath {
+		t.Errorf("FindMod(bare file name from containing folder) = %q, want %q", path, wantPath)
+	}
 }
 
 func TestIndexRefresh(t *testing.T) {

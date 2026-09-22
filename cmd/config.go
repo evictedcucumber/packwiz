@@ -91,10 +91,10 @@ var configRelateCmd = &cobra.Command{
 "packwiz config list"). A folder is given a trailing "/", to claim everything under it; running this again with the
 same arguments does nothing more.
 
-<mod> is the name of its .pw.toml file (its slug, unless it was renamed), the same as "packwiz pin" and "packwiz
-remove" take. <config file/dir> is a path to a file or folder that exists in the pack, from the current directory or
-the pack's root; if the pack keeps its files in a mod's own folder (see Configured Defaults), it is written as if that
-folder didn't exist, the same way every other config-files entry is.`,
+<mod> is its slug (unless it was renamed), the name of its .pw.toml file, or a path to that file, the same as
+"packwiz pin" and "packwiz remove" take. <config file/dir> is a path to a file or folder that exists in the pack,
+from the current directory or the pack's root; if the pack keeps its files in a mod's own folder (see Configured
+Defaults), it is written as if that folder didn't exist, the same way every other config-files entry is.`,
 	Args: cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.Muted.Println("Loading modpack...")
@@ -110,7 +110,7 @@ folder didn't exist, the same way every other config-files entry is.`,
 		}
 		modPath, ok := index.FindMod(args[0])
 		if !ok {
-			ui.Error.Println("Can't find this file; please ensure you have run packwiz refresh and use the name of the .pw.toml file (defaults to the project slug)")
+			ui.Error.Println("Can't find this file; please ensure you have run packwiz refresh and specify its slug, its .pw.toml file name, or a path to that file")
 			os.Exit(1)
 		}
 		modData, err := core.LoadMod(modPath)

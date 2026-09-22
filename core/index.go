@@ -332,14 +332,29 @@ func (in *Index) RefreshFileWithHash(path, format, hash string, markAsMetaFile b
 	return in.updateFileHashGiven(path, format, hash, markAsMetaFile)
 }
 
-// FindMod finds a mod in the index and returns its path and whether it has been found
+// trimMetaExtension removes a mod metadata file's extension (MetaExtension, or the legacy MetaExtensionOld) from a
+// file name, leaving it unchanged if it has neither.
+func trimMetaExtension(fileName string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(fileName, MetaExtension), MetaExtensionOld)
+}
+
+// FindMod finds a mod in the index and returns its path and whether it has been found. modName can be the mod's
+// slug (the name of its metadata file, without its extension, as this defaults to), that file name with its
+// extension, or a path to the metadata file itself - absolute, or relative to the working directory.
 func (in Index) FindMod(modName string) (string, bool) {
+	modNameTrimmed := trimMetaExtension(modName)
+	wantAbs, absErr := filepath.Abs(modName)
 	for p, v := range in.Files {
 		if v.IsMetaFile() {
 			_, fileName := path.Split(p)
-			fileTrimmed := strings.TrimSuffix(strings.TrimSuffix(fileName, MetaExtension), MetaExtensionOld)
-			if fileTrimmed == modName {
+			fileTrimmed := trimMetaExtension(fileName)
+			if fileTrimmed == modName || fileTrimmed == modNameTrimmed {
 				return in.ResolveIndexPath(p), true
+			}
+			if absErr == nil {
+				if candAbs, err := filepath.Abs(in.ResolveIndexPath(p)); err == nil && candAbs == wantAbs {
+					return in.ResolveIndexPath(p), true
+				}
 			}
 		}
 	}
