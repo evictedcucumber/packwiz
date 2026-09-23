@@ -159,6 +159,24 @@ func TestConfigListStateInvalidColourOnlyAddsToItsOutput(t *testing.T) {
 	}
 }
 
+func TestConfigListMissingEntriesAreStyledAsWarningsAndColourOnlyAdds(t *testing.T) {
+	setUpConfigFixture(t)
+	claimMissingConfigFiles(t)
+	setConfigListFlag(t, "state", "missing")
+
+	plain, coloured := cmdtest.AssertColourOnlyAdds(t, func() { configListCmd.Run(configListCmd, nil) })
+
+	if want := "Alpha Mod\n├── config/gone.json (missing)\n└── config/gone/ (missing)\n"; plain != want {
+		t.Errorf("plain output = %q, want %q", plain, want)
+	}
+	want := ui.Bold.Sprint("Alpha Mod") + "\n" +
+		ui.Warning.Sprint("├── config/gone.json (missing)") + "\n" +
+		ui.Warning.Sprint("└── config/gone/ (missing)") + "\n"
+	if coloured != want {
+		t.Errorf("coloured output = %q, want %q", coloured, want)
+	}
+}
+
 func TestPinReportsSuccessInGreenWithTheNameInBold(t *testing.T) {
 	setUpListFixture(t)
 	cmdtest.SetColor(t, ui.Always)

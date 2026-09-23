@@ -27,7 +27,8 @@ var validateCmd = &cobra.Command{
   - every required dependency is in the pack, and nothing in it is incompatible with something else
   - every mod that a mod on the client requires is on the client too (see 'packwiz modrinth add')
   - pack.toml has a Minecraft version, a NeoForge version and a version for the pack
-  - every tracked config file is claimed by a mod's config-files (see 'packwiz config list --state invalid')
+  - every tracked config file is claimed by a mod's config-files (see 'packwiz config list --state invalid'), and
+    every entry in a mod's config-files matches a file in the pack (see 'packwiz config list --state missing')
 
 What a mod depends on is what its metadata records. For a mod that records nothing it is looked up on Modrinth, which
 needs the network; if that fails, those mods' dependencies aren't checked, and it says so.
@@ -104,6 +105,14 @@ type validation struct {
 	// were looked up, and missing is what they require that isn't in the pack: what fixing the pack goes by
 	entries []entry
 	missing []dependencyNeed
+	// missingConfigFiles are the entries of a mod's config-files that match no file in the pack, by mod, for fixing it
+	missingConfigFiles []missingConfig
+}
+
+// missingConfig is the entries of a mod's config-files, as written in its metadata file, that match no file in the pack
+type missingConfig struct {
+	by      entry
+	entries []string
 }
 
 // validatePack checks a pack for problems, looking up on Modrinth what mods that record no dependencies depend on
@@ -314,17 +323,34 @@ func (v *validation) checkDependencies(pack core.Pack, entries []entry) {
 	}
 }
 
-// checkConfigFiles warns about tracked files that no mod's config-files claims: normally something in the pack's
-// config/ folder left behind by a mod that has since been removed, or never linked to the mod that installed it.
+// checkConfigFiles warns about tracked files that no mod's config-files claims, normally something in the pack's
+// config/ folder left behind by a mod that has since been removed, or never linked to the mod that installed it; and
+// about entries in a mod's config-files that match no file in the pack, normally a config file that has since been
+// deleted or renamed.
 func (v *validation) checkConfigFiles(index core.Index, entries []entry) {
 	mods := make([]*core.Mod, len(entries))
+	byMod := make(map[*core.Mod]entry, len(entries))
 	for i, e := range entries {
 		mods[i] = e.mod
+		byMod[e.mod] = e
 	}
 	tree, err := index.ConfigFileTree(mods)
 	if err != nil {
 		v.warnf(packEntry, "config files couldn't be checked: %v", err)
 		return
+	}
+
+	for _, m := range tree.Mods {
+		if len(m.Missing) == 0 {
+			continue
+		}
+		e := byMod[m.Mod]
+		noun, verb := "entries", "match"
+		if len(m.Missing) == 1 {
+			noun, verb = "entry", "matches"
+		}
+		v.warnf(e, "config-files has %d %s that %s no file in the pack: %s", len(m.Missing), noun, verb, listNames(m.Missing, 5))
+		v.missingConfigFiles = append(v.missingConfigFiles, missingConfig{by: e, entries: m.Missing})
 	}
 
 	if len(tree.Unclaimed) == 0 {

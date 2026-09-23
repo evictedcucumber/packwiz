@@ -252,6 +252,49 @@ func TestModClaimConfigFileAddsAndDedupes(t *testing.T) {
 	}
 }
 
+func TestModUnclaimConfigFileRemovesEveryOccurrence(t *testing.T) {
+	mod := Mod{ConfigFiles: &[]string{"config/a.json", "config/b.json", "config/a.json"}}
+	if !mod.UnclaimConfigFile("config/a.json") {
+		t.Error("UnclaimConfigFile() = false, want true for an entry that was there")
+	}
+	if want := []string{"config/b.json"}; !slices.Equal(*mod.ConfigFiles, want) {
+		t.Errorf("ConfigFiles = %v, want %v", *mod.ConfigFiles, want)
+	}
+	if mod.UnclaimConfigFile("config/a.json") {
+		t.Error("UnclaimConfigFile() = true, want false for an entry that is already gone")
+	}
+}
+
+func TestModUnclaimConfigFileOfAModWithNoneChangesNothing(t *testing.T) {
+	mod := Mod{}
+	if mod.UnclaimConfigFile("config/a.json") {
+		t.Error("UnclaimConfigFile() = true, want false")
+	}
+	if mod.ConfigFiles != nil {
+		t.Errorf("ConfigFiles = %v, want it left nil", mod.ConfigFiles)
+	}
+}
+
+// Taking out the last entry leaves the field there to fill in, as an empty list, rather than dropping it from the file
+func TestModUnclaimConfigFileLeavesAnEmptyListWrittenAsOne(t *testing.T) {
+	metaPath := filepath.Join(t.TempDir(), "test-mod.pw.toml")
+
+	mod := Mod{Name: "Test Mod", FileName: "test-mod.jar", ConfigFiles: &[]string{"config/a.json"}}
+	mod.SetMetaPath(metaPath)
+	mod.UnclaimConfigFile("config/a.json")
+	if _, _, err := mod.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("failed to read mod file: %v", err)
+	}
+	if !strings.Contains(string(data), "config-files = []") {
+		t.Errorf("expected an explicit empty config-files key, got:\n%s", data)
+	}
+}
+
 func TestModDisplayVersion(t *testing.T) {
 	tests := []struct {
 		name string

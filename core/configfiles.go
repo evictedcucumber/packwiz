@@ -5,18 +5,24 @@ import (
 	"strings"
 )
 
-// ModConfigFiles is a mod and the config files it claims (see Mod.ConfigFiles) that are actually tracked in the pack.
+// ModConfigFiles is a mod and the config files it claims (see Mod.ConfigFiles): those that are tracked in the pack, and
+// the entries of its ConfigFiles that nothing tracked matches.
 type ModConfigFiles struct {
 	Mod *Mod
 	// Files are the paths, relative to the pack and sorted, that Mod's ConfigFiles claims and the index tracks.
 	Files []string
+	// Missing are the entries of Mod's ConfigFiles, sorted and written as they are in the mod's metadata file (so
+	// without the pack's config folder, see ConfigFileTree), that no tracked file matches: a path that isn't tracked,
+	// or a folder with no tracked file under it. It is what has to be taken out of ConfigFiles to remove the claim.
+	Missing []string
 }
 
 // ConfigFileTree groups the pack's tracked files that aren't a mod's own metadata or destination file - normally what
 // is in its config/ folder - by the mod that claims each one.
 type ConfigFileTree struct {
-	// Mods are the mods that claim at least one tracked file, in alphabetical order of their name. A file that more
-	// than one mod's ConfigFiles claims is listed under each of them.
+	// Mods are the mods that claim at least one tracked file, or have an entry in their ConfigFiles that matches none,
+	// in alphabetical order of their name. A file that more than one mod's ConfigFiles claims is listed under each of
+	// them.
 	Mods []ModConfigFiles
 	// Unclaimed are the tracked files (sorted) that no mod's ConfigFiles claims: e.g. left behind by a mod that has
 	// since been removed, or never linked to the mod that installed it.
@@ -38,6 +44,11 @@ func claimsPath(entry, p string) bool {
 // normally does. A pack that has a mod with a ConfigDirResolver (e.g. Configured Defaults) instead keeps all of its
 // files in that mod's folder, so entries are resolved against it too: "config/sodium.json" claims
 // "configureddefaults/config/sodium.json" when Configured Defaults is installed, the same as without it.
+//
+// A file a mod claims is only there if the index tracks it, so an entry of a mod's ConfigFiles that matches no tracked
+// file is reported in that mod's Missing: normally a config file that has since been deleted or renamed. It goes by
+// the index, as everything else about the pack does, so a file that was only just deleted from disk is still tracked
+// until "packwiz refresh".
 func (in Index) ConfigFileTree(mods []*Mod) (ConfigFileTree, error) {
 	sorted := slices.Clone(mods)
 	slices.SortFunc(sorted, func(a, b *Mod) int {
@@ -88,8 +99,18 @@ func (in Index) ConfigFileTree(mods []*Mod) (ConfigFileTree, error) {
 				files = append(files, p)
 			}
 		}
-		if len(files) > 0 {
-			tree.Mods = append(tree.Mods, ModConfigFiles{Mod: mod, Files: files})
+
+		var missing []string
+		for i, claim := range claims {
+			if !slices.ContainsFunc(paths, func(p string) bool { return claimsPath(claim, p) }) {
+				missing = append(missing, (*mod.ConfigFiles)[i])
+			}
+		}
+		slices.Sort(missing)
+		missing = slices.Compact(missing)
+
+		if len(files) > 0 || len(missing) > 0 {
+			tree.Mods = append(tree.Mods, ModConfigFiles{Mod: mod, Files: files, Missing: missing})
 		}
 	}
 

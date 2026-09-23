@@ -26,7 +26,10 @@ type modFile struct {
 	modrinth           bool
 	project, versionID string
 	deps               []core.ModDependency
-	configFiles        []string
+	// configFiles are written as the mod's config-files, and the ones that are a file (not a folder) are tracked in the
+	// index by addMod, as 'packwiz refresh' would, so that they aren't missing; absentConfigFiles are written too, but
+	// nothing tracks them
+	configFiles, absentConfigFiles []string
 }
 
 // validMod is a mod that has everything a metadata file needs. It records a dependency, as a mod that records none is
@@ -47,9 +50,9 @@ func (m modFile) toml() string {
 			fmt.Fprintf(&b, "%s = %q\n", field.key, field.value)
 		}
 	}
-	if len(m.configFiles) > 0 {
-		quoted := make([]string, len(m.configFiles))
-		for i, cf := range m.configFiles {
+	if entries := slices.Concat(m.configFiles, m.absentConfigFiles); len(entries) > 0 {
+		quoted := make([]string, len(entries))
+		for i, cf := range entries {
 			quoted[i] = fmt.Sprintf("%q", cf)
 		}
 		fmt.Fprintf(&b, "config-files = [%s]\n", strings.Join(quoted, ", "))
@@ -93,7 +96,20 @@ func addModFile(t *testing.T, index *core.Index, name, content string) string {
 
 func addMod(t *testing.T, index *core.Index, m modFile) string {
 	t.Helper()
+	for _, cf := range m.configFiles {
+		if !strings.HasSuffix(cf, "/") {
+			trackConfigFile(t, index, cf)
+		}
+	}
 	return addModFile(t, index, m.name, m.toml())
+}
+
+// trackConfigFile puts a config file in the index, as 'packwiz refresh' would
+func trackConfigFile(t *testing.T, index *core.Index, path string) {
+	t.Helper()
+	if err := index.RefreshFileWithHash(path, "sha256", "unchecked", false); err != nil {
+		t.Fatalf("RefreshFileWithHash(%q) returned error: %v", path, err)
+	}
 }
 
 // validatablePack is a pack fixture that has what a pack needs, so that a test only gets the problems it makes
@@ -293,6 +309,50 @@ func TestValidateCombinesSeveralOrphanedConfigFilesIntoOneWarning(t *testing.T) 
 	v := validatePack(pack, index)
 
 	assertProblems(t, v, "", "warning: 2 files aren't claimed by any mod's config-files: config/a.json, config/b.json")
+}
+
+func TestValidateWarnsAboutAModsConfigFilesThatMatchNoFile(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.configFiles = []string{"config/alpha.json"}
+	alpha.absentConfigFiles = []string{"config/gone.json"}
+	alphaPath := addMod(t, &index, alpha)
+
+	v := validatePack(pack, index)
+
+	assertProblems(t, v, alphaPath, "warning: config-files has 1 entry that matches no file in the pack: config/gone.json")
+	assertProblems(t, v, "")
+	if v.errors() != 0 {
+		t.Errorf("errors = %d, want none: an entry for a file that isn't there is only a warning", v.errors())
+	}
+}
+
+func TestValidateCombinesSeveralMissingConfigFilesOfAModIntoOneWarning(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.absentConfigFiles = []string{"config/b.json", "config/a-folder/", "config/a.json"}
+	alphaPath := addMod(t, &index, alpha)
+	beta := validMod("beta")
+	beta.absentConfigFiles = []string{"config/beta.json"}
+	betaPath := addMod(t, &index, beta)
+
+	v := validatePack(pack, index)
+
+	assertProblems(t, v, alphaPath, "warning: config-files has 3 entries that match no file in the pack: config/a-folder/, config/a.json, config/b.json")
+	assertProblems(t, v, betaPath, "warning: config-files has 1 entry that matches no file in the pack: config/beta.json")
+}
+
+func TestValidateDoesNotWarnAboutAFolderThatHasAFileInIt(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.configFiles = []string{"config/alpha/"}
+	addMod(t, &index, alpha)
+	trackConfigFile(t, &index, "config/alpha/sub.json")
+
+	v := validatePack(pack, index)
+
+	assertProblems(t, v, "")
+	assertProblems(t, v, "mods/alpha"+core.MetaExtension)
 }
 
 // serveProjects answers Modrinth's project lookup with the titles given, by project ID

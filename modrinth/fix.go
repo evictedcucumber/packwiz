@@ -27,6 +27,8 @@ changes that would fix them, and ask before making any:
   - a mod that has no side is given one (both, which is what it is treated as having)
   - a mod that doesn't record its version has it recorded
   - a mod that doesn't have a config-files gets an empty one, ready for 'packwiz config relate' to fill in
+  - an entry in a mod's config-files that matches no file in the pack, such as one for a config file that has since
+    been deleted, is taken out (what is in the pack is what its index says, so run 'packwiz refresh' first)
 
 Everything else that is found needs a decision that only you can make, so it is left alone and reported. Once the
 changes are made the pack is checked again, and the command fails if any errors are left.
@@ -75,6 +77,8 @@ type fileChange struct {
 	version string
 	// addConfigFiles is whether to give the mod an empty config-files, as it doesn't have one yet
 	addConfigFiles bool
+	// removeConfigFiles are the entries of the mod's config-files to take out, as they match no file in the pack
+	removeConfigFiles []string
 }
 
 // fixPlan is what fixing a pack would do
@@ -208,6 +212,10 @@ func planFixes(pack core.Pack, index core.Index, v *validation) *fixPlan {
 		}
 	}
 
+	for _, m := range v.missingConfigFiles {
+		changeOf(m.by.path, m.by.name).removeConfigFiles = m.entries
+	}
+
 	plan.planVersions(v, changeOf)
 
 	slices.SortFunc(plan.changes, func(a, b *fileChange) int { return strings.Compare(a.path, b.path) })
@@ -328,6 +336,9 @@ func (c *fileChange) describe() []string {
 	if c.addConfigFiles {
 		lines = append(lines, "config-files: added, empty")
 	}
+	for _, entry := range c.removeConfigFiles {
+		lines = append(lines, fmt.Sprintf("config-files: remove %s, which matches no file in the pack", entry))
+	}
 	return lines
 }
 
@@ -369,6 +380,9 @@ func (p *fixPlan) apply(pack *core.Pack, index *core.Index) (int, error) {
 			}
 			if c.addConfigFiles {
 				mod.EnsureConfigFiles()
+			}
+			for _, entry := range c.removeConfigFiles {
+				mod.UnclaimConfigFile(entry)
 			}
 		}
 

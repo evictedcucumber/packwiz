@@ -167,6 +167,16 @@ config-files = ["config/sodium-options.json", "config/iris/"]
 
 This is written by hand, with `packwiz config relate`; nothing derives it. `--state valid` shows only what is claimed, and `--state invalid` only what isn't - the same as the "Invalid" section, for example a config file left behind by a mod that has since been removed, or never linked to the mod that installed it (as `--only main` does for `packwiz list`). `packwiz mr validate` reports the same files as a warning.
 
+An entry that no tracked file matches - a config file that has since been deleted or renamed, or a folder with nothing left in it - is listed under its mod too, marked `(missing)`, and `--state missing` shows only those:
+
+```
+Sodium
+├── config/sodium-options.json
+└── config/sodium-old.json (missing)
+```
+
+`packwiz mr validate` warns about them for the mod that has them, and `packwiz mr fix` takes them out of its `config-files`. What is in the pack is what its index says, so after adding or deleting a config file run `packwiz refresh` first: until then the index still has the old files, and a file that is on disk but not yet in the index counts as missing.
+
 Entries are always written as above, as if the pack kept its files at the root of the game directory. A pack that has [Configured Defaults](#configured-defaults) instead keeps everything in `configureddefaults/`, and `config-files` follows it there too: `config/sodium-options.json` claims `configureddefaults/config/sodium-options.json` once the mod is installed, with no need to rewrite it either way.
 
 `packwiz config relate <mod> <config file/dir>` adds a path to a mod's config-files, given the name of its `.pw.toml` file (as `packwiz pin` and `packwiz remove` take) and a file or folder that exists in the pack:
@@ -200,7 +210,7 @@ Repurposed Structures - Neoforge/Forge  required     required   8.0 MiB  mods/re
 - every required dependency is in the pack, and nothing in it is incompatible with something else
 - every mod that a mod on the client requires is on the client too: Modrinth lists some libraries, mostly for world generation, as unsupported on the client, but a mod that requires one crashes the game without it. `packwiz mr add` puts such a mod on both sides, and `validate` (and a warning from `export`) finds one that isn't
 - `pack.toml` has a Minecraft version, a NeoForge version and a version for the pack
-- every tracked config file is claimed by a mod's `config-files` (see [Config files](#config-files) and `packwiz config list --state invalid`)
+- every tracked config file is claimed by a mod's `config-files` (see [Config files](#config-files) and `packwiz config list --state invalid`), and every entry in a mod's `config-files` matches a file in the pack (`packwiz config list --state missing`)
 
 What a mod depends on is what its `.pw.toml` records. A mod that records nothing is looked up on Modrinth, so that needs the network; if it can't be reached, those mods' dependencies aren't checked, and it says so, but the rest of the checks are made.
 
@@ -218,7 +228,7 @@ Would you like to make these changes? [Y/n]:
 - a mod that is only on the server, but that a mod on the client requires, is put on both sides
 - a required dependency that isn't in the pack is added, at its latest version, as `packwiz mr add` would add it, and put on both sides if a mod on the client requires it (one that can't be found a version of, or whose file name is already taken, is left and reported)
 - a mod with no side is given one (`both`, which it was treated as having), and a mod that doesn't record its version has it recorded
-- a mod with no `config-files` gets an empty one, ready for `packwiz config relate` to fill in
+- a mod with no `config-files` gets an empty one, ready for `packwiz config relate` to fill in, and an entry in a mod's `config-files` that matches no file in the pack is taken out (run `packwiz refresh` first, as a file that isn't in the index yet counts as missing)
 
 Everything else `validate` finds, such as a mod that is incompatible with another, needs a decision, so it is left for you.
 

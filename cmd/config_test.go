@@ -203,6 +203,102 @@ hash = "b"
 	}
 }
 
+// claimMissingConfigFiles has the fixture's mod claim two more entries that nothing in the pack matches: a file that
+// has been deleted, and a folder with nothing left in it
+func claimMissingConfigFiles(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile("mods/alpha.pw.toml", []byte(`name = "Alpha Mod"
+filename = "alpha.jar"
+config-files = ["config/alpha.json", "config/alpha/", "config/gone.json", "config/gone/"]
+
+[download]
+hash-format = "sha256"
+hash = "a"
+`), 0644); err != nil {
+		t.Fatalf("failed to rewrite mod fixture: %v", err)
+	}
+}
+
+func TestConfigListShowsEntriesThatMatchNoFileAsMissingUnderTheirMod(t *testing.T) {
+	setUpConfigFixture(t)
+	claimMissingConfigFiles(t)
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configListCmd.Run(configListCmd, nil)
+	})
+	want := "Alpha Mod\n├── config/alpha.json\n├── config/alpha/sub.json\n├── config/gone.json (missing)\n└── config/gone/ (missing)\n\n" +
+		"Invalid\n└── config/orphan.json\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+func TestConfigListStateMissingOnlyShowsEntriesThatMatchNoFile(t *testing.T) {
+	setUpConfigFixture(t)
+	claimMissingConfigFiles(t)
+	setConfigListFlag(t, "state", "missing")
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configListCmd.Run(configListCmd, nil)
+	})
+	want := "Alpha Mod\n├── config/gone.json (missing)\n└── config/gone/ (missing)\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+func TestConfigListStateValidLeavesOutMissingEntries(t *testing.T) {
+	setUpConfigFixture(t)
+	claimMissingConfigFiles(t)
+	setConfigListFlag(t, "state", "valid")
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configListCmd.Run(configListCmd, nil)
+	})
+	want := "Alpha Mod\n├── config/alpha.json\n└── config/alpha/sub.json\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+func TestConfigListStateInvalidLeavesOutMissingEntries(t *testing.T) {
+	setUpConfigFixture(t)
+	claimMissingConfigFiles(t)
+	setConfigListFlag(t, "state", "invalid")
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configListCmd.Run(configListCmd, nil)
+	})
+	want := "Invalid\n└── config/orphan.json\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+// A mod that has nothing left of what it claims is still listed, with only what is missing
+func TestConfigListShowsAModWhoseConfigFilesAreAllMissing(t *testing.T) {
+	setUpConfigFixture(t)
+	if err := os.WriteFile("mods/alpha.pw.toml", []byte(`name = "Alpha Mod"
+filename = "alpha.jar"
+config-files = ["config/gone.json"]
+
+[download]
+hash-format = "sha256"
+hash = "a"
+`), 0644); err != nil {
+		t.Fatalf("failed to rewrite mod fixture: %v", err)
+	}
+	setConfigListFlag(t, "state", "missing")
+
+	out := cmdtest.CaptureStdout(t, func() {
+		configListCmd.Run(configListCmd, nil)
+	})
+	want := "Alpha Mod\n└── config/gone.json (missing)\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
 // setUpConfigRelateFixture builds a pack with one mod (Alpha Mod, with no config-files yet) and a real config/new.json
 // file and config/sub/ folder on disk, for "packwiz config relate" to link it to.
 func setUpConfigRelateFixture(t *testing.T) {

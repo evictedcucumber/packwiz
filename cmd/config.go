@@ -25,8 +25,12 @@ var configListCmd = &cobra.Command{
 config/ folder - as a tree of the mod each belongs to, with the files nothing claims listed under "Invalid" at the end.
 
 A mod can record which of these it owns in its metadata file's config-files (a path, or a path ending in "/" to claim
-everything under it). --state valid shows only what is claimed, and --state invalid shows only what isn't - for
-example, a config file left behind by a mod that has since been removed, or never linked to the mod that installed it.`,
+everything under it). An entry that no tracked file matches - for example, a config file that has since been deleted -
+is listed under its mod, marked "(missing)". --state valid shows only what is claimed, --state invalid only what isn't
+(for example, a config file left behind by a mod that has since been removed, or never linked to the mod that
+installed it), and --state missing only the entries that match nothing.
+
+What is tracked is what the index says, so run "packwiz refresh" after adding or deleting a config file.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		pack, err := core.LoadPack()
@@ -51,34 +55,53 @@ example, a config file left behind by a mod that has since been removed, or neve
 			os.Exit(1)
 		}
 
-		showValid, showInvalid := true, true
+		showValid, showInvalid, showMissing := true, true, true
 		if viper.IsSet("config.list.state") {
+			showValid, showInvalid, showMissing = false, false, false
 			switch state := viper.GetString("config.list.state"); state {
 			case "valid":
-				showInvalid = false
+				showValid = true
 			case "invalid":
-				showValid = false
+				showInvalid = true
+			case "missing":
+				showMissing = true
 			default:
-				ui.Error.Printf("Invalid --state %q, must be one of valid, invalid\n", state)
+				ui.Error.Printf("Invalid --state %q, must be one of valid, invalid, missing\n", state)
 				os.Exit(1)
 			}
 		}
 
 		printed := false
-		if showValid {
-			for _, m := range tree.Mods {
-				if printed {
-					fmt.Println()
+		for _, m := range tree.Mods {
+			var entries []treeEntry
+			if showValid {
+				for _, f := range m.Files {
+					entries = append(entries, treeEntry{f, ui.Success})
 				}
-				printGroup(ui.Bold.Sprint(m.Mod.Name), m.Files, ui.Success)
-				printed = true
 			}
+			if showMissing {
+				for _, f := range m.Missing {
+					entries = append(entries, treeEntry{f + " (missing)", ui.Warning})
+				}
+			}
+			if len(entries) == 0 {
+				continue
+			}
+			if printed {
+				fmt.Println()
+			}
+			printGroup(ui.Bold.Sprint(m.Mod.Name), entries)
+			printed = true
 		}
 		if showInvalid && len(tree.Unclaimed) > 0 {
 			if printed {
 				fmt.Println()
 			}
-			printGroup(ui.Bold.Sprint(ui.Warning.Sprint("Invalid")), tree.Unclaimed, ui.Warning)
+			entries := make([]treeEntry, len(tree.Unclaimed))
+			for i, f := range tree.Unclaimed {
+				entries[i] = treeEntry{f, ui.Warning}
+			}
+			printGroup(ui.Bold.Sprint(ui.Warning.Sprint("Invalid")), entries)
 		}
 	},
 }
@@ -236,15 +259,21 @@ func relateConfigPath(index core.Index, mods []*core.Mod, path string, isDir boo
 	return rel, nil
 }
 
-// printGroup prints a heading and its files as a tree, each file in style.
-func printGroup(heading string, files []string, style ui.Style) {
+// treeEntry is a line of a tree, and the style it is shown in.
+type treeEntry struct {
+	text  string
+	style ui.Style
+}
+
+// printGroup prints a heading and its entries as a tree.
+func printGroup(heading string, entries []treeEntry) {
 	fmt.Println(heading)
-	for i, f := range files {
+	for i, e := range entries {
 		branch := "├── "
-		if i == len(files)-1 {
+		if i == len(entries)-1 {
 			branch = "└── "
 		}
-		style.Println(branch + f)
+		e.style.Println(branch + e.text)
 	}
 }
 
@@ -253,7 +282,7 @@ func init() {
 	configCmd.AddCommand(configListCmd)
 	configCmd.AddCommand(configRelateCmd)
 
-	configListCmd.Flags().String("state", "", "Only show config files in this state: valid or invalid")
+	configListCmd.Flags().String("state", "", "Only show config files in this state: valid, invalid or missing")
 	_ = viper.BindPFlag("config.list.state", configListCmd.Flags().Lookup("state"))
 
 	configRelateCmd.Flags().StringArrayP("mod", "m", nil, "A mod (slug, .pw.toml file name, or path) to relate the config file(s) to; repeat for multiple mods")

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -402,6 +403,7 @@ func TestFixDoesNotReplaceAFileThatIsWhereADependencyWouldGo(t *testing.T) {
 	addMod(t, &index, alpha)
 	other := validMod("other")
 	other.configFiles = []string{"config/other.json"}
+	trackConfigFile(t, &index, "config/other.json")
 	inTheWay := addModFile(t, &index, "lib1-slug", other.toml())
 	before := readFile(t, inTheWay)
 	cmdtest.SetStdin(t, "y\n") // Only asked if it were to go on, which it mustn't
@@ -486,6 +488,110 @@ func TestFixLeavesAModsExistingConfigFilesAlone(t *testing.T) {
 	}
 	if after.errors() != 0 {
 		t.Errorf("errors = %d, want none", after.errors())
+	}
+}
+
+func TestFixRemovesAConfigFilesEntryThatMatchesNoFile(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.configFiles = []string{"config/alpha.json"}
+	alpha.absentConfigFiles = []string{"config/gone.json", "config/gone/"}
+	path := addMod(t, &index, alpha)
+	cmdtest.SetStdin(t, "y\n")
+
+	after, out, err := fix(t, pack, index)
+	if err != nil {
+		t.Fatalf("runFix() returned error: %v", err)
+	}
+
+	want := `Checking the pack...
+alpha (mods/alpha.pw.toml):
+  warning: config-files has 2 entries that match no file in the pack: config/gone.json, config/gone/
+
+No errors, but 1 warning.
+Changes to make:
+alpha (mods/alpha.pw.toml):
+  config-files: remove config/gone.json, which matches no file in the pack
+  config-files: remove config/gone/, which matches no file in the pack
+
+Would you like to make these changes? [Y/n]: Changed 1 file.
+
+Checking the pack again...
+The mod is valid!
+`
+	if out != want {
+		t.Errorf("output =\n%s\nwant\n%s", out, want)
+	}
+	if got := loadModAt(t, path).ConfigFiles; got == nil || !slices.Equal(*got, []string{"config/alpha.json"}) {
+		t.Errorf("ConfigFiles = %v, want only config/alpha.json, which is in the pack", got)
+	}
+	assertIndexHasHashOf(t, path)
+	if len(after.subjects) != 0 {
+		t.Errorf("problems after = %v, want none", after.subjects)
+	}
+}
+
+// Taking out every entry leaves the field there, empty, as a mod that has never claimed any has
+func TestFixLeavesAnEmptyConfigFilesWhenEveryEntryMatchesNoFile(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.absentConfigFiles = []string{"config/gone.json"}
+	path := addMod(t, &index, alpha)
+	cmdtest.SetStdin(t, "y\n")
+
+	after, _, err := fix(t, pack, index)
+	if err != nil {
+		t.Fatalf("runFix() returned error: %v", err)
+	}
+
+	if got := loadModAt(t, path).ConfigFiles; got == nil || len(*got) != 0 {
+		t.Errorf("ConfigFiles = %v, want a non-nil empty slice", got)
+	}
+	if !strings.Contains(readFile(t, path), "config-files = []") {
+		t.Errorf("config-files isn't written as an empty list:\n%s", readFile(t, path))
+	}
+	if len(after.subjects) != 0 {
+		t.Errorf("problems after = %v, want none, and no second config-files added", after.subjects)
+	}
+}
+
+func TestFixDeclinedKeepsAConfigFilesEntryThatMatchesNoFile(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.absentConfigFiles = []string{"config/gone.json"}
+	path := addMod(t, &index, alpha)
+	before := readFile(t, path)
+	cmdtest.SetStdin(t, "n\n")
+
+	after, out, err := fix(t, pack, index)
+	if err != nil {
+		t.Fatalf("runFix() returned error: %v", err)
+	}
+
+	if !strings.HasSuffix(out, "Would you like to make these changes? [Y/n]: Cancelled!\n") {
+		t.Errorf("output doesn't end with the question and Cancelled!:\n%s", out)
+	}
+	if readFile(t, path) != before {
+		t.Error("the mod changed, want it left as it was")
+	}
+	assertProblems(t, after, path, "warning: config-files has 1 entry that matches no file in the pack: config/gone.json")
+}
+
+// A file the pack has been refreshed to have is not taken out, however it got there
+func TestFixKeepsAConfigFilesEntryWhoseFileIsInThePack(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.configFiles = []string{"config/alpha.json", "config/alpha/"}
+	addMod(t, &index, alpha)
+	trackConfigFile(t, &index, "config/alpha/sub.json")
+
+	_, out, err := fix(t, pack, index)
+	if err != nil {
+		t.Fatalf("runFix() returned error: %v", err)
+	}
+
+	if want := "Checking the pack...\nThe mod is valid!\n"; out != want {
+		t.Errorf("output = %q, want %q", out, want)
 	}
 }
 

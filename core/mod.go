@@ -45,7 +45,8 @@ type Mod struct {
 	// existed), distinct from an empty-but-present list, which is what "packwiz mr add" and "packwiz mr fix" give a
 	// mod so its file shows config-files is there to fill in; "packwiz config relate" appends to it. A config file
 	// nothing claims - e.g. left behind by a mod that has since been removed - can be reported by "packwiz config
-	// list --state invalid" and "packwiz mr validate".
+	// list --state invalid" and "packwiz mr validate", and so can an entry that matches no file in the pack, e.g. for
+	// a config file that has since been deleted (--state missing), which "packwiz mr fix" takes out.
 	//
 	// Entries are written as if the pack kept its files at the root of the game directory, as it normally does: for
 	// a pack that instead keeps them all in a mod's own folder (see ConfigDirResolver, e.g. Configured Defaults),
@@ -73,6 +74,17 @@ func (m *Mod) ClaimConfigFile(path string) bool {
 		return false
 	}
 	*m.ConfigFiles = append(*m.ConfigFiles, path)
+	return true
+}
+
+// UnclaimConfigFile takes path out of m's ConfigFiles, however many times it is there. It reports whether it removed
+// anything: false if m didn't have path. An emptied ConfigFiles is left empty rather than nil, so the field stays there
+// to fill in.
+func (m *Mod) UnclaimConfigFile(path string) bool {
+	if m.ConfigFiles == nil || !slices.Contains(*m.ConfigFiles, path) {
+		return false
+	}
+	*m.ConfigFiles = slices.DeleteFunc(*m.ConfigFiles, func(entry string) bool { return entry == path })
 	return true
 }
 
