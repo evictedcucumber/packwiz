@@ -9,6 +9,7 @@ import (
 
 	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/notice"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/viper"
 )
@@ -98,7 +99,7 @@ func runCommit(dryRun bool) error {
 		return err
 	}
 	if !dryRun {
-		return c.run(steps)
+		return c.run(steps, printCommitted)
 	}
 
 	if len(steps) == 0 {
@@ -111,6 +112,46 @@ func runCommit(dryRun bool) error {
 	}
 	fmt.Println(strings.Join(messages, "\n"+ui.Muted.Sprint("---")+"\n"))
 	return nil
+}
+
+// PlanCommit works out the commits that "packwiz git commit" would make, as their messages, without making any and without
+// saying anything on the terminal. There are none if there is nothing to commit. It fails if the pack isn't in a repository.
+func PlanCommit() (messages []string, notices []string, err error) {
+	collected := notice.Collect(func() {
+		var steps []commitStep
+		if _, steps, err = prepareCommit(true); err != nil {
+			return
+		}
+		for _, step := range steps {
+			messages = append(messages, step.message)
+		}
+	})
+	return messages, plainNotices(collected), err
+}
+
+// CommitAll commits the pack as "packwiz git commit" does, without saying anything on the terminal, and returns the messages
+// of the commits that were made.
+func CommitAll() (committed []string, notices []string, err error) {
+	collected := notice.Collect(func() {
+		var c committer
+		var steps []commitStep
+		if c, steps, err = prepareCommit(false); err != nil {
+			return
+		}
+		err = c.run(steps, func(message string) { committed = append(committed, message) })
+	})
+	return committed, plainNotices(collected), err
+}
+
+// plainNotices are what was said that is worth reading, as text.
+func plainNotices(collected []notice.Notice) []string {
+	var texts []string
+	for _, n := range collected {
+		if n.Level != notice.Muted {
+			texts = append(texts, n.Text)
+		}
+	}
+	return texts
 }
 
 // styleMessage picks out the subject of a commit message, which is its first line
@@ -188,7 +229,7 @@ func (c committer) changedBeyond(changes []changelog.Change) (bool, error) {
 // run makes the commits. Each commit is a pack that is consistent by itself, so that any commit can be checked out
 // and used, or found to be the one that broke something: it holds the mod's file and an index and pack.toml that
 // describe the pack as it is in that commit, which is the last commit's pack with only that mod changed.
-func (c committer) run(steps []commitStep) error {
+func (c committer) run(steps []commitStep, report func(message string)) error {
 	// Versions belong in the commit of the mod they were looked up for, so they're in the files before any commit
 	if err := c.w.Index.RecordVersions(c.w.Versions); err != nil {
 		return err
@@ -229,7 +270,7 @@ func (c committer) run(steps []commitStep) error {
 				made, len(steps), plural(len(steps), "commit"), firstLine(step.message), err)
 		}
 		made++
-		printCommitted(step.message)
+		report(step.message)
 	}
 
 	if err := c.writeIndexAndPack(c.w.Index.Files, c.w.Pack); err != nil {
@@ -241,7 +282,7 @@ func (c committer) run(steps []commitStep) error {
 	}
 	if !dirty {
 		if made == 0 {
-			ui.Info.Println("Nothing to commit.")
+			notice.Infof("Nothing to commit.")
 		}
 		return nil
 	}
@@ -256,7 +297,7 @@ func (c committer) run(steps []commitStep) error {
 		return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again to commit the rest",
 			made, len(steps), plural(len(steps), "commit"), firstLine(message), err)
 	}
-	printCommitted(message)
+	report(message)
 	return nil
 }
 

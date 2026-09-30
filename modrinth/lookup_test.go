@@ -122,6 +122,15 @@ func TestResolveVersionNumberNotFound(t *testing.T) {
 	}
 }
 
+// installVersionByID adds the version with an ID, as the command does when it is given a version ID
+func installVersionByID(pack core.Pack, index *core.Index, versionID string) error {
+	project, version, err := resolveTarget(pack, index, "", "", versionID, "")
+	if err != nil {
+		return err
+	}
+	return installVersion(project, version, "", pack, index, "")
+}
+
 func TestInstallVersionById(t *testing.T) {
 	httpmock.Activate(t)
 	pack, index := setupPackFixture(t)
@@ -132,8 +141,8 @@ func TestInstallVersionById(t *testing.T) {
 	httpmock.RegisterResponder("GET", "https://api.modrinth.com/v2/project/p1",
 		httpmock.NewStringResponder(200, `{"id":"p1","slug":"test-project","title":"Test Project","project_type":"mod","client_side":"required","server_side":"required"}`))
 
-	if err := installVersionById("v1", "", pack, &index, ""); err != nil {
-		t.Fatalf("installVersionById() returned error: %v", err)
+	if err := installVersionByID(pack, &index, "v1"); err != nil {
+		t.Fatalf("adding version v1 returned error: %v", err)
 	}
 
 	metaPath := filepath.Join("mods", "test-project"+core.MetaExtension)
@@ -149,7 +158,7 @@ func TestInstallVersionByIdUnknownVersion(t *testing.T) {
 	httpmock.RegisterResponder("GET", "https://api.modrinth.com/v2/version/missing",
 		httpmock.NewStringResponder(404, `{"error":"not_found","description":"missing"}`))
 
-	if err := installVersionById("missing", "", pack, &index, ""); err == nil {
+	if err := installVersionByID(pack, &index, "missing"); err == nil {
 		t.Error("expected an error for an unknown version ID, got nil")
 	}
 }

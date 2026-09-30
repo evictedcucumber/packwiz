@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/evictedcucumber/packwiz/core"
-	"github.com/evictedcucumber/packwiz/internal/ui"
+	"github.com/evictedcucumber/packwiz/internal/notice"
 )
 
 // Working is the pack as it is on disk now.
@@ -32,7 +32,7 @@ func LoadWorking(strict bool) (Working, error) {
 	if err != nil {
 		return Working{}, err
 	}
-	if err := index.Refresh(); err != nil {
+	if err := refreshIndex(&index); err != nil {
 		return Working{}, err
 	}
 
@@ -41,9 +41,22 @@ func LoadWorking(strict bool) (Working, error) {
 		if strict {
 			return Working{}, fmt.Errorf("couldn't look up the versions of mods that don't record one: %w", err)
 		}
-		ui.Warning.Printf("Warning: couldn't look up the versions of mods that don't record one (%v); they are shown by file name.\n", err)
+		notice.Warnf("Warning: couldn't look up the versions of mods that don't record one (%v); they are shown by file name.", err)
 	}
 	return Working{pack, index, versions}, nil
+}
+
+// refreshIndex brings the index up to date with the files, showing how it is getting on and what it finds on the terminal,
+// unless whatever is running has the terminal to itself (see notice.Collecting), which is told of what it finds instead.
+func refreshIndex(index *core.Index) error {
+	if !notice.Collecting() {
+		return index.Refresh()
+	}
+	notices, err := index.RefreshQuietly()
+	for _, n := range notices {
+		notice.Infof("%s", n)
+	}
+	return err
 }
 
 // Snapshot describes the pack as it is, with the versions that were looked up.

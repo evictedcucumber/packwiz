@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -43,7 +44,7 @@ var initCmd = &cobra.Command{
 			}
 			if directoryName != "." && len(directoryName) > 0 {
 				// Turn directory name into a space-seperated proper name
-				name = titlecase.Title(strings.ReplaceAll(strings.ReplaceAll(strings.Join(camelcase.Split(directoryName), " "), " - ", " "), " _ ", " "))
+				name = packNameFromDirectory(directoryName)
 				name = initReadValue("Modpack name ["+name+"]: ", name)
 			} else {
 				name = initReadValue("Modpack name: ", "")
@@ -118,14 +119,7 @@ var initCmd = &cobra.Command{
 				ui.Error.Printf("Error loading versions: %s\n", err)
 				os.Exit(1)
 			}
-			// NeoForge reused Forge's version-prefixing format (prefixed with the supported
-			// minecraft version), but only during the 1.20.1 days; they've since switched formats.
-			resolveVersion := func(v string) string {
-				if loader.Name == "neoforge" && mcVersion == "1.20.1" {
-					return cmdshared.GetRawForgeVersion(v)
-				}
-				return v
-			}
+			resolveVersion := func(v string) string { return LoaderVersion(loader, mcVersion, v) }
 			isValidComponentVersion := func(v string) bool { return slices.Contains(versionData.Versions, resolveVersion(v)) }
 
 			componentVersion := viper.GetString("init." + loader.Name + "-version")
@@ -149,72 +143,138 @@ var initCmd = &cobra.Command{
 			modLoaderVersions[loader.Name] = resolveVersion(componentVersion)
 		}
 
-		indexFilePath := viper.GetString("init.index-file")
-		_, err = os.Stat(indexFilePath)
-		if os.IsNotExist(err) {
-			// Create file
-			err = os.WriteFile(indexFilePath, []byte{}, 0644)
-			if err != nil {
-				ui.Error.Printf("Error creating index file: %s\n", err)
-				os.Exit(1)
-			}
-			ui.Success.Println(indexFilePath + " created!")
-		} else if err != nil {
-			ui.Error.Printf("Error checking index file: %s\n", err)
-			os.Exit(1)
-		}
-
-		// Create the pack
-		pack := core.Pack{
-			Name:       name,
-			Author:     author,
-			Version:    version,
-			PackFormat: core.CurrentPackFormat,
-			Index: struct {
-				File       string `toml:"file"`
-				HashFormat string `toml:"hash-format"`
-				Hash       string `toml:"hash,omitempty"`
-			}{
-				File: indexFilePath,
-			},
-			Versions: map[string]string{
-				"minecraft": mcVersion,
-			},
-		}
-		if modLoaderName != "none" {
-			for k, v := range modLoaderVersions {
-				pack.Versions[k] = v
-			}
-		}
-
-		// Refresh the index and pack
-		index, err := pack.LoadIndex()
-		if err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
-		err = index.Refresh()
-		if err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
-		err = index.Write()
-		if err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
-		err = pack.UpdateIndexHash()
-		if err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
-		err = pack.Write()
+		_, err = createPack(NewPack{
+			Name: name, Author: author, Version: version, MCVersion: mcVersion,
+			Loader: modLoaderName, LoaderVersion: modLoaderVersions[modLoaderName],
+			IndexFile: viper.GetString("init.index-file"),
+		}, false, func(indexFile string) { ui.Success.Println(indexFile + " created!") })
 		if err != nil {
 			ui.Error.Println(err)
 			os.Exit(1)
 		}
 		ui.Success.Println(viper.GetString("pack-file") + " created!")
 	},
+}
+
+// packNameFromDirectory turns the name of a folder into what a pack in it could be called: "my-cool_pack" is "My Cool Pack".
+func packNameFromDirectory(directory string) string {
+	return titlecase.Title(strings.ReplaceAll(strings.ReplaceAll(strings.Join(camelcase.Split(directory), " "), " - ", " "), " _ ", " "))
+}
+
+// DefaultPackName is what a pack in the current directory is called if it isn't told otherwise, going by the name of the
+// folder, or "" if that isn't known.
+func DefaultPackName() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	directory := filepath.Base(wd)
+	if directory == "." || directory == "" || directory == string(filepath.Separator) {
+		return ""
+	}
+	return packNameFromDirectory(directory)
+}
+
+// LoaderVersion is the version of a mod loader as a pack records it, given the one that was chosen for a Minecraft
+// version. NeoForge reused Forge's version-prefixing format (prefixed with the supported Minecraft version), but only
+// during the 1.20.1 days; they've since switched formats.
+func LoaderVersion(loader core.ModLoaderComponent, mcVersion, chosen string) string {
+	if loader.Name == "neoforge" && mcVersion == "1.20.1" {
+		return cmdshared.GetRawForgeVersion(chosen)
+	}
+	return chosen
+}
+
+// LoaderVersions lists the versions of a mod loader that are for a Minecraft version, and which of them is the latest. It
+// asks the network. loader is one of the names in core.ModLoaders.
+func LoaderVersions(loader, mcVersion string) (*core.ModLoaderVersions, error) {
+	component, ok := core.ModLoaders[loader]
+	if !ok {
+		return nil, fmt.Errorf("%q is not a supported mod loader", loader)
+	}
+	return core.DoQuery(core.MakeQuery(component, mcVersion))
+}
+
+// NewPack is what a pack is created with.
+type NewPack struct {
+	Name, Author, Version string
+	// MCVersion is the Minecraft version, which isn't checked here
+	MCVersion string
+	// Loader is the name of the mod loader, which is one of the names in core.ModLoaders, or "none" or empty for no mod
+	// loader, and LoaderVersion the version of it
+	Loader, LoaderVersion string
+	// IndexFile is where the index is, relative to pack.toml
+	IndexFile string
+}
+
+// CreatePack creates a pack in the current directory: pack.toml, and the index of the files it has, as "packwiz init" does
+// without asking anything. It says nothing on the terminal. It won't replace a pack that is there.
+func CreatePack(pack NewPack) error {
+	if _, err := os.Stat(viper.GetString("pack-file")); err == nil {
+		return errors.New("Modpack metadata file already exists")
+	}
+	_, err := createPack(pack, true, nil)
+	return err
+}
+
+// createPack writes the index file if it isn't there, then the pack, and refreshes the index to have the files the pack
+// has. indexCreated, if it isn't nil, is told when the index file is made, which is before the rest. With quiet, nothing is
+// printed, not even the progress of the refresh.
+func createPack(np NewPack, quiet bool, indexCreated func(indexFile string)) (created bool, err error) {
+	indexFilePath := np.IndexFile
+	if indexFilePath == "" {
+		indexFilePath = "index.toml"
+	}
+	_, err = os.Stat(indexFilePath)
+	if os.IsNotExist(err) {
+		// Create file
+		err = os.WriteFile(indexFilePath, []byte{}, 0644)
+		if err != nil {
+			return false, fmt.Errorf("Error creating index file: %s", err)
+		}
+		created = true
+		if indexCreated != nil {
+			indexCreated(indexFilePath)
+		}
+	} else if err != nil {
+		return false, fmt.Errorf("Error checking index file: %s", err)
+	}
+
+	// Create the pack
+	pack := core.Pack{
+		Name:       np.Name,
+		Author:     np.Author,
+		Version:    np.Version,
+		PackFormat: core.CurrentPackFormat,
+		Index: struct {
+			File       string `toml:"file"`
+			HashFormat string `toml:"hash-format"`
+			Hash       string `toml:"hash,omitempty"`
+		}{
+			File: indexFilePath,
+		},
+		Versions: map[string]string{
+			"minecraft": np.MCVersion,
+		},
+	}
+	if np.Loader != "" && np.Loader != "none" {
+		pack.Versions[np.Loader] = np.LoaderVersion
+	}
+
+	// Refresh the index and pack
+	index, err := pack.LoadIndex()
+	if err != nil {
+		return created, err
+	}
+	if quiet {
+		_, err = index.RefreshQuietly()
+	} else {
+		err = index.Refresh()
+	}
+	if err != nil {
+		return created, err
+	}
+	return created, pack.SaveIndex(index)
 }
 
 func init() {

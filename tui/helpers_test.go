@@ -114,7 +114,10 @@ func keyMsg(t *testing.T, name string) tea.KeyPressMsg {
 		"pgup":      {Code: tea.KeyPgUp},
 		"pgdown":    {Code: tea.KeyPgDown},
 		"space":     {Code: tea.KeySpace, Text: " "},
+		"shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift},
 		"ctrl+c":    {Code: 'c', Mod: tea.ModCtrl},
+		"ctrl+r":    {Code: 'r', Mod: tea.ModCtrl},
+		"ctrl+s":    {Code: 's', Mod: tea.ModCtrl},
 		"ctrl+u":    {Code: 'u', Mod: tea.ModCtrl},
 		"ctrl+w":    {Code: 'w', Mod: tea.ModCtrl},
 	}
@@ -129,20 +132,33 @@ func keyMsg(t *testing.T, name string) tea.KeyPressMsg {
 }
 
 // feed sends a message to a screen, and then what the commands it starts come back with, and theirs in turn, as Bubble
-// Tea runs a program. A command that returns nothing ends it.
+// Tea runs a program. A command that returns nothing ends it, and one that starts several (a batch) is all run.
 func feed(t *testing.T, s screen, msg tea.Msg) {
 	t.Helper()
-	for range 20 {
-		var cmd tea.Cmd
-		s, cmd = s.update(msg)
-		if cmd == nil {
-			return
+	queue := []tea.Msg{msg}
+	for steps := 0; len(queue) > 0; steps++ {
+		if steps > 1000 {
+			t.Fatal("commands kept starting more commands")
 		}
-		if msg = cmd(); msg == nil {
-			return
+		next := queue[0]
+		queue = queue[1:]
+		if next == nil {
+			continue
+		}
+		if batch, ok := next.(tea.BatchMsg); ok {
+			for _, cmd := range batch {
+				if cmd != nil {
+					queue = append(queue, cmd())
+				}
+			}
+			continue
+		}
+		var cmd tea.Cmd
+		s, cmd = s.update(next)
+		if cmd != nil {
+			queue = append(queue, cmd())
 		}
 	}
-	t.Fatal("commands kept starting more commands")
 }
 
 // press presses keys on a screen, one after another, running whatever they start.
@@ -210,7 +226,7 @@ func cursorRow(t *testing.T, s *configScreen) string {
 }
 
 // statusOf is the last line of a screen, which says what was done.
-func statusOf(s *configScreen) string {
+func statusOf(s screen) string {
 	all := lines(s.view())
 	return all[len(all)-1]
 }
@@ -346,4 +362,133 @@ func mustLoad(t *testing.T) configData {
 // windowSize is the message that tells a program how big its terminal is.
 func windowSize(width, height int) tea.WindowSizeMsg {
 	return tea.WindowSizeMsg{Width: width, Height: height}
+}
+
+// stubUpdater is a source of updates that says what a test tells it to of each mod, for a mod with an [update.stub]
+// table. What it finds for a mod it doesn't mention is that it is up to date.
+type stubUpdater struct {
+	// checks are what it says of each mod, by its name
+	checks map[string]core.UpdateCheck
+	// err fails looking for updates as a whole, and doErr fails making them
+	err, doErr error
+	// updated are the mods that it was asked to update, by name
+	updated []string
+}
+
+func (*stubUpdater) ParseUpdate(data map[string]interface{}) (interface{}, error) { return data, nil }
+
+func (u *stubUpdater) CheckUpdate(mods []*core.Mod, _ core.Pack) ([]core.UpdateCheck, error) {
+	if u.err != nil {
+		return nil, u.err
+	}
+	checks := make([]core.UpdateCheck, len(mods))
+	for i, mod := range mods {
+		checks[i] = u.checks[mod.Name]
+	}
+	return checks, nil
+}
+
+// DoUpdate points each mod at the file its update says, which is the state of the check, and gives it version 2.0.
+func (u *stubUpdater) DoUpdate(mods []*core.Mod, state []interface{}) error {
+	if u.doErr != nil {
+		return u.doErr
+	}
+	for i, mod := range mods {
+		u.updated = append(u.updated, mod.Name)
+		mod.FileName, _ = state[i].(string)
+		mod.Version = "2.0"
+	}
+	return nil
+}
+
+// useUpdater makes the updater the source of updates for mods that have an [update.stub] table, for the test.
+func useUpdater(t *testing.T, u *stubUpdater) *stubUpdater {
+	t.Helper()
+	core.Updaters["stub"] = u
+	t.Cleanup(func() { delete(core.Updaters, "stub") })
+	return u
+}
+
+// stubTable is what a mod's metadata file needs to be updated by the stub updater, for writeMod's extra.
+const stubTable = "\n[update]\n[update.stub]\nid = \"x\"\n"
+
+// writeModAt writes a mod whose metadata file has the given lines at the top, which can be any of its fields: a side, or
+// whether it was added as a dependency.
+func writeModAt(t *testing.T, slug, name, top string) {
+	t.Helper()
+	writeMod(t, slug, name, top, "")
+}
+
+// modLines are the lines of the mods screen's list, without the summary and the status: a line for each mod that is shown.
+func modLines(t *testing.T, s *modsScreen) []string {
+	t.Helper()
+	all := lines(s.view())
+	if len(all) != s.height {
+		t.Fatalf("the screen is %d lines, want %d", len(all), s.height)
+	}
+	body := all[1 : len(all)-1]
+	for len(body) > 0 && body[len(body)-1] == "" {
+		body = body[:len(body)-1]
+	}
+	return body
+}
+
+// newMods makes a mods screen on the pack that setUpPack made, with the pack read.
+func newMods(t *testing.T) *modsScreen {
+	t.Helper()
+	setUpPack(t)
+	return modsOn(t, packBackend{})
+}
+
+func modsOn(t *testing.T, backend modsBackend) *modsScreen {
+	t.Helper()
+	s := newModsScreen(backend)
+	s.setSize(100, 24)
+	feed(t, s, s.activate()())
+	return s
+}
+
+// newUpdates makes an updates screen on the pack that is in the working directory.
+func newUpdates(t *testing.T) *updatesScreen {
+	t.Helper()
+	s := newUpdatesScreen(packBackend{})
+	s.setSize(100, 24)
+	return s
+}
+
+// setUpUpdatable makes the pack that setUpPack makes have its mods, and three more, looked after by the stub updater:
+// Gamma Mod and Delta Mod have an update, and the others are up to date.
+func setUpUpdatable(t *testing.T) *stubUpdater {
+	t.Helper()
+	setUpPack(t)
+	for _, m := range []struct{ slug, name string }{{"alpha", "Alpha Mod"}, {"beta", "Beta Mod"}, {"gamma", "Gamma Mod"}, {"delta", "Delta Mod"}, {"epsilon", "Epsilon Mod"}} {
+		writeMod(t, m.slug, m.name, "", stubTable)
+	}
+	u := useUpdater(t, &stubUpdater{checks: map[string]core.UpdateCheck{
+		"Gamma Mod": {UpdateAvailable: true, UpdateString: "gamma.jar -> gamma-2.jar", CachedState: "gamma-2.jar"},
+		"Delta Mod": {UpdateAvailable: true, UpdateString: "delta.jar -> delta-2.jar", CachedState: "delta-2.jar"},
+	}})
+	if _, err := (packBackend{}).refresh(); err != nil {
+		t.Fatalf("refresh() returned error: %v", err)
+	}
+	return u
+}
+
+// body is what a screen draws between its summary and its status, without the blank lines after it.
+func body(t *testing.T, s screen) []string {
+	t.Helper()
+	all := lines(s.view())
+	out := all[1 : len(all)-1]
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return out
+}
+
+// mustRemove deletes a file of the pack under test.
+func mustRemove(t *testing.T, name string) {
+	t.Helper()
+	if err := os.Remove(name); err != nil {
+		t.Fatalf("failed to remove %s: %v", name, err)
+	}
 }

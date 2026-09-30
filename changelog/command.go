@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/notice"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -81,61 +83,191 @@ release lists what has changed in the pack since the last one, which it keeps a 
 	},
 }
 
-// runSave writes CHANGELOG.md from the releases recorded in the history, without releasing anything
-func runSave() error {
-	history, err := LoadHistory(historyPath())
-	if err != nil {
-		return fmt.Errorf("failed to read %s: %w", HistoryFile, err)
-	}
-	// Changes made since the last release are listed first as unreleased. Nothing is released or recorded for them.
+// unreleasedChanges are the changes made since the last release, which CHANGELOG.md lists first as unreleased. Nothing is
+// released or recorded for them. A pack that isn't in a repository can have them only if what it was at the last release is
+// known, and if it isn't they aren't listed, which is said.
+func unreleasedChanges(history History) ([]Change, error) {
 	repo, err := openRepository()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var unreleased []Change
 	if repo == nil {
 		if err := checkWithoutRepository(history, ""); err != nil {
-			ui.Info.Printf("Not listing unreleased changes: %s.\n", err)
-			return saveMarkdown(history, nil)
+			notice.Infof("Not listing unreleased changes: %s.", err)
+			return nil, nil
 		}
 	}
 	p, err := loadPending(repo, false, "", true)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	unreleased = p.changes
-	return saveMarkdown(history, unreleased)
+	return p.changes, nil
 }
 
-func saveMarkdown(history History, unreleased []Change) error {
+// saveMarkdown writes CHANGELOG.md from the releases recorded in the history, with the changes that aren't released yet
+// listed above them, without releasing anything. What it says goes through notice.
+func saveMarkdown() error {
+	history, err := LoadHistory(historyPath())
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", HistoryFile, err)
+	}
+	unreleased, err := unreleasedChanges(history)
+	if err != nil {
+		return err
+	}
 	if err := writeFileAtomic(markdownPath(), []byte(RenderMarkdownWithUnreleased(history.Releases, unreleased))); err != nil {
 		return fmt.Errorf("failed to write %s: %w", MarkdownFile, err)
+	}
+	return nil
+}
+
+// SaveMarkdown writes CHANGELOG.md as "packwiz changelog --save" does, and returns where it wrote it and what it said along
+// the way, in plain text. It says nothing on the terminal.
+func SaveMarkdown() (path string, notices []string, err error) {
+	collected := notice.Collect(func() { err = saveMarkdown() })
+	if err != nil {
+		return "", nil, err
+	}
+	for _, n := range collected {
+		if n.Level != notice.Muted {
+			notices = append(notices, n.Text)
+		}
+	}
+	return markdownPath(), notices, nil
+}
+
+// runSave writes CHANGELOG.md from the releases recorded in the history, without releasing anything
+func runSave() error {
+	if err := saveMarkdown(); err != nil {
+		return err
 	}
 	ui.Success.Printf("Wrote %s.\n", ui.Bold.Sprint(MarkdownFile))
 	return nil
 }
 
-// runPreview prints the release the pack's changes would make, including those that haven't been committed yet,
-// without changing anything. since is the commit to read the log from, if it isn't where the last release was made.
-func runPreview(since string) error {
-	repo, err := openRepository()
+// Preview is the release that the pack's changes would make, for showing: nothing is committed or saved.
+type Preview struct {
+	// InRepository is whether the pack is in a repository, so that its changes are read from the log. If it isn't, Reason
+	// says why, and they are found by comparing the pack with what it was at the last release.
+	InRepository bool
+	Reason       string
+	// Last is the version of the last release, if there has been one
+	Last string
+	// HasChanges is whether there is anything to release. If there isn't, NoChanges says so, and Release is empty.
+	HasChanges bool
+	NoChanges  string
+	Release    Release
+	// Notes are things to know about how the version was worked out, such as that pack.toml has another version than the
+	// last release
+	Notes []string
+	// Notices are what loading the pack had to say as it went, in plain text
+	Notices []string
+
+	release releasePlan
+}
+
+// releasePlan is what text of a release needs besides the release itself.
+type releasePlan struct {
+	last    string
+	hasLast bool
+	// packVersionNote is the note that pack.toml has a different version than the last release, if it does
+	packVersionNote string
+}
+
+// Text is the release as "packwiz changelog" prints it: what version it would be, then what is in it, styled for the
+// terminal it is shown on (see package ui).
+func (p Preview) Text() string {
+	if !p.HasChanges {
+		return p.NoChanges + "\n"
+	}
+	return planText(p.Release, p.release)
+}
+
+// LoadPreview works out the release that the pack's changes would make, and says nothing on the terminal. since is the
+// commit to read the log from, if it isn't where the last release was made, and version a version to use instead of the one
+// that is worked out from the changes.
+func LoadPreview(since, version string) (Preview, error) {
+	var preview Preview
+	var err error
+	notices := notice.Collect(func() { preview, err = loadPreview(since, version) })
 	if err != nil {
-		return err
+		return Preview{}, err
+	}
+	for _, n := range notices {
+		// A pack that isn't in a repository is said by Reason
+		if n.Level != notice.Muted && n.Text != notReadingLog(errors.New(preview.Reason)) {
+			preview.Notices = append(preview.Notices, n.Text)
+		}
+	}
+	return preview, nil
+}
+
+// notReadingLog is what is said when the pack isn't in a repository, so there is no log to read.
+func notReadingLog(reason error) string {
+	return fmt.Sprintf("Not reading the git log (%v).", reason)
+}
+
+func loadPreview(since, version string) (Preview, error) {
+	repo, err := OpenRepository()
+	preview := Preview{InRepository: err == nil}
+	switch {
+	case errors.Is(err, ErrNoRepository):
+		notice.Infof("%s", notReadingLog(err))
+		preview.Reason = err.Error()
+		repo = nil
+	case err != nil:
+		return Preview{}, err
 	}
 	p, err := loadPending(repo, false, since, true)
 	if err != nil {
-		return err
+		return Preview{}, err
+	}
+	preview.Last, preview.release.hasLast = "", false
+	if last, ok := p.history.Latest(); ok {
+		preview.Last, preview.release.last, preview.release.hasLast = last.Version, last.Version, true
 	}
 	if len(p.changes) == 0 {
-		ui.Info.Println(p.noChangesMessage())
-		return nil
+		preview.NoChanges = p.noChangesMessage()
+		return preview, nil
 	}
-	release, err := p.plan("")
+	release, err := p.plan(version)
+	if err != nil {
+		return Preview{}, err
+	}
+	preview.HasChanges, preview.Release = true, release
+	if preview.release.hasLast && p.pack.Version != "" && p.pack.Version != preview.release.last {
+		preview.release.packVersionNote = fmt.Sprintf("Note: pack.toml has version %s, but the last release was %s; using the last release as the base.", p.pack.Version, preview.release.last)
+		preview.Notes = append(preview.Notes, preview.release.packVersionNote)
+	}
+	return preview, nil
+}
+
+// runPreview prints the release the pack's changes would make, including those that haven't been committed yet,
+// without changing anything. since is the commit to read the log from, if it isn't where the last release was made.
+func runPreview(since string) error {
+	preview, err := loadPreview(since, "")
 	if err != nil {
 		return err
 	}
-	p.printPlan(release)
+	if !preview.HasChanges {
+		ui.Info.Println(preview.NoChanges)
+		return nil
+	}
+	fmt.Print(preview.Text())
 	return nil
+}
+
+// releaseHooks are what the command line does at points of making a release, which an interface of another kind has no use
+// for: it asks its questions before it makes one, and has other ways of showing what was done.
+type releaseHooks struct {
+	// show is given the release before it is made
+	show func(p pending, release Release)
+	// confirm is asked whether to make it, and if it says no nothing is made. Nil is a yes.
+	confirm func(release Release) bool
+	// committed, if it isn't nil, is told of each commit made first, which are otherwise printed
+	committed func(message string)
+	// nothing, if it isn't nil, is told why there is nothing to release, which is otherwise printed
+	nothing func(message string)
 }
 
 // RunRelease records the release that the commits made since the last one make, once the user confirms it. First it
@@ -147,12 +279,69 @@ func runPreview(since string) error {
 // A pack that isn't in a repository has no log, so nothing is committed and the release is what has changed in the
 // pack since the last one, which the release keeps a record of.
 func RunRelease(versionOverride, since string) (Release, bool, error) {
+	release, released, err := makeRelease(versionOverride, since, releaseHooks{
+		show: func(p pending, release Release) { fmt.Print(planText(release, p.describe())) },
+		confirm: func(release Release) bool {
+			if !cmdshared.PromptYesNo(fmt.Sprintf("Release %s? [Y/n]: ", release.Version)) {
+				ui.Warning.Println("Cancelled!")
+				return false
+			}
+			return true
+		},
+	})
+	if released {
+		ui.Success.Printf("Released %s!\n", ui.Bold.Sprint(release.Version))
+	}
+	return release, released, err
+}
+
+// Released is what making a release did.
+type Released struct {
+	// Made is whether a release was made: it isn't if there is nothing to release
+	Made    bool
+	Release Release
+	// Committed are the messages of the commits that were made first, so that they are in the log the release was made from
+	Committed []string
+	// NoChanges says why nothing was released, if nothing was
+	NoChanges string
+	// Notices are what making it said along the way, in plain text
+	Notices []string
+}
+
+// MakeRelease records the release that the pack's changes make, as "packwiz changelog release" does, without asking whether
+// to: whoever calls it has. It says nothing on the terminal. See RunRelease for what it does and for versionOverride and since.
+func MakeRelease(versionOverride, since string) (Released, error) {
+	var result Released
+	var err error
+	notices := notice.Collect(func() {
+		result.Release, result.Made, err = makeRelease(versionOverride, since, releaseHooks{
+			committed: func(message string) { result.Committed = append(result.Committed, message) },
+			nothing:   func(message string) { result.NoChanges = message },
+		})
+	})
+	if err != nil {
+		return Released{}, err
+	}
+	for _, n := range notices {
+		if n.Level != notice.Muted {
+			result.Notices = append(result.Notices, n.Text)
+		}
+	}
+	return result, nil
+}
+
+func makeRelease(versionOverride, since string, hooks releaseHooks) (Release, bool, error) {
 	repo, err := openRepository()
 	if err != nil {
 		return Release{}, false, err
 	}
 	if repo != nil {
-		if err := repo.CommitPending(); err != nil {
+		if reporter, ok := repo.(CommitReporter); ok && hooks.committed != nil {
+			err = reporter.CommitPendingReporting(hooks.committed)
+		} else {
+			err = repo.CommitPending()
+		}
+		if err != nil {
 			return Release{}, false, err
 		}
 	}
@@ -161,13 +350,17 @@ func RunRelease(versionOverride, since string) (Release, bool, error) {
 		return Release{}, false, err
 	}
 	if len(p.changes) == 0 {
-		ui.Info.Println(p.noChangesMessage())
+		if hooks.nothing != nil {
+			hooks.nothing(p.noChangesMessage())
+		} else {
+			notice.Infof("%s", p.noChangesMessage())
+		}
 		// Nothing to release, but past releases can still be made to show versions where they showed file names
 		if p.upgraded > 0 {
 			if err := p.save(p.history); err != nil {
 				return Release{}, false, fmt.Errorf("failed to update the changelog: %w", err)
 			}
-			ui.Success.Printf("Updated %d %s in the changelog.\n", p.upgraded, plural(p.upgraded, "line"))
+			notice.Successf("Updated %d %s in the changelog.", p.upgraded, plural(p.upgraded, "line"))
 		}
 		return Release{}, false, nil
 	}
@@ -175,16 +368,15 @@ func RunRelease(versionOverride, since string) (Release, bool, error) {
 	if err != nil {
 		return Release{}, false, err
 	}
-	p.printPlan(release)
-
-	if !cmdshared.PromptYesNo(fmt.Sprintf("Release %s? [Y/n]: ", release.Version)) {
-		ui.Warning.Println("Cancelled!")
+	if hooks.show != nil {
+		hooks.show(p, release)
+	}
+	if hooks.confirm != nil && !hooks.confirm(release) {
 		return Release{}, false, nil
 	}
 	if err := p.apply(release); err != nil {
 		return Release{}, false, fmt.Errorf("failed to release: %w", err)
 	}
-	ui.Success.Printf("Released %s!\n", ui.Bold.Sprint(release.Version))
 	return release, true, nil
 }
 
@@ -203,7 +395,7 @@ func init() {
 func openRepository() (Repository, error) {
 	repo, err := OpenRepository()
 	if errors.Is(err, ErrNoRepository) {
-		ui.Info.Printf("Not reading the git log (%v).\n", err)
+		notice.Infof("%s", notReadingLog(err))
 		return nil, nil
 	}
 	return repo, err
@@ -407,18 +599,32 @@ func (p pending) firstVersion(override *Version) (Version, error) {
 	return v, nil
 }
 
-func (p pending) printPlan(release Release) {
-	last, hasLast := p.history.Latest()
-	if hasLast {
-		fmt.Printf("Changes since %s; next version is %s %s\n", last.Version, ui.Bold.Sprint(release.Version), ui.Muted.Sprintf("(%s bump)", release.Bump))
+// describe is what the text of a release needs to know of what is pending.
+func (p pending) describe() releasePlan {
+	plan := releasePlan{}
+	if last, ok := p.history.Latest(); ok {
+		plan.last, plan.hasLast = last.Version, true
 		if p.pack.Version != "" && p.pack.Version != last.Version {
-			ui.Info.Printf("Note: pack.toml has version %s, but the last release was %s; using the last release as the base.\n", p.pack.Version, last.Version)
+			plan.packVersionNote = fmt.Sprintf("Note: pack.toml has version %s, but the last release was %s; using the last release as the base.", p.pack.Version, last.Version)
+		}
+	}
+	return plan
+}
+
+// planText is what "packwiz changelog" says of a release before it is made: what version it would be and then what is in it.
+func planText(release Release, plan releasePlan) string {
+	var b strings.Builder
+	if plan.hasLast {
+		fmt.Fprintf(&b, "Changes since %s; next version is %s %s\n", plan.last, ui.Bold.Sprint(release.Version), ui.Muted.Sprintf("(%s bump)", release.Bump))
+		if plan.packVersionNote != "" {
+			b.WriteString(ui.Info.Sprint(plan.packVersionNote) + "\n")
 		}
 	} else {
-		fmt.Printf("First release; version is %s\n", ui.Bold.Sprint(release.Version))
+		fmt.Fprintf(&b, "First release; version is %s\n", ui.Bold.Sprint(release.Version))
 	}
-	fmt.Println()
-	fmt.Println(renderRelease(release, style{colour: true}))
+	b.WriteString("\n")
+	b.WriteString(renderRelease(release, style{colour: true}) + "\n")
+	return b.String()
 }
 
 // apply records the release, as made at the commit that was current when it was worked out.

@@ -105,16 +105,67 @@ func runRelease(versionOverride, since string) error {
 		return nil
 	}
 
-	// From here the release is on disk, so failing to commit or tag it has to say how to finish the job by hand
-	tag := TagName(release.Version)
-	if err := r.commitAll(ReleaseMessage(release.Version)); err != nil {
-		return fmt.Errorf("released %s, but couldn't commit it: %w\nCommit the changed files yourself, then tag the commit %s", release.Version, err, tag)
-	}
-	if err := r.tag(tag, "Release "+release.Version); err != nil {
-		return fmt.Errorf("released and committed %s, but couldn't tag it: %w\nTag the commit %s yourself", release.Version, err, tag)
+	tag, err := commitRelease(r, release)
+	if err != nil {
+		return err
 	}
 	ui.Success.Printf("Committed and tagged %s\n", ui.Bold.Sprint(tag))
 	return nil
+}
+
+// commitRelease commits a release that is on disk, and tags the commit, and returns the tag. From here the release is made,
+// so failing to commit or tag it has to say how to finish the job by hand.
+func commitRelease(r repo, release changelog.Release) (tag string, err error) {
+	tag = TagName(release.Version)
+	if err := r.commitAll(ReleaseMessage(release.Version)); err != nil {
+		return "", fmt.Errorf("released %s, but couldn't commit it: %w\nCommit the changed files yourself, then tag the commit %s", release.Version, err, tag)
+	}
+	if err := r.tag(tag, "Release "+release.Version); err != nil {
+		return "", fmt.Errorf("released and committed %s, but couldn't tag it: %w\nTag the commit %s yourself", release.Version, err, tag)
+	}
+	return tag, nil
+}
+
+// Released is what releasing the pack did.
+type Released struct {
+	// Made is whether a release was made: it isn't if there is nothing to release
+	Made    bool
+	Release changelog.Release
+	// Committed are the messages of the commits made first, so that they are in the log the release was made from
+	Committed []string
+	// Tag is the tag the release was committed with
+	Tag string
+	// NoChanges says why nothing was released, if nothing was
+	NoChanges string
+	// Dirty is whether the pack has changes that aren't committed, which is so after nothing was released if that still
+	// changed the changelog
+	Dirty bool
+	// Notices are what was said along the way, in plain text
+	Notices []string
+}
+
+// ReleaseAndTag records a release, commits it and tags it, as "packwiz git release" does, without asking whether to and
+// without saying anything on the terminal: whoever calls it has asked. See runRelease for versionOverride and since.
+func ReleaseAndTag(versionOverride, since string) (Released, error) {
+	r, err := openRepo(packRoot())
+	if err != nil {
+		return Released{}, err
+	}
+	made, err := changelog.MakeRelease(versionOverride, since)
+	if err != nil {
+		return Released{}, err
+	}
+	result := Released{Made: made.Made, Release: made.Release, Committed: made.Committed, NoChanges: made.NoChanges, Notices: made.Notices}
+	if !made.Made {
+		if dirty, err := r.dirty(); err == nil {
+			result.Dirty = dirty
+		}
+		return result, nil
+	}
+	if result.Tag, err = commitRelease(r, made.Release); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func firstLine(s string) string {

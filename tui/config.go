@@ -47,6 +47,12 @@ type loadedMsg struct {
 	err  error
 }
 
+// reloadedMsg is the pack's config files having been read again because the screen was switched to.
+type reloadedMsg struct {
+	data configData
+	err  error
+}
+
 // changedMsg is a change to the pack having been made, or failed. Either way the pack is read again, as a change that
 // failed can have been made in part.
 type changedMsg struct {
@@ -97,7 +103,20 @@ func newConfigScreen(backend configBackend, data configData) *configScreen {
 
 func (s *configScreen) title() string { return "Config" }
 
-func (s *configScreen) init() tea.Cmd { return nil }
+func (s *configScreen) about() string { return "say which mod, loader or pack owns each config file" }
+
+// activate reads the pack again, as another screen may have changed what it says about config files (taking out entries
+// that match no file, say). It isn't a job: it doesn't stop keys, and what it finds is only shown.
+func (s *configScreen) activate() tea.Cmd {
+	backend := s.backend
+	return exclusive(func() tea.Msg {
+		data, err := backend.load()
+		return reloadedMsg{data, err}
+	})
+}
+
+// working is whether the pack is being changed, or read after it was.
+func (s *configScreen) working() bool { return s.busy != "" }
 
 func (s *configScreen) modal() bool { return s.overlay != nil || s.searching }
 
@@ -209,6 +228,12 @@ func (s *configScreen) move(delta int) {
 
 func (s *configScreen) update(msg tea.Msg) (screen, tea.Cmd) {
 	switch msg := msg.(type) {
+	case reloadedMsg:
+		if msg.err != nil {
+			s.status = errorStatus(msg.err)
+			return s, nil
+		}
+		s.applyData(msg.data)
 	case loadedMsg:
 		s.busy = ""
 		if msg.err != nil {
@@ -276,10 +301,10 @@ func (s *configScreen) applyData(data configData) {
 
 func (s *configScreen) loadCmd() tea.Cmd {
 	backend := s.backend
-	return func() tea.Msg {
+	return exclusive(func() tea.Msg {
 		data, err := backend.load()
 		return loadedMsg{data, err}
-	}
+	})
 }
 
 func (s *configScreen) updateKey(msg tea.KeyPressMsg) (screen, tea.Cmd) {

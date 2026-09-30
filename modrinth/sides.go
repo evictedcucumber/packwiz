@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/notice"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
@@ -35,6 +36,11 @@ func projectIDOf(mod *core.Mod) string {
 	}
 	id, _ := mod.Update["modrinth"]["mod-id"].(string)
 	return id
+}
+
+// ProjectID is the Modrinth project a mod is from, or "" if it isn't from one.
+func ProjectID(mod *core.Mod) string {
+	return projectIDOf(mod)
 }
 
 // widenSides puts every server-only mod on both sides when a mod that runs on the client requires it. What a mod that
@@ -118,7 +124,7 @@ func promoteSides(index *core.Index) error {
 		if err := index.RefreshFileWithHash(p.mod.GetFilePath(), format, hash, true); err != nil {
 			return err
 		}
-		ui.Info.Printf("Notice: %s is now on both sides, as %s needs it on the client\n", ui.Bold.Sprint(p.mod.Name), ui.Bold.Sprint(p.neededBy.Name))
+		notice.Infof("Notice: %s is now on both sides, as %s needs it on the client", ui.Bold.Sprint(p.mod.Name), ui.Bold.Sprint(p.neededBy.Name))
 	}
 	return nil
 }

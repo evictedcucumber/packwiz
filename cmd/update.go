@@ -37,72 +37,28 @@ var UpdateCmd = &cobra.Command{
 
 		var singleUpdatedName string
 		if viper.GetBool("update.all") {
-			filesWithUpdater := make(map[string][]*core.Mod)
 			ui.Muted.Println("Reading metadata files...")
 			mods, err := index.LoadAllMods()
 			if err != nil {
 				ui.Error.Printf("Failed to update all files: %v\n", err)
 				os.Exit(1)
 			}
-			for _, modData := range mods {
-				updaterFound := false
-				for k := range modData.Update {
-					slice, ok := filesWithUpdater[k]
-					if !ok {
-						_, ok = core.Updaters[k]
-						if !ok {
-							continue
-						}
-						slice = []*core.Mod{}
-					}
-					updaterFound = true
-					filesWithUpdater[k] = append(slice, modData)
-				}
-				if !updaterFound {
-					ui.Warning.Printf("A supported update system for \"%s\" cannot be found.\n", modData.Name)
-				}
-			}
 
 			ui.Muted.Println("Checking for updates...")
-			updatesFound := false
-			// How many files there is no answer for, which isn't the same as being up to date
-			failedChecks := 0
-			updatableFiles := make(map[string][]*core.Mod)
-			updaterCachedStateMap := make(map[string][]interface{})
-			for k, v := range filesWithUpdater {
-				checks, err := core.Updaters[k].CheckUpdate(v, pack)
-				if err != nil {
-					// TODO: do we return err code 1?
-					ui.Error.Printf("Failed to check updates for %s: %s\n", k, err.Error())
-					failedChecks += len(v)
-					continue
-				}
-				for i, check := range checks {
-					if check.Error != nil {
-						// TODO: do we return err code 1?
-						ui.Error.Printf("Failed to check updates for %s: %s\n", v[i].Name, check.Error.Error())
-						failedChecks++
-						continue
-					}
-					if check.UpdateAvailable {
-						if v[i].Pin {
-							ui.Muted.Printf("Update skipped for pinned mod %s\n", v[i].Name)
-							continue
-						}
-
-						if !updatesFound {
-							ui.Bold.Println("Updates found:")
-							updatesFound = true
-						}
-						fmt.Printf("%s: %s\n", ui.Bold.Sprint(v[i].Name), styleUpdate(check.UpdateString))
-						updatableFiles[k] = append(updatableFiles[k], v[i])
-						updaterCachedStateMap[k] = append(updaterCachedStateMap[k], check.CachedState)
-					}
-				}
+			search := FindUpdates(pack, mods, nil)
+			for _, mod := range search.Unsupported {
+				ui.Warning.Printf("A supported update system for \"%s\" cannot be found.\n", mod.Name)
+			}
+			for _, failure := range search.Failures {
+				// TODO: do we return err code 1?
+				ui.Error.Printf("Failed to check updates for %s: %s\n", failure.Name, failure.Err.Error())
+			}
+			for _, mod := range search.Pinned {
+				ui.Muted.Printf("Update skipped for pinned mod %s\n", mod.Name)
 			}
 
-			if !updatesFound {
-				if failedChecks > 0 {
+			if len(search.Offers) == 0 {
+				if failedChecks := search.FailedChecks(); failedChecks > 0 {
 					// Not knowing whether a file has an update isn't being up to date
 					noun := "files"
 					if failedChecks == 1 {
@@ -115,30 +71,20 @@ var UpdateCmd = &cobra.Command{
 				return
 			}
 
+			ui.Bold.Println("Updates found:")
+			for _, offer := range search.Offers {
+				fmt.Printf("%s: %s\n", ui.Bold.Sprint(offer.Mod.Name), StyleUpdate(offer.Change))
+			}
+
 			if !cmdshared.PromptYesNo("Do you want to update? [Y/n]: ") {
 				ui.Warning.Println("Cancelled!")
 				return
 			}
 
-			for k, v := range updatableFiles {
-				err := core.Updaters[k].DoUpdate(v, updaterCachedStateMap[k])
-				if err != nil {
-					// TODO: do we return err code 1?
-					ui.Error.Println(err.Error())
-					continue
-				}
-				for _, modData := range v {
-					format, hash, err := modData.Write()
-					if err != nil {
-						ui.Error.Println(err.Error())
-						continue
-					}
-					err = index.RefreshFileWithHash(modData.GetFilePath(), format, hash, true)
-					if err != nil {
-						ui.Error.Println(err.Error())
-						continue
-					}
-				}
+			_, errs := ApplyUpdates(&index, search.Offers)
+			for _, err := range errs {
+				// TODO: do we return err code 1?
+				ui.Error.Println(err.Error())
 			}
 		} else {
 			if len(args) < 1 || len(args[0]) == 0 {
@@ -180,7 +126,7 @@ var UpdateCmd = &cobra.Command{
 				}
 
 				if check[0].UpdateAvailable {
-					ui.Info.Printf("Update available: %s\n", styleUpdate(check[0].UpdateString))
+					ui.Info.Printf("Update available: %s\n", StyleUpdate(check[0].UpdateString))
 
 					err = updater.DoUpdate([]*core.Mod{&modData}, []interface{}{check[0].CachedState})
 					if err != nil {
@@ -235,8 +181,8 @@ var UpdateCmd = &cobra.Command{
 	},
 }
 
-// styleUpdate shows what an updater says an update is, which is usually "old -> new", with the old and the new set apart
-func styleUpdate(update string) string {
+// StyleUpdate shows what an updater says an update is, which is usually "old -> new", with the old and the new set apart
+func StyleUpdate(update string) string {
 	from, to, ok := strings.Cut(update, " -> ")
 	if !ok {
 		return update

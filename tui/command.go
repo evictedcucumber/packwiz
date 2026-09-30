@@ -10,12 +10,14 @@ package tui
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"golang.org/x/term"
 )
 
@@ -23,11 +25,31 @@ import (
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Open the interactive terminal interface",
-	Long: `Open an interactive interface for the pack in the current directory.
+	Long: `Open an interactive interface for the pack in the current directory: what the commands do, on screens. Go between them
+with tab and shift+tab, or with the number of a screen:
 
-It has the pack's config files: the same tree as "packwiz config list", of the pack, its mod loader or the mod that claims
-each file, with the files nothing claims under "Invalid". Move through it with the arrow keys (or j and k), fold a group
-of files with the left and right arrow keys, and change who owns what:
+  1 Overview   what the pack is and what is in it
+  2 Mods       the pack's mods, as "packwiz list" has them: search them, pin one, mark one as a dependency, update one, write
+               the list to MODS.md, and see what the pack knows of it
+  3 Add        add a mod, resource pack or shader from Modrinth, as "packwiz modrinth add" does: search for it by name, or
+               give the address of its page or its slug, and see what it needs before you say yes
+  4 Updates    look for new versions of the mods, pick the ones to update, and update them, as "packwiz update --all" does
+  5 Check      what "packwiz validate" finds wrong with the pack, and "packwiz fix" for what can be fixed
+  6 Deps       what each mod needs and whether the pack has it, as "packwiz modrinth deps" does, and saving what was looked up
+  7 Config     the pack's config files, as "packwiz config list" has them, and who owns each, as "packwiz config relate" says
+  8 Export     export the pack as a .mrpack for Modrinth, as "packwiz modrinth export" does
+  9 Release    the release that the pack's changes would make ("packwiz changelog"), committing what hasn't been ("packwiz git
+               commit"), releasing ("packwiz changelog release", "packwiz git release") and writing CHANGELOG.md
+
+In a folder that has no pack it opens on a screen that makes one, as "packwiz init" does.
+
+Everything it changes it changes as the commands do, so what it writes is what they write, and it asks before it changes
+anything that isn't undone by pressing a key again. Each screen lists its keys at the bottom, and ? lists all of them. Keys
+like j and k move as the arrow keys do, / searches (fuzzily, as fzf does: "sdm" finds Sodium) and esc leaves a search or a box.
+What asks the network (Modrinth, Mojang) does so when you ask it to, and shows that it is working; q waits for what is
+changing the pack to finish, and ctrl+c quits at once.
+
+The config screen, as an example of what a screen has:
 
   r        relate the file the cursor is on (or every file that is marked) to the pack, its mod loader or mods
   x        stop an owner claiming a file, or take out an entry that matches no file
@@ -37,8 +59,8 @@ of files with the left and right arrow keys, and change who owns what:
   R        refresh the index, so that files added or deleted since show up
 
 Relating writes what "packwiz config relate" does, and asks who to give the files to: the pack as a whole (options.txt,
-say), its mod loader (NeoForge's own config files) and then the mods (type / to search them, fuzzily, as fzf does: "sdm"
-finds Sodium), and whether to claim each file or the folder it is in. Press ? for all of the keys, and q to quit.
+say), its mod loader (NeoForge's own config files) and then the mods (type / to search them), and whether to claim each file
+or the folder it is in.
 
 It needs a terminal to run in.`,
 	Args: cobra.NoArgs,
@@ -50,20 +72,55 @@ It needs a terminal to run in.`,
 	},
 }
 
-// run reads the pack, and opens the interface on it. The pack is read first, so that a directory that isn't one is an
-// error on the terminal as it is for any other command, rather than something the interface has to show.
+// run opens the interface on the pack in the current directory, or if there is none on a screen that makes one. The pack is
+// read first, so that a directory that has a pack that can't be read is an error on the terminal as it is for any other
+// command, rather than something the interface has to show.
 func run() error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 		return errors.New("packwiz tui needs a terminal: its input and its output must both be one")
 	}
 
 	backend := packBackend{}
-	data, err := backend.load()
-	if err != nil {
-		return err
+	open := func() (string, []screen, error) {
+		data, err := backend.load()
+		if err != nil {
+			return "", nil, err
+		}
+		return data.pack, newScreens(backend, data), nil
 	}
-	_, err = tea.NewProgram(newApp(data.pack, newConfigScreen(backend, data))).Run()
+
+	var a *app
+	if _, err := os.Stat(viper.GetString("pack-file")); errors.Is(err, fs.ErrNotExist) {
+		a = newApp("", newInitScreen(backend))
+		a.opened = open
+	} else {
+		pack, screens, err := open()
+		if err != nil {
+			return err
+		}
+		a = newApp(pack, screens...)
+	}
+	_, err := tea.NewProgram(a).Run()
 	return err
+}
+
+// newScreens makes the screens of the interface, in the order they are reached in: the number a screen is gone to with is
+// its place in this list.
+func newScreens(backend packBackend, data configData) []screen {
+	overview := newOverviewScreen(backend)
+	screens := []screen{
+		overview,
+		newModsScreen(backend),
+		newAddScreen(backend),
+		newUpdatesScreen(backend),
+		newCheckScreen(backend),
+		newDepsScreen(backend),
+		newConfigScreen(backend, data),
+		newExportScreen(backend),
+		newReleaseScreen(backend),
+	}
+	overview.guide = guideFor(screens)
+	return screens
 }
 
 func init() {

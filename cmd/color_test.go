@@ -179,12 +179,12 @@ func TestStyleUpdate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := styleUpdate(tt.update)
+			got := StyleUpdate(tt.update)
 			if got != tt.want {
-				t.Errorf("styleUpdate(%q) = %q, want %q", tt.update, got, tt.want)
+				t.Errorf("StyleUpdate(%q) = %q, want %q", tt.update, got, tt.want)
 			}
 			if ui.Strip(got) != tt.update {
-				t.Errorf("styleUpdate(%q) changed its text to %q", tt.update, ui.Strip(got))
+				t.Errorf("StyleUpdate(%q) changed its text to %q", tt.update, ui.Strip(got))
 			}
 		})
 	}

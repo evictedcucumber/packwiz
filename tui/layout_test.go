@@ -16,6 +16,20 @@ import (
 // picker, so that what is drawn has to be cut to fit.
 func newLongApp(t *testing.T, width, height int) *app {
 	t.Helper()
+	setUpLongPack(t)
+	data, err := packBackend{}.load()
+	if err != nil {
+		t.Fatalf("load() returned error: %v", err)
+	}
+	a := newApp(data.pack, newConfigScreen(packBackend{}, data))
+	a.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	return a
+}
+
+// setUpLongPack is the pack that setUpPack makes with names and paths that are too long for a terminal, in the pack and
+// the screens that show them.
+func setUpLongPack(t *testing.T) {
+	t.Helper()
 	setUpPack(t)
 	writeMod(t, "long", "A mod whose name goes on and on and on, well past the edge of any terminal anyone has", `config-files = ["config/a-folder-with-a-long-name/another-long-folder-name/"]`, "")
 	for i := range 12 {
@@ -32,13 +46,6 @@ func newLongApp(t *testing.T, width, height int) *app {
 	}
 	claimInPack(t, core.ConfigOwnerPack, "options.txt")
 	claimInPack(t, "neoforge", "config/neoforge-with-a-long-name-so-that-it-cannot-fit-in-forty-columns-either.toml")
-	data, err := packBackend{}.load()
-	if err != nil {
-		t.Fatalf("load() returned error: %v", err)
-	}
-	a := newApp(data.pack, newConfigScreen(packBackend{}, data))
-	a.Update(tea.WindowSizeMsg{Width: width, Height: height})
-	return a
 }
 
 // states are the things the app can be showing, each a way to get to it from a new app.

@@ -160,3 +160,40 @@ func highlight(text string, positions []int, style ui.Style) string {
 	}
 	return b.String()
 }
+
+// wrap breaks text into lines no wider than width, at spaces where it can, and gives every line after the first indent (a
+// hanging indent, so that what is wrapped reads as one thing). Styling is kept, and isn't counted.
+func wrap(text string, width int, indent string) []string {
+	if width <= 0 {
+		return nil
+	}
+	// Each line of text that has more than one is wrapped on its own
+	if strings.Contains(text, "\n") {
+		var out []string
+		for _, line := range strings.Split(text, "\n") {
+			out = append(out, wrap(line, width, indent)...)
+		}
+		return out
+	}
+	indentWidth := ansi.StringWidth(indent)
+	if ansi.StringWidth(text) <= width || width <= indentWidth+1 {
+		return []string{text}
+	}
+	// The first line has the room the others have less their indent, so wrap to that and indent what follows
+	first, rest := splitFirst(ansi.Wrap(text, width, ""))
+	if rest == "" {
+		return []string{first}
+	}
+	out := []string{first}
+	for _, line := range strings.Split(ansi.Wrap(rest, width-indentWidth, ""), "\n") {
+		out = append(out, indent+line)
+	}
+	return out
+}
+
+// splitFirst cuts the first line off text, which has line breaks in it, and returns it and what is after it, joined as
+// a single line of text again so that it can be wrapped to a different width.
+func splitFirst(text string) (first, rest string) {
+	first, rest, _ = strings.Cut(text, "\n")
+	return first, strings.ReplaceAll(rest, "\n", " ")
+}

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"fmt"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/notice"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	"io"
 	"os"
@@ -33,31 +34,31 @@ func ListManualDownloads(session core.DownloadSession) {
 
 func AddToZip(dl core.CompletedDownload, exp *zip.Writer, dir string, index *core.Index) bool {
 	if dl.Error != nil {
-		ui.Error.Printf("Download of %s (%s) failed: %v\n", dl.Mod.Name, dl.Mod.FileName, dl.Error)
+		notice.Errorf("Download of %s (%s) failed: %v", dl.Mod.Name, dl.Mod.FileName, dl.Error)
 		return false
 	}
 	for _, warning := range dl.Warnings {
-		ui.Warning.Printf("Warning for %s (%s): %v\n", dl.Mod.Name, dl.Mod.FileName, warning)
+		notice.Warnf("Warning for %s (%s): %v", dl.Mod.Name, dl.Mod.FileName, warning)
 	}
 
 	p, err := index.RelIndexPath(dl.Mod.GetDestFilePath())
 	if err != nil {
-		ui.Error.Printf("Error resolving external file: %v\n", err)
+		notice.Errorf("Error resolving external file: %v", err)
 		return false
 	}
 	modFile, err := exp.Create(path.Join(dir, p))
 	if err != nil {
-		ui.Error.Printf("Error creating metadata file %s: %v\n", p, err)
+		notice.Errorf("Error creating metadata file %s: %v", p, err)
 		return false
 	}
 	_, err = io.Copy(modFile, dl.File)
 	if err != nil {
-		ui.Error.Printf("Error copying file %s: %v\n", p, err)
+		notice.Errorf("Error copying file %s: %v", p, err)
 		return false
 	}
 	err = dl.File.Close()
 	if err != nil {
-		ui.Error.Printf("Error closing file %s: %v\n", p, err)
+		notice.Errorf("Error closing file %s: %v", p, err)
 		return false
 	}
 
@@ -70,7 +71,7 @@ func AddNonMetafileOverrides(index *core.Index, exp *zip.Writer) {
 		if !v.IsMetaFile() {
 			file, err := exp.Create(path.Join("overrides", p))
 			if err != nil {
-				ui.Error.Printf("Error creating file: %s\n", err.Error())
+				notice.Errorf("Error creating file: %s", err.Error())
 				// TODO: exit(1)?
 				continue
 			}
@@ -78,14 +79,14 @@ func AddNonMetafileOverrides(index *core.Index, exp *zip.Writer) {
 			src, err := os.Open(index.ResolveIndexPath(p))
 			if err != nil {
 				_ = src.Close()
-				ui.Error.Printf("Error reading file: %s\n", err.Error())
+				notice.Errorf("Error reading file: %s", err.Error())
 				// TODO: exit(1)?
 				continue
 			}
 			_, err = io.Copy(file, src)
 			if err != nil {
 				_ = src.Close()
-				ui.Error.Printf("Error copying file: %s\n", err.Error())
+				notice.Errorf("Error copying file: %s", err.Error())
 				// TODO: exit(1)?
 				continue
 			}

@@ -8,6 +8,7 @@ type gitRepository struct {
 }
 
 var _ changelog.Repository = gitRepository{}
+var _ changelog.CommitReporter = gitRepository{}
 
 func init() {
 	changelog.OpenRepository = func() (changelog.Repository, error) {
@@ -34,6 +35,15 @@ func (g gitRepository) LastChangedIn(file string) (string, error) {
 // CommitPending is "packwiz git commit"
 func (g gitRepository) CommitPending() error {
 	return runCommit(false)
+}
+
+// CommitPendingReporting is "packwiz git commit", telling report the message of each commit instead of printing it
+func (g gitRepository) CommitPendingReporting(report func(message string)) error {
+	c, steps, err := prepareCommit(false)
+	if err != nil {
+		return err
+	}
+	return c.run(steps, report)
 }
 
 func (g gitRepository) PendingCommits() ([]changelog.Commit, error) {

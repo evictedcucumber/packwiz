@@ -11,6 +11,7 @@ import (
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/notice"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -267,7 +268,7 @@ func (p *fixPlan) dependenciesToAdd(pack core.Pack, index core.Index, v *validat
 		return nil
 	}
 
-	ui.Muted.Println("Finding dependencies to add...")
+	notice.Mutedf("Finding dependencies to add...")
 	installed := slices.Collect(maps.Keys(installedProjects(pack, v.entries)))
 	found, err := findDependencies(pack, ids, nil, installed, runsFabricMods(pack, installed))
 	if err != nil {

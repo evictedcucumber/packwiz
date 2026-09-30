@@ -20,6 +20,13 @@ type Repository interface {
 	PendingCommits() ([]Commit, error)
 }
 
+// CommitReporter is implemented by a Repository that can say which commits it makes rather than printing them, for what has
+// the terminal to itself and can't have anything written over it.
+type CommitReporter interface {
+	// CommitPendingReporting is CommitPending, telling report the message of each commit as it is made.
+	CommitPendingReporting(report func(message string)) error
+}
+
 // ErrNoRepository is what the error from OpenRepository is when the pack isn't in a repository, or there is nothing to
 // open one with. That isn't a failure for a changelog: it is made without a log to read, from the pack alone. Anything
 // else that stops a repository being opened is one.

@@ -11,6 +11,7 @@ import (
 	modrinthApi "github.com/evictedcucumber/packwiz/modrinth/api"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/notice"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -79,70 +80,69 @@ compared with the one the pack has, and if they differ you are asked whether to 
 			}
 		}
 
-		// Got version ID; install using this ID
-		if versionID != "" {
-			err = installVersionById(versionID, versionFilename, pack, &index, releaseTypeFlag)
-			if err != nil {
-				ui.Error.Printf("Failed to add project: %s\n", err)
-				os.Exit(1)
-			}
-			return
-		}
-
-		// Look up project ID
 		// Modrinth transparently handles slugs/project IDs in their API; we don't have to detect which one it is.
-		project, err := mrDefaultClient.Projects.Get(projectID)
+		project, versionData, err := resolveTarget(pack, &index, projectID, version, versionID, releaseTypeFlag)
 		if err != nil {
 			ui.Error.Printf("Failed to add project: %s\n", err)
 			os.Exit(1)
 		}
-
-		if version != "" {
-			// Try to look up version number
-			versionData, err := resolveVersion(project, version)
-			if err != nil {
-				ui.Error.Printf("Failed to add project: %s\n", err)
-				os.Exit(1)
-			}
-			err = installVersion(project, versionData, versionFilename, pack, &index, releaseTypeFlag)
-			if err != nil {
-				ui.Error.Printf("Failed to add project: %s\n", err)
-				os.Exit(1)
-			}
-			return
-		}
-
-		// No version specified; find latest
-		err = installProject(project, versionFilename, pack, &index, releaseTypeFlag)
-		if err != nil {
+		if err := installVersion(project, versionData, versionFilename, pack, &index, releaseTypeFlag); err != nil {
 			ui.Error.Printf("Failed to add project: %s\n", err)
 			os.Exit(1)
 		}
 	},
 }
 
-func installVersionById(versionId string, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
-	version, err := mrDefaultClient.Versions.Get(versionId)
-	if err != nil {
-		return fmt.Errorf("failed to fetch version %s: %v", versionId, err)
+// resolveTarget finds the project that is to be added, and the version of it: the one with the given ID, if a version ID
+// is given (it belongs to a project, which is looked up from it); else the one with the given number, if there is one; else
+// the latest that suits the pack. A project can be given by its ID or its slug.
+func resolveTarget(pack core.Pack, index *core.Index, projectID, versionNumber, versionID, releaseType string) (*modrinthApi.Project, *modrinthApi.Version, error) {
+	if versionID != "" {
+		version, err := mrDefaultClient.Versions.Get(versionID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to fetch version %s: %v", versionID, err)
+		}
+		project, err := mrDefaultClient.Projects.Get(*version.ProjectID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to fetch project %s: %v", *version.ProjectID, err)
+		}
+		return project, version, nil
 	}
 
-	project, err := mrDefaultClient.Projects.Get(*version.ProjectID)
+	project, err := mrDefaultClient.Projects.Get(projectID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch project %s: %v", *version.ProjectID, err)
+		return nil, nil, err
+	}
+	if versionNumber != "" {
+		// Try to look up version number
+		version, err := resolveVersion(project, versionNumber)
+		return project, version, err
 	}
 
-	return installVersion(project, version, versionFilename, pack, index, releaseType)
+	// No version specified; find latest
+	version, err := latestVersionOfProject(project, pack, index, releaseType)
+	return project, version, err
 }
 
 func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
+	latestVersion, err := latestVersionOfProject(project, pack, index, releaseType)
+	if err != nil {
+		return err
+	}
+	return installVersion(project, latestVersion, versionFilename, pack, index, releaseType)
+}
+
+// latestVersionOfProject finds the version of a project that adding it without saying which adds: its latest one, for
+// the pack. releaseType is the release type to accept if it was asked for, and else the project is looked up with the one
+// it was added with, if the pack has it.
+func latestVersionOfProject(project *modrinthApi.Project, pack core.Pack, index *core.Index, releaseType string) (*modrinthApi.Version, error) {
 	lookupReleaseType := releaseType
 	if lookupReleaseType == "" {
 		// A project that is already added is looked up with the release type it was added with, as 'packwiz mr update'
 		// does, so that both agree on what its latest version is
 		existing, err := findInstalledMod(index, *project.ID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if existing != nil {
 			data, _ := modrinthUpdateData(existing)
@@ -153,13 +153,12 @@ func installProject(project *modrinthApi.Project, versionFilename string, pack c
 	acceptFabric := runsFabricMods(pack, getInstalledProjectIDs(index))
 	latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, lookupReleaseType, acceptFabric)
 	if err != nil {
-		return fmt.Errorf("failed to get latest version: %v", err)
+		return nil, fmt.Errorf("failed to get latest version: %v", err)
 	}
 	if latestVersion.ID == nil {
-		return errors.New("mod not available for the configured Minecraft version(s) (use the 'packwiz settings acceptable-versions' command to accept more) or loader")
+		return nil, errors.New("mod not available for the configured Minecraft version(s) (use the 'packwiz settings acceptable-versions' command to accept more) or loader")
 	}
-
-	return installVersion(project, latestVersion, versionFilename, pack, index, releaseType)
+	return latestVersion, nil
 }
 
 const maxCycles = 20
@@ -190,7 +189,7 @@ func findDependencies(pack core.Pack, projectIDs, versionIDs, installedProjects 
 					depProjectIDPendingQueue = append(depProjectIDPendingQueue, *v.ProjectID)
 				}
 			} else {
-				ui.Error.Printf("Error retrieving dependency data: %s\n", err.Error())
+				notice.Errorf("Error retrieving dependency data: %s", err.Error())
 			}
 			depVersionIDPendingQueue = depVersionIDPendingQueue[:0]
 		}
@@ -221,7 +220,7 @@ func findDependencies(pack core.Pack, projectIDs, versionIDs, installedProjects 
 		}
 		depProjects, err := mrDefaultClient.Projects.GetMultiple(depProjectIDPendingQueue)
 		if err != nil {
-			ui.Error.Printf("Error retrieving dependency data: %s\n", err.Error())
+			notice.Errorf("Error retrieving dependency data: %s", err.Error())
 		}
 		depProjectIDPendingQueue = depProjectIDPendingQueue[:0]
 
@@ -233,7 +232,7 @@ func findDependencies(pack core.Pack, projectIDs, versionIDs, installedProjects 
 			// Dependencies use the pack's default release type rather than inheriting the flag passed for the mod being added
 			latestVersion, err := getLatestVersion(*project.ID, *project.Title, pack, "", acceptFabric)
 			if err != nil {
-				ui.Error.Printf("Failed to get latest version of dependency %v: %v\n", *project.Title, err)
+				notice.Errorf("Failed to get latest version of dependency %v: %v", *project.Title, err)
 				continue
 			}
 			// Only got a Fabric version because the pack runs Fabric mods
@@ -275,9 +274,31 @@ func findDependencies(pack core.Pack, projectIDs, versionIDs, installedProjects 
 	return depMetadata, nil
 }
 
-func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
+// installPlan is what adding a version of a project to the pack would do, found out in stages, so that what a person
+// is asked comes at the right point: newInstallPlan finds out whether the pack has the project already, lookUpDependencies
+// what has to be added along with it, and apply does it.
+type installPlan struct {
+	pack        core.Pack
+	project     *modrinthApi.Project
+	version     *modrinthApi.Version
+	file        *modrinthApi.File
+	releaseType string
+
+	// existing is the mod the pack has from the project already, which is updated in place, or nil. If it has this version
+	// already (upToDate) or is pinned (pinned) nothing is done to it.
+	existing         *core.Mod
+	upToDate, pinned bool
+
+	// requiresDependencies is whether the version requires any project at all, and deps are the ones the pack doesn't have,
+	// with what to add of each, once they have been looked up
+	requiresDependencies bool
+	deps                 []depMetadataStore
+}
+
+// newInstallPlan starts the plan for adding version of project. It asks nothing of Modrinth.
+func newInstallPlan(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, releaseType string) (*installPlan, error) {
 	if len(version.Files) == 0 {
-		return errors.New("version doesn't have any files attached")
+		return nil, errors.New("version doesn't have any files attached")
 	}
 
 	var file = version.Files[0]
@@ -289,12 +310,113 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 	}
 	// TODO: handle optional/required resource pack files
 
-	existing, err := findInstalledMod(index, *project.ID)
+	plan := &installPlan{pack: pack, project: project, version: version, file: file, releaseType: releaseType}
+	var err error
+	if plan.existing, err = findInstalledMod(index, *project.ID); err != nil {
+		return nil, err
+	}
+	if plan.existing != nil {
+		if data, _ := modrinthUpdateData(plan.existing); data.InstalledVersion == *version.ID {
+			plan.upToDate = true
+		} else if plan.existing.Pin {
+			plan.pinned = true
+		}
+	}
+	return plan, nil
+}
+
+// lookUpDependencies finds what has to be added along with the project: the required projects that the pack doesn't have,
+// and what those require in turn, at their latest versions. It needs the network.
+func (p *installPlan) lookUpDependencies(index *core.Index) error {
+	installedProjects := getInstalledProjectIDs(index)
+	acceptFabric := runsFabricMods(p.pack, installedProjects)
+	if acceptFabric {
+		noticeFabricMod(*p.project.Title, p.version, p.pack)
+	}
+
+	if len(p.version.Dependencies) == 0 {
+		return nil
+	}
+	// TODO: could get installed version IDs, and compare to install the newest - i.e. preferring pinned versions over getting absolute latest?
+	if acceptFabric {
+		// Forgified Fabric API takes the place of Fabric API, which can't be added next to it
+		installedProjects = append(installedProjects, fabricAPIProjectID)
+	}
+
+	var depProjectIDPendingQueue []string
+	var depVersionIDPendingQueue []string
+
+	for _, dep := range p.version.Dependencies {
+		// TODO: recommend optional dependencies?
+		if dep.DependencyType != nil && *dep.DependencyType == "required" {
+			if dep.VersionID != nil {
+				depVersionIDPendingQueue = append(depVersionIDPendingQueue, *dep.VersionID)
+			} else {
+				if dep.ProjectID != nil {
+					depProjectIDPendingQueue = append(depProjectIDPendingQueue, *dep.ProjectID)
+				}
+			}
+		}
+	}
+
+	if len(depProjectIDPendingQueue)+len(depVersionIDPendingQueue) == 0 {
+		return nil
+	}
+	notice.Mutedf("Finding dependencies...")
+	p.requiresDependencies = true
+
+	var err error
+	p.deps, err = findDependencies(p.pack, depProjectIDPendingQueue, depVersionIDPendingQueue, installedProjects, acceptFabric)
+	return err
+}
+
+// apply adds the project to the pack, or updates it if the pack has it, and with addDependencies the dependencies that
+// were found too. Each dependency that was added is passed to added, if that isn't nil. It saves the index and the pack.
+func (p *installPlan) apply(index *core.Index, addDependencies bool, added func(depMetadataStore)) error {
+	if addDependencies {
+		for _, v := range p.deps {
+			if err := createFileMeta(v.projectInfo, v.versionInfo, v.fileInfo, p.pack, index, "", true); err != nil {
+				return err
+			}
+			if added != nil {
+				added(v)
+			}
+		}
+	}
+
+	// Create the metadata file, or update the one the project already has
+	var err error
+	if p.existing != nil {
+		err = updateFileMeta(p.existing, p.version, p.file, p.releaseType, index)
+	} else {
+		err = createFileMeta(p.project, p.version, p.file, p.pack, index, p.releaseType, false)
+	}
 	if err != nil {
 		return err
 	}
-	if existing != nil {
-		update, err := confirmUpdate(existing, version, file)
+
+	// After both the mod and its dependencies are in the pack, so that it doesn't matter which was added first
+	if err := promoteSides(index); err != nil {
+		return err
+	}
+
+	if err := index.Write(); err != nil {
+		return err
+	}
+	if err := p.pack.UpdateIndexHash(); err != nil {
+		return err
+	}
+	return p.pack.Write()
+}
+
+func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
+	plan, err := newInstallPlan(project, version, versionFilename, pack, index, releaseType)
+	if err != nil {
+		return err
+	}
+
+	if plan.existing != nil {
+		update, err := confirmUpdate(plan)
 		if err != nil {
 			return err
 		}
@@ -303,118 +425,56 @@ func installVersion(project *modrinthApi.Project, version *modrinthApi.Version, 
 		}
 	}
 
-	installedProjects := getInstalledProjectIDs(index)
-	acceptFabric := runsFabricMods(pack, installedProjects)
-	if acceptFabric {
-		noticeFabricMod(*project.Title, version, pack)
+	if err := plan.lookUpDependencies(index); err != nil {
+		return err
 	}
 
-	if len(version.Dependencies) > 0 {
-		// TODO: could get installed version IDs, and compare to install the newest - i.e. preferring pinned versions over getting absolute latest?
-		if acceptFabric {
-			// Forgified Fabric API takes the place of Fabric API, which can't be added next to it
-			installedProjects = append(installedProjects, fabricAPIProjectID)
-		}
-
-		var depProjectIDPendingQueue []string
-		var depVersionIDPendingQueue []string
-
-		for _, dep := range version.Dependencies {
-			// TODO: recommend optional dependencies?
-			if dep.DependencyType != nil && *dep.DependencyType == "required" {
-				if dep.VersionID != nil {
-					depVersionIDPendingQueue = append(depVersionIDPendingQueue, *dep.VersionID)
-				} else {
-					if dep.ProjectID != nil {
-						depProjectIDPendingQueue = append(depProjectIDPendingQueue, *dep.ProjectID)
-					}
-				}
+	addDependencies := false
+	if plan.requiresDependencies {
+		if len(plan.deps) > 0 {
+			ui.Bold.Println("Dependencies found:")
+			for _, v := range plan.deps {
+				fmt.Println(*v.projectInfo.Title)
 			}
-		}
-
-		if len(depProjectIDPendingQueue)+len(depVersionIDPendingQueue) > 0 {
-			ui.Muted.Println("Finding dependencies...")
-
-			depMetadata, err := findDependencies(pack, depProjectIDPendingQueue, depVersionIDPendingQueue, installedProjects, acceptFabric)
-			if err != nil {
-				return err
-			}
-
-			if len(depMetadata) > 0 {
-				ui.Bold.Println("Dependencies found:")
-				for _, v := range depMetadata {
-					fmt.Println(*v.projectInfo.Title)
-				}
-
-				if cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ") {
-					for _, v := range depMetadata {
-						err := createFileMeta(v.projectInfo, v.versionInfo, v.fileInfo, pack, index, "", true)
-						if err != nil {
-							return err
-						}
-						ui.Success.Printf("Dependency \"%s\" successfully added! %s\n", ui.Bold.Sprint(*v.projectInfo.Title), ui.Muted.Sprintf("(%s)", *v.fileInfo.Filename))
-					}
-				}
-			} else {
-				ui.Success.Println("All dependencies are already added!")
-			}
+			addDependencies = cmdshared.PromptYesNo("Would you like to add them? [Y/n]: ")
+		} else {
+			ui.Success.Println("All dependencies are already added!")
 		}
 	}
 
-	// Create the metadata file, or update the one the project already has
-	if existing != nil {
-		err = updateFileMeta(existing, version, file, releaseType, index)
-	} else {
-		err = createFileMeta(project, version, file, pack, index, releaseType, false)
-	}
-	if err != nil {
-		return err
-	}
-
-	// After both the mod and its dependencies are in the pack, so that it doesn't matter which was added first
-	err = promoteSides(index)
-	if err != nil {
-		return err
-	}
-
-	err = index.Write()
-	if err != nil {
-		return err
-	}
-	err = pack.UpdateIndexHash()
-	if err != nil {
-		return err
-	}
-	err = pack.Write()
+	err = plan.apply(index, addDependencies, func(v depMetadataStore) {
+		ui.Success.Printf("Dependency \"%s\" successfully added! %s\n", ui.Bold.Sprint(*v.projectInfo.Title), ui.Muted.Sprintf("(%s)", *v.fileInfo.Filename))
+	})
 	if err != nil {
 		return err
 	}
 
 	verb := "added"
-	if existing != nil {
+	if plan.existing != nil {
 		verb = "updated"
 	}
-	ui.Success.Printf("Project \"%s\" successfully %s! %s\n", ui.Bold.Sprint(*project.Title), verb, ui.Muted.Sprintf("(%s)", *file.Filename))
+	ui.Success.Printf("Project \"%s\" successfully %s! %s\n", ui.Bold.Sprint(*project.Title), verb, ui.Muted.Sprintf("(%s)", *plan.file.Filename))
 	return nil
 }
 
-// confirmUpdate decides what to do when version of a project is added but the pack already has the project, as
-// existing. It reports whether existing should be updated to version (using file): not if it already has that version,
-// if it is pinned, or if the user says no. It says why, except when it is an error.
-func confirmUpdate(existing *core.Mod, version *modrinthApi.Version, file *modrinthApi.File) (bool, error) {
-	if data, _ := modrinthUpdateData(existing); data.InstalledVersion == *version.ID {
+// confirmUpdate decides what to do when a version of a project is added but the pack already has the project. It
+// reports whether the project should be updated to that version: not if it already has that version, if it is pinned, or
+// if the user says no. It says why, except when it is an error.
+func confirmUpdate(plan *installPlan) (bool, error) {
+	existing := plan.existing
+	if plan.upToDate {
 		ui.Success.Printf("\"%s\" is already added and up to date! %s\n", ui.Bold.Sprint(existing.Name), ui.Muted.Sprintf("(%s)", existing.FileName))
 		return false, nil
 	}
 	// Checked before asking
-	if existing.Pin {
+	if plan.pinned {
 		return false, fmt.Errorf("\"%s\" is pinned; run the unpin command to allow updating", existing.Name)
 	}
 
-	from, to := existing.Version, versionNumberOf(version)
+	from, to := existing.Version, versionNumberOf(plan.version)
 	if from == "" || to == "" {
 		// Mods added before their version was recorded only have a file name to go by
-		from, to = existing.FileName, *file.Filename
+		from, to = existing.FileName, *plan.file.Filename
 	}
 	ui.Info.Printf("\"%s\" is already added. Update available: %s\n", ui.Bold.Sprint(existing.Name), ui.Transition(from, to))
 	if !cmdshared.PromptYesNo("Would you like to update it? [Y/n]: ") {
@@ -481,7 +541,7 @@ func newFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, fil
 
 	side := getSide(project)
 	if side == "" {
-		ui.Warning.Println("Warning: Project doesn't have a side that's supported; assuming universal. Server: " + *project.ServerSide + " Client: " + *project.ClientSide)
+		notice.Warnf("%s", "Warning: Project doesn't have a side that's supported; assuming universal. Server: "+*project.ServerSide+" Client: "+*project.ClientSide)
 		side = core.UniversalSide
 	}
 

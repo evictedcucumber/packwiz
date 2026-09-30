@@ -26,7 +26,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - `packwiz list --save` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
 - `packwiz validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz fix` fixes what it can, showing the changes and asking first
 - `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, or the mod loader (NeoForge's own config) or the pack as a whole (`options.txt`), and `packwiz validate` checks the same
-- `packwiz tui` opens an interface in the terminal, for now for config files: the same tree as `packwiz config list`, which it searches fuzzily, with keys to relate a file to the pack, its mod loader or the mods that own it, or take a claim out again
+- `packwiz tui` opens an interface in the terminal for the whole of packwiz: the pack's mods, adding projects from Modrinth (searched by name), updates, checking and fixing the pack, dependencies, config files, exporting, and releasing, each on a screen of its own that asks before it changes anything
 - A mod can be named by a part of its name on the command line (`packwiz mr pin sdm`), searched for fuzzily the way fzf does, and the TUI's searches work the same way
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
@@ -226,7 +226,35 @@ What is searched for is only used if exactly one mod matches, and you are told w
 
 ## Terminal interface
 
-`packwiz tui` opens an interface for the pack in the current directory, in the terminal's alternate screen, so it leaves what was there when you quit. For now it has one screen, for the pack's config files: the tree that `packwiz config list` prints, which you move through instead of reading, and change while you are there.
+`packwiz tui` opens an interface for the pack in the current directory, in the terminal's alternate screen, so it leaves what was there when you quit. It is everything the commands do, on screens: go between them with `tab` and `shift+tab`, or press the number of one. In a folder that has no pack it opens on a screen that makes one, as `packwiz init` does, and carries on into the pack once it has.
+
+| | Screen | What it is |
+| --- | --- | --- |
+| `1` | Overview | what the pack is and what is in it: its versions, how many mods and on which sides, the state of its config files |
+| `2` | Mods | `packwiz list`, with pin (`p`), mark as dependency (`d`), update (`u`), the details of a mod (`enter`), search (`/`), filters for the side (`s`) and for main mods and dependencies (`m`), `w` to write `MODS.md` as `list --save` does, and `R` to refresh the index |
+| `3` | Add | `packwiz modrinth add`: search Modrinth by name, or give the address of a project's page, or its slug or ID, and see what adding it would do and which mods it needs before you say yes |
+| `4` | Updates | `packwiz update --all`: `c` looks for new versions, `space` picks which to update, `enter` updates what is picked |
+| `5` | Check | `packwiz validate` and `packwiz fix`: what is wrong with the pack, by mod, and `f` to see what can be fixed, and make the changes |
+| `6` | Deps | `packwiz modrinth deps`: what each mod needs and whether the pack has it, and `s` to save what had to be looked up |
+| `7` | Config | `packwiz config list` and `packwiz config relate`, below |
+| `8` | Export | `packwiz modrinth export`: where the pack goes and how, and what went into it |
+| `9` | Release | `packwiz changelog`, `changelog release`, `git commit` and `git release`: the release the pack's changes would make, `C` to commit what isn't committed, `r` to release (and commit and tag it, in a repository), `v` to choose the version, `s` to write `CHANGELOG.md` |
+
+Every screen lists its keys at the bottom, and `?` lists them all. `j` and `k` move as the arrow keys do, `g` and `G` go to the top and the bottom, `/` searches (fuzzily, below), and `esc` leaves a search or a box. Keys that are letters are the screen's, so `tab` and the numbers don't change screens while text is being typed; `esc` leaves it first.
+
+What it changes it changes as the commands do, through the same code, so what it writes is what they write and the index and `pack.toml` are left as a refresh would leave them. It asks before it changes anything that pressing a key again doesn't undo. It never writes to the terminal behind the screen: what the commands say as they go (that a version was used although another has a higher number, that a mod runs through Sinytra Connector, that a file failed to download) is shown on the screen it is for.
+
+What asks the network (Modrinth, Mojang, the NeoForge repository) does so when you ask it to, apart from the first look at the Check, Deps and Release screens, and shows that it is working. One thing works on the pack at a time, so a screen that asked while another was busy waits its turn. `q` waits for what is changing the pack to finish, and `ctrl+c` quits at once. Colour follows `PACKWIZ_COLOR` and `NO_COLOR` like everything else, and everything selected or marked is shown with a symbol as well as a colour. It needs a terminal at least 40 columns wide and 10 lines high.
+
+### Adding a project
+
+`/` (or `i`) starts typing, and `enter` searches Modrinth for mods that suit the pack's game version and mod loader (and Fabric mods too, for a pack that runs them through Sinytra Connector). The results are listed with their author and how often they were downloaded, and the ones the pack has are marked. `enter` again adds the one under the cursor (or searches again if you changed what you typed); an address such as `https://modrinth.com/mod/sodium` goes straight to it. `tab` while typing, or `t` after, searches for resource packs and then shaders instead, and `ctrl+r` (or `r`) says how unstable a version can be and still be taken, as `--release-type` does.
+
+Before anything is added it says what would be: the version and file, where it goes, which side it is for, what it needs that the pack doesn't have, and notices such as that it is a Fabric mod. `y` adds it and what it needs, `d` adds it without what it needs, and `n` leaves the pack alone. A project the pack has already is offered an update in place, and a pinned one is refused, as with the command.
+
+### Config files
+
+The config screen is the tree that `packwiz config list` prints, which you move through instead of reading, and change while you are there.
 
 | Key | |
 | --- | --- |
@@ -244,7 +272,7 @@ What is searched for is only used if exactly one mod matches, and you are told w
 
 `r` asks who to give the file to, the pack and the loader first ("Pack" is the pack as a whole, for `options.txt` and the like; the loader is NeoForge) and then the mods: type `/` to search them, `space` picks one, and `enter` relates the file to what is picked, or to the mod under the cursor if none is. The search is fuzzy, the way fzf's is, and nothing has to be installed for it: `sdm` finds Sodium, letters only have to be in order, several words (`sod ex`) all have to match in any order, case doesn't matter, and the mod's slug is searched too when its name doesn't match. The best match is first, so `enter` takes it, and the letters that matched are picked out. Several can be picked for a file they share. `tab` switches between claiming the file and claiming the folder it is in, and what would be written to each one's `config-files` is shown above the list. Marked files are related together, and an owner that already claims everything being related is labelled as such. `x` shows the entry that would be taken out, and how many files it covers if it is a folder, and asks before doing it.
 
-It writes what `packwiz config relate` writes, through the same code, so the `.pw.toml` files, the index and `pack.toml` (where the pack's and the loader's claims go) are left as if the commands had made the changes, and a pack that keeps its files in `configureddefaults/` has its entries written without it, as they are there. Colour follows `PACKWIZ_COLOR` and `NO_COLOR` like everything else, and everything selected or marked is shown with a symbol as well as a colour. It needs a terminal at least 40 columns wide and 10 lines high.
+It writes what `packwiz config relate` writes, through the same code, so the `.pw.toml` files, the index and `pack.toml` (where the pack's and the loader's claims go) are left as if the commands had made the changes, and a pack that keeps its files in `configureddefaults/` has its entries written without it, as they are there.
 
 ## Checking a pack
 

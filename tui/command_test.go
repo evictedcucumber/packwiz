@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -37,5 +38,24 @@ func TestRunNeedsATerminalAndSaysSoBeforeReadingThePack(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "needs a terminal") {
 		t.Errorf("run() returned %q, want it to say that a terminal is needed", err)
+	}
+}
+
+// The help says which number goes to which screen, so it has to follow the order they are made in
+func TestTuiHelpListsTheScreensInTheOrderTheyAreGoneToWith(t *testing.T) {
+	screens := newScreens(packBackend{}, configData{})
+	for i, s := range screens {
+		if want := fmt.Sprintf("  %d %s ", i+1, s.title()); !strings.Contains(tuiCmd.Long, want) {
+			t.Errorf("the help doesn't have %q, want every screen listed by its number", want)
+		}
+	}
+	// Every screen says what it is for, which is what the overview lists
+	for _, s := range screens {
+		if _, ok := s.(describer); !ok && s.title() != "Overview" {
+			t.Errorf("the %s screen doesn't say what it is for", s.title())
+		}
+	}
+	if len(screens) > 9 {
+		t.Errorf("there are %d screens, but only the numbers 1 to 9 go to one", len(screens))
 	}
 }

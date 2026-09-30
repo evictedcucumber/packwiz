@@ -186,17 +186,36 @@ func markdownListPath() string {
 	return filepath.Join(filepath.Dir(viper.GetString("pack-file")), core.ModListFile)
 }
 
-// writeMarkdownList makes the markdown list of the mods and writes it to dest, or to stdout if that is "-"
-func writeMarkdownList(dest string, pack core.Pack, index core.Index, mods []*core.Mod) error {
+// RenderModList makes the markdown list of the mods, as "packwiz list --save" writes it.
+func RenderModList(pack core.Pack, index core.Index, mods []*core.Mod) (string, error) {
 	entries := make([]markdownEntry, len(mods))
 	for i, mod := range mods {
 		file, err := index.RelIndexPath(mod.GetFilePath())
 		if err != nil {
-			return err
+			return "", err
 		}
 		entries[i] = markdownEntry{name: mod.Name, path: file, url: modrinthPageURL(mod), version: mod.DisplayVersion()}
 	}
-	text := renderMarkdownList(pack, entries)
+	return renderMarkdownList(pack, entries), nil
+}
+
+// SaveModList writes the markdown list of the mods to the file that "packwiz list --save" writes to when it isn't told
+// where, in the pack's folder, and returns where that is. It says nothing: it is for what has the terminal to itself.
+func SaveModList(pack core.Pack, index core.Index, mods []*core.Mod) (string, error) {
+	text, err := RenderModList(pack, index, mods)
+	if err != nil {
+		return "", err
+	}
+	dest := filepath.Join(filepath.Dir(viper.GetString("pack-file")), core.ModListFile)
+	return dest, os.WriteFile(dest, []byte(text), 0o644)
+}
+
+// writeMarkdownList makes the markdown list of the mods and writes it to dest, or to stdout if that is "-"
+func writeMarkdownList(dest string, pack core.Pack, index core.Index, mods []*core.Mod) error {
+	text, err := RenderModList(pack, index, mods)
+	if err != nil {
+		return err
+	}
 
 	if dest == "-" {
 		fmt.Print(text)

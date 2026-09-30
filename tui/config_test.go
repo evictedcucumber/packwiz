@@ -1069,3 +1069,35 @@ func TestPickerShowsWhatTheFilterMatched(t *testing.T) {
 		t.Errorf("the slug is shown though the name is what matched:\n%s", view)
 	}
 }
+
+func TestConfigReadsThePackAgainWhenItIsSwitchedTo(t *testing.T) {
+	s := newConfig(t)
+	writeFile(t, "config/fresh.json", "{}")
+	if _, err := (packBackend{}).refresh(); err != nil {
+		t.Fatalf("refresh() returned error: %v", err)
+	}
+	if out := strings.Join(tree(t, s), "\n"); strings.Contains(out, "fresh.json") {
+		t.Fatalf("the tree shows a file that was added after it was read:\n%s", out)
+	}
+
+	feed(t, s, s.activate()())
+	if out := strings.Join(tree(t, s), "\n"); !strings.Contains(out, "fresh.json") {
+		t.Errorf("after switching to it the tree doesn't show the file that was added:\n%s", out)
+	}
+	if s.working() {
+		t.Error("reading the pack when the screen was switched to counts as work, which would stop q")
+	}
+}
+
+func TestConfigIsWorkingWhileItChangesThePack(t *testing.T) {
+	s := newConfig(t)
+	press(t, s, "G", "r")
+	_, cmd := s.update(keyMsg(t, "enter"))
+	if !s.working() {
+		t.Error("the screen isn't working while it saves, so q would quit in the middle of it")
+	}
+	feed(t, s, cmd())
+	if s.working() {
+		t.Error("the screen is still working after it was done")
+	}
+}

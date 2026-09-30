@@ -46,19 +46,11 @@ With --save, or --output, the list is written to a markdown file instead of prin
 		// Filter mods by main/dependency status
 		if viper.IsSet("list.only") {
 			only := viper.GetString("list.only")
-			if only != "main" && only != "dependencies" {
+			if only != OnlyMain && only != OnlyDependencies {
 				ui.Error.Printf("Invalid --only %q, must be one of main, dependencies\n", only)
 				os.Exit(1)
 			}
-
-			i := 0
-			for _, mod := range mods {
-				if (only == "dependencies") == mod.AddedAsDependency {
-					mods[i] = mod
-					i++
-				}
-			}
-			mods = mods[:i]
+			mods = FilterByKind(mods, only)
 		}
 
 		// Filter mods by side
@@ -68,20 +60,10 @@ With --save, or --output, the list is written to a markdown file instead of prin
 				ui.Error.Printf("Invalid side %q, must be one of client, server, or both (default)\n", side)
 				os.Exit(1)
 			}
-
-			i := 0
-			for _, mod := range mods {
-				if mod.Side == side || mod.Side == core.EmptySide || mod.Side == core.UniversalSide || side == core.UniversalSide {
-					mods[i] = mod
-					i++
-				}
-			}
-			mods = mods[:i]
+			mods = FilterBySide(mods, side)
 		}
 
-		sort.Slice(mods, func(i, j int) bool {
-			return strings.ToLower(mods[i].Name) < strings.ToLower(mods[j].Name)
-		})
+		SortMods(mods)
 
 		if viper.GetBool("list.save") || viper.IsSet("list.output") {
 			if err := writeMarkdownList(markdownListPath(), pack, index, mods); err != nil {
@@ -109,6 +91,45 @@ With --save, or --output, the list is written to a markdown file instead of prin
 			fmt.Println(line)
 		}
 	},
+}
+
+// What --only takes: the mods that were added on their own, or those that were added because another needs them
+const (
+	OnlyMain         = "main"
+	OnlyDependencies = "dependencies"
+)
+
+// FilterByKind keeps the mods that are main mods (only is OnlyMain) or are dependencies of others (OnlyDependencies), as
+// "packwiz list --only" lists them. It works in place, so the mods that it is given are not to be used as they were.
+func FilterByKind(mods []*core.Mod, only string) []*core.Mod {
+	i := 0
+	for _, mod := range mods {
+		if (only == OnlyDependencies) == mod.AddedAsDependency {
+			mods[i] = mod
+			i++
+		}
+	}
+	return mods[:i]
+}
+
+// FilterBySide keeps the mods that run on a side, as "packwiz list --side" lists them: those that are on it, and those
+// that are on both, which is what a mod with no side is taken to be. It works in place, as FilterByKind does.
+func FilterBySide(mods []*core.Mod, side string) []*core.Mod {
+	i := 0
+	for _, mod := range mods {
+		if mod.Side == side || mod.Side == core.EmptySide || mod.Side == core.UniversalSide || side == core.UniversalSide {
+			mods[i] = mod
+			i++
+		}
+	}
+	return mods[:i]
+}
+
+// SortMods puts mods in alphabetical order of their names, ignoring case, which is the order they are listed in.
+func SortMods(mods []*core.Mod) {
+	sort.Slice(mods, func(i, j int) bool {
+		return strings.ToLower(mods[i].Name) < strings.ToLower(mods[j].Name)
+	})
 }
 
 func init() {

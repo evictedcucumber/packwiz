@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 )
 
 // ProjectsService handles communication with the projects routes of the
@@ -49,4 +50,46 @@ func (s *ProjectsService) GetMultiple(ids []string) ([]*Project, error) {
 		return nil, err
 	}
 	return projects, nil
+}
+
+// SearchOptions say what to search for.
+type SearchOptions struct {
+	// Query is the text to look for in the names and descriptions of projects
+	Query string
+	// Facets narrow what is found: each group is alternatives and a project has to match one of every group, so
+	// {{"project_type:mod"}, {"versions:1.21.1"}} is mods for 1.21.1, and {{"categories:neoforge", "categories:fabric"}} is
+	// for either
+	Facets [][]string
+	// Limit is how many projects to find at most, or 0 for what Modrinth gives by default
+	Limit int
+}
+
+// Search finds projects by what they are called and what they say they are.
+//
+// Modrinth API docs: https://docs.modrinth.com/api/operations/searchprojects/
+func (s *ProjectsService) Search(options SearchOptions) (*SearchResult, error) {
+	req, err := s.client.newRequest(http.MethodGet, "search", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	query := req.URL.Query()
+	query.Set("query", options.Query)
+	if len(options.Facets) > 0 {
+		facets, err := json.Marshal(options.Facets)
+		if err != nil {
+			return nil, err
+		}
+		query.Set("facets", string(facets))
+	}
+	if options.Limit > 0 {
+		query.Set("limit", strconv.Itoa(options.Limit))
+	}
+	req.URL.RawQuery = query.Encode()
+
+	var result SearchResult
+	if err := s.client.do(req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
