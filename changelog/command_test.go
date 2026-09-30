@@ -947,3 +947,28 @@ func TestSaveWritesChangelogFromHistory(t *testing.T) {
 		t.Errorf("CHANGELOG.md = %q", got)
 	}
 }
+
+func TestSaveListsUnreleasedChanges(t *testing.T) {
+	setUpPack(t, "1.0.0")
+	writeMod(t, "Sodium", "client", "1.0")
+	if _, _, err := RunRelease("", ""); err != nil {
+		t.Fatal(err)
+	}
+	writeMod(t, "Lithium", "both", "1.0")
+
+	if err := runSave(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(markdownPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unreleased := strings.Index(string(got), "## Unreleased")
+	released := strings.Index(string(got), "## 1.0.0")
+	if unreleased < 0 || released < 0 || unreleased > released {
+		t.Fatalf("want Unreleased above 1.0.0 in:\n%s", got)
+	}
+	if !strings.Contains(string(got)[unreleased:released], "Lithium") {
+		t.Errorf("Unreleased doesn't list Lithium:\n%s", got)
+	}
+}

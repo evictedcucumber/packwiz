@@ -38,7 +38,8 @@ the release they would make and the version it would have. Nothing is committed 
 A pack that isn't in a git repository has no commits to read, so its changes are found by comparing it with the pack as
 it was at the last release instead.
 
-With --save, nothing is previewed: CHANGELOG.md is written from the releases recorded in changelog.toml.`,
+With --save, nothing is previewed: CHANGELOG.md is written from the releases recorded in changelog.toml, with the changes
+not released yet listed above them as Unreleased.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if saveFlag {
@@ -86,7 +87,28 @@ func runSave() error {
 	if err != nil {
 		return fmt.Errorf("failed to read %s: %w", HistoryFile, err)
 	}
-	if err := writeFileAtomic(markdownPath(), []byte(RenderMarkdown(history.Releases))); err != nil {
+	// Changes made since the last release are listed first as unreleased. Nothing is released or recorded for them.
+	repo, err := openRepository()
+	if err != nil {
+		return err
+	}
+	var unreleased []Change
+	if repo == nil {
+		if err := checkWithoutRepository(history, ""); err != nil {
+			ui.Info.Printf("Not listing unreleased changes: %s.\n", err)
+			return saveMarkdown(history, nil)
+		}
+	}
+	p, err := loadPending(repo, false, "", true)
+	if err != nil {
+		return err
+	}
+	unreleased = p.changes
+	return saveMarkdown(history, unreleased)
+}
+
+func saveMarkdown(history History, unreleased []Change) error {
+	if err := writeFileAtomic(markdownPath(), []byte(RenderMarkdownWithUnreleased(history.Releases, unreleased))); err != nil {
 		return fmt.Errorf("failed to write %s: %w", MarkdownFile, err)
 	}
 	ui.Success.Printf("Wrote %s.\n", ui.Bold.Sprint(MarkdownFile))
