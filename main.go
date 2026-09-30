@@ -6,6 +6,7 @@ import (
 	"github.com/evictedcucumber/packwiz/cmd"
 	_ "github.com/evictedcucumber/packwiz/git"
 	_ "github.com/evictedcucumber/packwiz/modrinth"
+	_ "github.com/evictedcucumber/packwiz/tui"
 	_ "github.com/evictedcucumber/packwiz/utils"
 )
 

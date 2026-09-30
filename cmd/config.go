@@ -106,12 +106,6 @@ What is tracked is what the index says, so run "packwiz refresh" after adding or
 	},
 }
 
-// relatedMod is a mod loaded for "packwiz config relate", alongside its metadata file's path (for RefreshFileWithHash).
-type relatedMod struct {
-	path string
-	data *core.Mod
-}
-
 // configRelateCmd represents the config relate command
 var configRelateCmd = &cobra.Command{
 	Use:   "relate --mod <mod> [--mod <mod>...] <config file/dir>...",
@@ -146,7 +140,7 @@ same way every other config-files entry is.`,
 			os.Exit(1)
 		}
 
-		var relatedMods []relatedMod
+		var relatedMods []*core.Mod
 		seenModPaths := make(map[string]bool, len(modRefs))
 		for _, ref := range modRefs {
 			modPath, ok := index.FindMod(ref)
@@ -163,7 +157,7 @@ same way every other config-files entry is.`,
 				ui.Error.Println(err)
 				os.Exit(1)
 			}
-			relatedMods = append(relatedMods, relatedMod{path: modPath, data: &modData})
+			relatedMods = append(relatedMods, &modData)
 		}
 
 		mods, err := index.LoadAllMods()
@@ -193,49 +187,36 @@ same way every other config-files entry is.`,
 		}
 
 		changed := false
-		for _, rm := range relatedMods {
+		for _, mod := range relatedMods {
 			var newlyClaimed, alreadyClaimed []string
 			for _, rel := range rels {
-				if rm.data.ClaimConfigFile(rel) {
+				if mod.ClaimConfigFile(rel) {
 					newlyClaimed = append(newlyClaimed, rel)
 				} else {
 					alreadyClaimed = append(alreadyClaimed, rel)
 				}
 			}
 			if len(alreadyClaimed) > 0 {
-				ui.Info.Printf("%s already claims %s\n", ui.Bold.Sprint(rm.data.Name), ui.Bold.Sprint(strings.Join(alreadyClaimed, ", ")))
+				ui.Info.Printf("%s already claims %s\n", ui.Bold.Sprint(mod.Name), ui.Bold.Sprint(strings.Join(alreadyClaimed, ", ")))
 			}
 			if len(newlyClaimed) == 0 {
 				continue
 			}
 			changed = true
 
-			format, hash, err := rm.data.Write()
-			if err != nil {
-				ui.Error.Println(err)
-				os.Exit(1)
-			}
-			if err := index.RefreshFileWithHash(rm.path, format, hash, true); err != nil {
+			if err := index.SaveMod(mod); err != nil {
 				ui.Error.Println(err)
 				os.Exit(1)
 			}
 
-			ui.Success.Printf("%s now claims %s\n", ui.Bold.Sprint(rm.data.Name), ui.Bold.Sprint(strings.Join(newlyClaimed, ", ")))
+			ui.Success.Printf("%s now claims %s\n", ui.Bold.Sprint(mod.Name), ui.Bold.Sprint(strings.Join(newlyClaimed, ", ")))
 		}
 
 		if !changed {
 			return
 		}
 
-		if err := index.Write(); err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
-		if err := pack.UpdateIndexHash(); err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
-		if err := pack.Write(); err != nil {
+		if err := pack.SaveIndex(index); err != nil {
 			ui.Error.Println(err)
 			os.Exit(1)
 		}
@@ -250,13 +231,7 @@ func relateConfigPath(index core.Index, mods []*core.Mod, path string, isDir boo
 	if err != nil {
 		return "", err
 	}
-	if isDir && !strings.HasSuffix(rel, "/") {
-		rel += "/"
-	}
-	if dir := core.ConfigDirOfMods(mods); dir != "" {
-		rel = strings.TrimPrefix(rel, dir+"/")
-	}
-	return rel, nil
+	return core.ConfigEntry(rel, isDir, core.ConfigDirOfMods(mods)), nil
 }
 
 // treeEntry is a line of a tree, and the style it is shown in.

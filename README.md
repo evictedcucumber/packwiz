@@ -26,6 +26,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - `packwiz list --markdown` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
 - `packwiz validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz fix` fixes what it can, showing the changes and asking first
 - `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, and `packwiz validate` checks the same
+- `packwiz tui` opens an interface in the terminal, for now for config files: the same tree as `packwiz config list`, with keys to relate a file to the mods that own it, or take a claim out again
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
 - Configured Defaults support: a pack that has the mod keeps its config, and any other default files, in `configureddefaults/`
@@ -188,6 +189,25 @@ packwiz config relate iris config/iris
 A folder is given a trailing `/` automatically. If the pack has Configured Defaults, the path is written as if it didn't - the same normalizing `packwiz config list` does - so it reads the same whether or not the mod is installed. Running it again with the same arguments does nothing more.
 
 Every mod gets an empty `config-files = []` when it is added with `packwiz mr add`, and `packwiz fix` adds one to any mod that doesn't have one yet, so a `.pw.toml` file always shows the field is there to fill in with `packwiz config relate`.
+
+## Terminal interface
+
+`packwiz tui` opens an interface for the pack in the current directory, in the terminal's alternate screen, so it leaves what was there when you quit. For now it has one screen, for the pack's config files: the tree that `packwiz config list` prints, which you move through instead of reading, and change while you are there.
+
+| Key | |
+| --- | --- |
+| `↑` `↓` (or `k` `j`), `g` `G`, page up and down | move through the tree |
+| `←` `→` (or `h` `l`), `enter` on a mod | fold and unfold what a mod owns; `←` from a file goes to its mod |
+| `r` (or `enter` on a file) | relate the file to mods |
+| `x` | take a mod's claim on a file out, or an entry that matches no file |
+| `space`, `esc` | mark a file, to relate several together (on a mod or "Invalid", every file in it); `esc` unmarks them all |
+| `f` | show all files, then only the valid, the invalid and the missing ones, as `--state` does |
+| `R` | refresh the index, so files added or deleted since show up |
+| `?`, `q` | all of the keys, and quit |
+
+`r` asks which mods to give the file to: type `/` to filter them by name, `space` picks one, and `enter` relates the file to what is picked, or to the mod under the cursor if none is. Several mods can be picked for a file they share. `tab` switches between claiming the file and claiming the folder it is in, and what would be written to each mod's `config-files` is shown above the list. Marked files are related together, and a mod that already claims everything being related is labelled as such. `x` shows the entry that would be taken out, and how many files it covers if it is a folder, and asks before doing it.
+
+It writes what `packwiz config relate` writes, through the same code, so the `.pw.toml` files, the index and `pack.toml` are left as if the commands had made the changes, and a pack that keeps its files in `configureddefaults/` has its entries written without it, as they are there. Colour follows `PACKWIZ_COLOR` and `NO_COLOR` like everything else, and everything selected or marked is shown with a symbol as well as a colour. It needs a terminal at least 40 columns wide and 10 lines high.
 
 ## Checking a pack
 

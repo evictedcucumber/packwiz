@@ -1,6 +1,7 @@
 package core
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -236,5 +237,42 @@ func TestConfigDir(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s: configDir() = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// The notice that files have left the index is what a caller with the screen to itself gets back, in plain text,
+// instead of it being printed
+func TestIndexRefreshQuietlyReturnsTheNoticeInsteadOfPrintingIt(t *testing.T) {
+	registerConfigDirSource(t, "defaults", "configureddefaults")
+	idx, dir := refreshFixture(t, map[string]string{
+		"mods/defaults.pw.toml":                 modTOML("defaults", "", "defaults", "x"),
+		"configureddefaults/config/sodium.json": "{}",
+		"config/sodium.json":                    "{}",
+	})
+	// Only files that the index has are said to have left it
+	if err := idx.RefreshFileWithHash(filepath.Join(dir, "config", "sodium.json"), "sha256", "h", false); err != nil {
+		t.Fatalf("RefreshFileWithHash() returned error: %v", err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() returned error: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	notices, refreshErr := idx.RefreshQuietly()
+	os.Stdout = oldStdout
+	_ = w.Close()
+	if refreshErr != nil {
+		t.Fatalf("RefreshQuietly() returned error: %v", refreshErr)
+	}
+
+	out, _ := io.ReadAll(r)
+	if len(out) != 0 {
+		t.Errorf("RefreshQuietly() wrote %q to stdout, want nothing", out)
+	}
+	want := []string{"Notice: this pack keeps its files in configureddefaults/, so 1 file outside it is no longer tracked"}
+	if !slices.Equal(notices, want) {
+		t.Errorf("notices = %q, want %q", notices, want)
 	}
 }

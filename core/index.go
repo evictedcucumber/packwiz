@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 	gitignore "github.com/sabhiram/go-gitignore"
 	"github.com/spf13/viper"
 	"github.com/vbauerster/mpb/v4"
@@ -188,8 +189,23 @@ func readGitignore(path string) (*gitignore.GitIgnore, bool) {
 	return gitignore.CompileIgnoreLines(lines...), true
 }
 
-// Refresh updates the hashes of all the files in the index, and adds new files to the index
+// Refresh updates the hashes of all the files in the index, and adds new files to the index, showing its progress and
+// anything it has to say on stdout
 func (in *Index) Refresh() error {
+	return in.refresh(mpb.New(), func(notice string) { fmt.Println(notice) })
+}
+
+// RefreshQuietly is Refresh without the progress bar, and with the notices it would print returned instead, as plain
+// text: for a caller that has the screen to itself (such as the TUI) and can't have anything written over it.
+func (in *Index) RefreshQuietly() (notices []string, err error) {
+	err = in.refresh(mpb.New(mpb.WithOutput(io.Discard)), func(notice string) {
+		notices = append(notices, ui.Strip(notice))
+	})
+	return notices, err
+}
+
+// refresh is Refresh, showing its progress in progressContainer and giving notify what it has to say
+func (in *Index) refresh(progressContainer *mpb.Progress, notify func(notice string)) error {
 	// TODO: If needed, multithreaded hashing
 	// for i := 0; i < runtime.NumCPU(); i++ {}
 
@@ -253,12 +269,11 @@ func (in *Index) Refresh() error {
 
 	// A pack with a mod that reads the pack's files from a folder of its own (see ConfigDirResolver) tracks only that
 	// folder and its metadata files
-	fileList, err = in.keepConfigDirFiles(fileList)
+	fileList, err = in.keepConfigDirFiles(fileList, notify)
 	if err != nil {
 		return err
 	}
 
-	progressContainer := mpb.New()
 	progress := progressContainer.AddBar(int64(len(fileList)),
 		mpb.PrependDecorators(
 			// simple name decorator
@@ -330,6 +345,16 @@ func (in *Index) RefreshFileWithHash(path, format, hash string, markAsMetaFile b
 		hash = ""
 	}
 	return in.updateFileHashGiven(path, format, hash, markAsMetaFile)
+}
+
+// SaveMod writes a mod's metadata file and records the file's new hash in the index. The index still has to be written
+// afterwards, and the pack's record of its hash brought up to date (see Pack.SaveIndex).
+func (in *Index) SaveMod(m *Mod) error {
+	format, hash, err := m.Write()
+	if err != nil {
+		return err
+	}
+	return in.RefreshFileWithHash(m.GetFilePath(), format, hash, true)
 }
 
 // trimMetaExtension removes a mod metadata file's extension (MetaExtension, or the legacy MetaExtensionOld) from a

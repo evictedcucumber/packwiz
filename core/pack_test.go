@@ -442,3 +442,54 @@ func TestParsePackDoesNotTouchTheGlobalConfiguration(t *testing.T) {
 		t.Errorf("viper %q = %q after ParsePack(), want it left alone", key, got)
 	}
 }
+
+// SaveIndex is what has to follow any change to the index: the index on disk, the hash the pack records for it, and the
+// pack itself
+func TestPackSaveIndexWritesTheIndexAndTheHashThePackRecordsForIt(t *testing.T) {
+	packFile := withPackFile(t, "")
+	dir := filepath.Dir(packFile)
+	oldNoHashes := viper.GetBool("no-internal-hashes")
+	viper.Set("no-internal-hashes", false)
+	t.Cleanup(func() { viper.Set("no-internal-hashes", oldNoHashes) })
+
+	pack := Pack{Name: "Test", PackFormat: CurrentPackFormat}
+	pack.Index.File = "index.toml"
+	index := Index{
+		HashFormat: "sha256",
+		Files:      IndexFiles{"config/a.json": &indexFile{File: "config/a.json", Hash: "abc"}},
+		indexFile:  filepath.Join(dir, "index.toml"),
+		packRoot:   dir,
+	}
+
+	if err := pack.SaveIndex(index); err != nil {
+		t.Fatalf("SaveIndex() returned error: %v", err)
+	}
+
+	loadedIndex, err := LoadIndex(filepath.Join(dir, "index.toml"))
+	if err != nil {
+		t.Fatalf("the index wasn't written: %v", err)
+	}
+	if _, ok := loadedIndex.Files["config/a.json"]; !ok {
+		t.Errorf("the written index is missing config/a.json: %v", loadedIndex.Files)
+	}
+
+	loadedPack, err := LoadPack()
+	if err != nil {
+		t.Fatalf("the pack wasn't written: %v", err)
+	}
+	if loadedPack.Index.Hash == "" {
+		t.Fatal("the pack records no hash for the index")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "index.toml"))
+	if err != nil {
+		t.Fatalf("reading the index returned error: %v", err)
+	}
+	h, err := GetHashImpl("sha256")
+	if err != nil {
+		t.Fatalf("GetHashImpl() returned error: %v", err)
+	}
+	_, _ = h.Write(data)
+	if want := h.HashToString(h.Sum(nil)); loadedPack.Index.Hash != want {
+		t.Errorf("the pack records index hash %q, but the index's is %q", loadedPack.Index.Hash, want)
+	}
+}

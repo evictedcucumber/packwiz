@@ -62,8 +62,8 @@ func hasMetaExtension(path string) bool {
 
 // keepConfigDirFiles takes the files found in the pack, as paths on disk, and drops the ones that a pack with a
 // config folder doesn't track: everything but its metadata files and what is in that folder. A pack without one
-// keeps them all. It says so when files that the index has are dropped, as they leave it.
-func (in *Index) keepConfigDirFiles(found []string) ([]string, error) {
+// keeps them all. It gives notify a notice when files that the index has are dropped, as they leave it.
+func (in *Index) keepConfigDirFiles(found []string, notify func(notice string)) ([]string, error) {
 	rels := make([]string, len(found))
 	isMeta := make([]bool, len(found))
 	var metaFiles []string
@@ -106,8 +106,8 @@ func (in *Index) keepConfigDirFiles(found []string) ([]string, error) {
 		if left == 1 {
 			noun, verb = "file", "is"
 		}
-		ui.Info.Printf("Notice: this pack keeps its files in %s, so %d %s outside it %s no longer tracked\n",
-			ui.Bold.Sprint(dir+"/"), left, noun, verb)
+		notify(ui.Info.Sprintf("Notice: this pack keeps its files in %s, so %d %s outside it %s no longer tracked",
+			ui.Bold.Sprint(dir+"/"), left, noun, verb))
 	}
 	return kept, nil
 }

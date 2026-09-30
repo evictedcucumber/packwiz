@@ -269,3 +269,109 @@ func TestConfigFileTreeMissingIsLookedForInTheConfigDir(t *testing.T) {
 		t.Errorf("Alpha's missing = %v, want %v", tree.Mods[0].Missing, want)
 	}
 }
+
+func TestConfigEntry(t *testing.T) {
+	tests := []struct {
+		name      string
+		rel       string
+		isDir     bool
+		configDir string
+		want      string
+	}{
+		{"file", "config/sodium.json", false, "", "config/sodium.json"},
+		{"folder gets a trailing slash", "config/sodium", true, "", "config/sodium/"},
+		{"folder that has one already", "config/sodium/", true, "", "config/sodium/"},
+		{"file in the config dir", "configureddefaults/config/sodium.json", false, "configureddefaults", "config/sodium.json"},
+		{"folder in the config dir", "configureddefaults/config/sodium", true, "configureddefaults", "config/sodium/"},
+		{"a path outside the config dir is left as it is", "config/sodium.json", false, "configureddefaults", "config/sodium.json"},
+		{"the config dir itself has no entry", "configureddefaults", true, "configureddefaults", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ConfigEntry(tt.rel, tt.isDir, tt.configDir); got != tt.want {
+				t.Errorf("ConfigEntry(%q, %v, %q) = %q, want %q", tt.rel, tt.isDir, tt.configDir, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClaimingEntries(t *testing.T) {
+	mod := modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar",
+		"config/alpha.json", "config/alpha/", "config/alpha/sub.json", "config/other.json", "config/alpha/")
+
+	tests := []struct {
+		name string
+		path string
+		want []string
+	}{
+		{"an entry that names the file", "config/alpha.json", []string{"config/alpha.json"}},
+		{"a folder entry", "config/alpha/other.json", []string{"config/alpha/"}},
+		{"the file and its folder, each once", "config/alpha/sub.json", []string{"config/alpha/", "config/alpha/sub.json"}},
+		{"a path nothing claims", "config/orphan.json", nil},
+		{"a folder entry doesn't claim a file that only shares its name", "config/alpha-extra.json", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClaimingEntries(mod, "", tt.path)
+			slices.Sort(got)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("ClaimingEntries(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+
+	t.Run("a mod with no config-files claims nothing", func(t *testing.T) {
+		if got := ClaimingEntries(modAt("Bare", "mods/bare.pw.toml", "bare.jar"), "", "config/alpha.json"); len(got) != 0 {
+			t.Errorf("ClaimingEntries() = %v, want none", got)
+		}
+	})
+
+	t.Run("entries are resolved against the config dir, and returned as written", func(t *testing.T) {
+		got := ClaimingEntries(mod, "configureddefaults", "configureddefaults/config/alpha/sub.json")
+		slices.Sort(got)
+		if want := []string{"config/alpha/", "config/alpha/sub.json"}; !slices.Equal(got, want) {
+			t.Errorf("ClaimingEntries() = %v, want %v", got, want)
+		}
+		if got := ClaimingEntries(mod, "configureddefaults", "config/alpha.json"); len(got) != 0 {
+			t.Errorf("a path outside the config dir: ClaimingEntries() = %v, want none", got)
+		}
+	})
+}
+
+// ClaimingEntries has to find exactly the entries that make ConfigFileTree list a file under a mod, or unclaiming what it
+// returns wouldn't stop the mod claiming the file
+func TestClaimingEntriesAgreeWithConfigFileTree(t *testing.T) {
+	idx := newIndexFixture(t)
+	track(t, idx, "mods/alpha.pw.toml", "config/alpha.json", "config/alpha/sub.json", "config/orphan.json")
+	mod := modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json", "config/alpha/")
+
+	tree, err := idx.ConfigFileTree([]*Mod{mod})
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
+	}
+	for _, p := range append(slices.Clone(tree.Mods[0].Files), tree.Unclaimed...) {
+		claimed := slices.Contains(tree.Mods[0].Files, p)
+		if got := len(ClaimingEntries(mod, "", p)) > 0; got != claimed {
+			t.Errorf("%s: ClaimingEntries says claimed = %v, ConfigFileTree says %v", p, got, claimed)
+		}
+	}
+}
+
+func TestEntryClaims(t *testing.T) {
+	tests := []struct {
+		entry, configDir, path string
+		want                   bool
+	}{
+		{"config/a.json", "", "config/a.json", true},
+		{"config/a.json", "", "config/a.json.bak", false},
+		{"config/a/", "", "config/a/b.json", true},
+		{"config/a/", "", "config/ab.json", false},
+		{"config/a/", "configureddefaults", "configureddefaults/config/a/b.json", true},
+		{"config/a/", "configureddefaults", "config/a/b.json", false},
+	}
+	for _, tt := range tests {
+		if got := EntryClaims(tt.entry, tt.configDir, tt.path); got != tt.want {
+			t.Errorf("EntryClaims(%q, %q, %q) = %v, want %v", tt.entry, tt.configDir, tt.path, got, tt.want)
+		}
+	}
+}

@@ -22,8 +22,8 @@ import (
 
 // Chdir creates a fresh temp directory and changes the test's working
 // directory into it, restoring the original working directory on cleanup.
-// (go.mod targets go1.23, which predates testing.T.Chdir, so this is done
-// manually.)
+// (go.mod targeted go1.23 when this was written, which predates
+// testing.T.Chdir, so this is done manually.)
 func Chdir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

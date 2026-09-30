@@ -117,6 +117,18 @@ func (pack *Pack) UpdateIndexHash() error {
 	return f.Close()
 }
 
+// SaveIndex writes the index, brings the pack's record of the index's hash up to date and writes the pack: everything
+// that has to follow a change to the index.
+func (pack *Pack) SaveIndex(index Index) error {
+	if err := index.Write(); err != nil {
+		return err
+	}
+	if err := pack.UpdateIndexHash(); err != nil {
+		return err
+	}
+	return pack.Write()
+}
+
 // Write saves the pack file
 func (pack Pack) Write() error {
 	f, err := os.Create(viper.GetString("pack-file"))

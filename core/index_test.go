@@ -1,8 +1,10 @@
 package core
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -681,5 +683,89 @@ file = "config/bar.txt"
 		if other, ok := parsed.Files[p]; !ok || other.IsMetaFile() != f.IsMetaFile() {
 			t.Errorf("%s differs between LoadIndex() and ParseIndex()", p)
 		}
+	}
+}
+
+// RefreshQuietly is for a caller that owns the screen, so it must not write a progress bar to stdout as Refresh does
+func TestIndexRefreshQuietlyWritesNothingToStdout(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "pack.toml"), "name = \"Test\"\n")
+	mustWriteFile(t, filepath.Join(dir, "index.toml"), "")
+	mustWriteFile(t, filepath.Join(dir, "config", "a.json"), "{}")
+	mustWriteFile(t, filepath.Join(dir, "config", "b.json"), "{}")
+
+	oldPackFile := viper.GetString("pack-file")
+	viper.Set("pack-file", filepath.Join(dir, "pack.toml"))
+	t.Cleanup(func() { viper.Set("pack-file", oldPackFile) })
+
+	idx := Index{HashFormat: "sha256", indexFile: filepath.Join(dir, "index.toml"), packRoot: dir, Files: IndexFiles{}}
+
+	// A pipe stands in for stdout; mpb looks stdout up when the bar is made, so it is swapped before Refresh
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() returned error: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	_, refreshErr := idx.RefreshQuietly()
+	os.Stdout = oldStdout
+	_ = w.Close()
+
+	if refreshErr != nil {
+		t.Fatalf("RefreshQuietly() returned error: %v", refreshErr)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading stdout returned error: %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("RefreshQuietly() wrote %q to stdout, want nothing", out)
+	}
+	for _, p := range []string{"config/a.json", "config/b.json"} {
+		if _, ok := idx.Files[p]; !ok {
+			t.Errorf("expected %s to be added to the index", p)
+		}
+	}
+}
+
+func TestIndexSaveModWritesTheFileAndRecordsItsHash(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "index.toml"), "")
+
+	idx := Index{HashFormat: "sha256", indexFile: filepath.Join(dir, "index.toml"), packRoot: dir, Files: IndexFiles{}}
+	mod := &Mod{Name: "Alpha", FileName: "alpha.jar"}
+	mod.SetMetaPath(filepath.Join(dir, "mods", "alpha.pw.toml"))
+	mod.ClaimConfigFile("config/alpha.json")
+
+	if err := idx.SaveMod(mod); err != nil {
+		t.Fatalf("SaveMod() returned error: %v", err)
+	}
+
+	saved, err := LoadMod(mod.GetFilePath())
+	if err != nil {
+		t.Fatalf("the mod file wasn't written: %v", err)
+	}
+	if saved.ConfigFiles == nil || !slices.Equal(*saved.ConfigFiles, []string{"config/alpha.json"}) {
+		t.Errorf("saved config-files = %v, want [config/alpha.json]", saved.ConfigFiles)
+	}
+
+	entry, ok := idx.Files["mods/alpha.pw.toml"]
+	if !ok {
+		t.Fatalf("mods/alpha.pw.toml isn't in the index: %v", idx.Files)
+	}
+	if !entry.IsMetaFile() {
+		t.Error("the mod's file should be marked as a metadata file")
+	}
+	data, err := os.ReadFile(mod.GetFilePath())
+	if err != nil {
+		t.Fatalf("reading the mod file returned error: %v", err)
+	}
+	h, err := GetHashImpl("sha256")
+	if err != nil {
+		t.Fatalf("GetHashImpl() returned error: %v", err)
+	}
+	_, _ = h.Write(data)
+	if got := entry.(*indexFile).Hash; got != h.HashToString(h.Sum(nil)) {
+		t.Errorf("the index records hash %q, but the file's is %q", got, h.HashToString(h.Sum(nil)))
 	}
 }

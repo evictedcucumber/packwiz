@@ -38,6 +38,47 @@ func claimsPath(entry, p string) bool {
 	return entry == p
 }
 
+// ConfigEntry turns a path relative to the pack, as the index has it, into an entry for a mod's ConfigFiles: a folder
+// (isDir) is given a trailing "/", which claims everything under it, and the pack's config folder (configDir, from
+// ConfigDirOfMods, or "" if it has none) is taken back out, so it reads the same as any other entry does. It is "" for
+// the config folder itself, which no entry can be written for.
+func ConfigEntry(rel string, isDir bool, configDir string) string {
+	if isDir && !strings.HasSuffix(rel, "/") {
+		rel += "/"
+	}
+	if configDir != "" {
+		rel = strings.TrimPrefix(rel, configDir+"/")
+	}
+	return rel
+}
+
+// EntryClaims reports whether entry, an entry of a mod's ConfigFiles written as it is in the mod's metadata file,
+// claims path, a path relative to the pack as the index has it. configDir is the pack's config folder, as for
+// ConfigEntry.
+func EntryClaims(entry, configDir, path string) bool {
+	if configDir != "" {
+		entry = configDir + "/" + entry
+	}
+	return claimsPath(entry, path)
+}
+
+// ClaimingEntries returns the entries of m's ConfigFiles that claim path, a tracked path relative to the pack as the
+// index has it: at most the one that names it and the folders it is under, each once, written as they are in the mod's
+// metadata file. It is what has to be taken out of ConfigFiles for m to stop claiming path. configDir is the pack's
+// config folder, as for ConfigEntry.
+func ClaimingEntries(m *Mod, configDir, path string) []string {
+	if m.ConfigFiles == nil {
+		return nil
+	}
+	var entries []string
+	for _, entry := range *m.ConfigFiles {
+		if EntryClaims(entry, configDir, path) && !slices.Contains(entries, entry) {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
 // ConfigFileTree builds a ConfigFileTree of the pack's tracked config-like files, by the mod that claims each one.
 //
 // Entries in a mod's ConfigFiles are written as if the pack kept its files at the root of the game directory, as it
