@@ -20,15 +20,11 @@ in
         installShellFiles
       ];
 
-      # Install shell completions and manual pages
+      # Install manual pages (there are no shell completions: the completion
+      # command is disabled, see cmd/root.go)
       postInstall = ''
         $out/bin/packwiz man man
         installManPage man/*.1
-
-        installShellCompletion --cmd packwiz \
-          --bash <($out/bin/packwiz completion bash) \
-          --fish <($out/bin/packwiz completion fish) \
-          --zsh <($out/bin/packwiz completion zsh)
       '';
 
       meta = with lib; {
