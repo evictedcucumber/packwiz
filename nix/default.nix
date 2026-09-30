@@ -20,8 +20,11 @@ in
         installShellFiles
       ];
 
-      # Install shell completions
+      # Install shell completions and manual pages
       postInstall = ''
+        $out/bin/packwiz man man
+        installManPage man/*.1
+
         installShellCompletion --cmd packwiz \
           --bash <($out/bin/packwiz completion bash) \
           --fish <($out/bin/packwiz completion fish) \
