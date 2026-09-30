@@ -248,8 +248,6 @@ func styleUpdate(update string) string {
 }
 
 func init() {
-	rootCmd.AddCommand(UpdateCmd)
-
 	UpdateCmd.Flags().BoolP("all", "a", false, "Update all external files")
 	_ = viper.BindPFlag("update.all", UpdateCmd.Flags().Lookup("all"))
 }

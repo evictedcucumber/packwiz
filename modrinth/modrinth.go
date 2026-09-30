@@ -29,6 +29,7 @@ var mrDefaultClient = modrinthApi.NewClient(&http.Client{})
 
 func init() {
 	cmd.Add(modrinthCmd)
+	modrinthCmd.AddCommand(cmd.UpdateCmd)
 	core.Updaters["modrinth"] = mrUpdater{}
 
 	mrDefaultClient.UserAgent = core.UserAgent

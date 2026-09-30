@@ -461,7 +461,7 @@ func TestInstallVersionUpdateRecordsReleaseType(t *testing.T) {
 
 	mod := loadTestMod(t)
 	if data, _ := modrinthUpdateData(&mod); data.ReleaseType != "beta" {
-		t.Errorf("ReleaseType = %q, want the --release-type it was updated with, so 'packwiz update' keeps to it", data.ReleaseType)
+		t.Errorf("ReleaseType = %q, want the --release-type it was updated with, so 'packwiz mr update' keeps to it", data.ReleaseType)
 	}
 }
 
@@ -596,7 +596,7 @@ func TestInstallProjectOffersUpdateToLatest(t *testing.T) {
 	}
 }
 
-// A mod added with --release-type beta is checked for updates with it by 'packwiz update', and so must 'mr add' be, or
+// A mod added with --release-type beta is checked for updates with it by 'packwiz mr update', and so must 'mr add' be, or
 // it would offer the older release as an "update"
 func TestInstallProjectLooksForUpdatesWithTheReleaseTypeItWasAddedWith(t *testing.T) {
 	pack, index := setupPackFixture(t)

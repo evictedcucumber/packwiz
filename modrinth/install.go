@@ -139,7 +139,7 @@ func installVersionById(versionId string, versionFilename string, pack core.Pack
 func installProject(project *modrinthApi.Project, versionFilename string, pack core.Pack, index *core.Index, releaseType string) error {
 	lookupReleaseType := releaseType
 	if lookupReleaseType == "" {
-		// A project that is already added is looked up with the release type it was added with, as 'packwiz update'
+		// A project that is already added is looked up with the release type it was added with, as 'packwiz mr update'
 		// does, so that both agree on what its latest version is
 		existing, err := findInstalledMod(index, *project.ID)
 		if err != nil {

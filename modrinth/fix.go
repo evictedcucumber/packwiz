@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/ui"
@@ -18,7 +19,7 @@ import (
 var fixCmd = &cobra.Command{
 	Use:   "fix",
 	Short: "Check the pack, then fix what can be fixed, after showing the changes and asking",
-	Long: `Check the pack as 'packwiz modrinth validate' does, then work out which of what it found can be fixed, show the
+	Long: `Check the pack as 'packwiz validate' does, then work out which of what it found can be fixed, show the
 changes that would fix them, and ask before making any:
 
   - a mod that is only on the server, but that a mod on the client requires, is put on both sides
@@ -412,5 +413,5 @@ func (p *fixPlan) apply(pack *core.Pack, index *core.Index) (int, error) {
 }
 
 func init() {
-	modrinthCmd.AddCommand(fixCmd)
+	cmd.Add(fixCmd)
 }

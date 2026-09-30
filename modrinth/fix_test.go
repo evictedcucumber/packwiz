@@ -708,9 +708,9 @@ func TestFixPlanColour(t *testing.T) {
 	}
 }
 
-func TestFixIsAModrinthCommand(t *testing.T) {
-	if cmd, _, err := modrinthCmd.Find([]string{"fix"}); err != nil || cmd != fixCmd {
-		t.Errorf("modrinth fix = %v (%v), want the fix command", cmd, err)
+func TestFixIsARootCommand(t *testing.T) {
+	if parent := fixCmd.Parent(); parent == nil || parent == modrinthCmd || parent.HasParent() {
+		t.Errorf("fix is under %v, want it directly under packwiz", parent)
 	}
 }
 

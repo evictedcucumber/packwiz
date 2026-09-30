@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	modrinthApi "github.com/evictedcucumber/packwiz/modrinth/api"
@@ -35,7 +36,7 @@ needs the network; if that fails, those mods' dependencies aren't checked, and i
 
 The command fails if it finds errors. Warnings are about things that don't stop the pack from working, and don't.
 
-'packwiz modrinth fix' fixes what can be fixed of what this finds.`,
+'packwiz fix' fixes what can be fixed of what this finds.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		pack, err := core.LoadPack()
@@ -250,7 +251,7 @@ func (v *validation) checkMod(e entry) {
 	}
 
 	if mod.Version == "" {
-		v.warnf(e, "doesn't record its version; 'packwiz modrinth fix' and 'packwiz git commit' save it")
+		v.warnf(e, "doesn't record its version; 'packwiz fix' and 'packwiz git commit' save it")
 	}
 }
 
@@ -503,5 +504,5 @@ func (v *validation) print() {
 }
 
 func init() {
-	modrinthCmd.AddCommand(validateCmd)
+	cmd.Add(validateCmd)
 }

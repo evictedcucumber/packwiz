@@ -42,11 +42,11 @@ type Mod struct {
 	// ConfigFiles lists the paths, relative to the pack and written with forward slashes, of the config files this
 	// mod owns. An entry ending in "/" claims everything under that folder; any other entry claims only that exact
 	// path. It is nil for a mod nothing has ever recorded config files for (as every mod was before this field
-	// existed), distinct from an empty-but-present list, which is what "packwiz mr add" and "packwiz mr fix" give a
+	// existed), distinct from an empty-but-present list, which is what "packwiz mr add" and "packwiz fix" give a
 	// mod so its file shows config-files is there to fill in; "packwiz config relate" appends to it. A config file
 	// nothing claims - e.g. left behind by a mod that has since been removed - can be reported by "packwiz config
-	// list --state invalid" and "packwiz mr validate", and so can an entry that matches no file in the pack, e.g. for
-	// a config file that has since been deleted (--state missing), which "packwiz mr fix" takes out.
+	// list --state invalid" and "packwiz validate", and so can an entry that matches no file in the pack, e.g. for
+	// a config file that has since been deleted (--state missing), which "packwiz fix" takes out.
 	//
 	// Entries are written as if the pack kept its files at the root of the game directory, as it normally does: for
 	// a pack that instead keeps them all in a mod's own folder (see ConfigDirResolver, e.g. Configured Defaults),

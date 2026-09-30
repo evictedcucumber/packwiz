@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/core"
 	modrinthApi "github.com/evictedcucumber/packwiz/modrinth/api"
 	"github.com/spf13/viper"
@@ -774,5 +775,11 @@ func TestIsPrimaryNilField(t *testing.T) {
 func TestIsPrimaryNilFile(t *testing.T) {
 	if isPrimary(nil) {
 		t.Error("expected false for a nil *File")
+	}
+}
+
+func TestUpdateIsAModrinthCommand(t *testing.T) {
+	if parent := cmd.UpdateCmd.Parent(); parent != modrinthCmd {
+		t.Errorf("update is under %v, want the modrinth command", parent)
 	}
 }

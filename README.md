@@ -25,8 +25,8 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Easy installation and updating of multiple mods at once from Modrinth
 - Exporting to Modrinth packs, listing what goes in each one and which sides it is for
 - `packwiz list --markdown` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
-- `packwiz mr validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz mr fix` fixes what it can, showing the changes and asking first
-- `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, and `packwiz mr validate` checks the same
+- `packwiz validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz fix` fixes what it can, showing the changes and asking first
+- `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, and `packwiz validate` checks the same
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
 - Configured Defaults support: a pack that has the mod keeps its config, and any other default files, in `configureddefaults/`
@@ -165,7 +165,7 @@ A mod records which files it owns in its `.pw.toml`'s `config-files`, a path, or
 config-files = ["config/sodium-options.json", "config/iris/"]
 ```
 
-This is written by hand, with `packwiz config relate`; nothing derives it. `--state valid` shows only what is claimed, and `--state invalid` only what isn't - the same as the "Invalid" section, for example a config file left behind by a mod that has since been removed, or never linked to the mod that installed it (as `--only main` does for `packwiz list`). `packwiz mr validate` reports the same files as a warning.
+This is written by hand, with `packwiz config relate`; nothing derives it. `--state valid` shows only what is claimed, and `--state invalid` only what isn't - the same as the "Invalid" section, for example a config file left behind by a mod that has since been removed, or never linked to the mod that installed it (as `--only main` does for `packwiz list`). `packwiz validate` reports the same files as a warning.
 
 An entry that no tracked file matches - a config file that has since been deleted or renamed, or a folder with nothing left in it - is listed under its mod too, marked `(missing)`, and `--state missing` shows only those:
 
@@ -175,7 +175,7 @@ Sodium
 └── config/sodium-old.json (missing)
 ```
 
-`packwiz mr validate` warns about them for the mod that has them, and `packwiz mr fix` takes them out of its `config-files`. What is in the pack is what its index says, so after adding or deleting a config file run `packwiz refresh` first: until then the index still has the old files, and a file that is on disk but not yet in the index counts as missing.
+`packwiz validate` warns about them for the mod that has them, and `packwiz fix` takes them out of its `config-files`. What is in the pack is what its index says, so after adding or deleting a config file run `packwiz refresh` first: until then the index still has the old files, and a file that is on disk but not yet in the index counts as missing.
 
 Entries are always written as above, as if the pack kept its files at the root of the game directory. A pack that has [Configured Defaults](#configured-defaults) instead keeps everything in `configureddefaults/`, and `config-files` follows it there too: `config/sodium-options.json` claims `configureddefaults/config/sodium-options.json` once the mod is installed, with no need to rewrite it either way.
 
@@ -188,7 +188,7 @@ packwiz config relate iris config/iris
 
 A folder is given a trailing `/` automatically. If the pack has Configured Defaults, the path is written as if it didn't - the same normalizing `packwiz config list` does - so it reads the same whether or not the mod is installed. Running it again with the same arguments does nothing more.
 
-Every mod gets an empty `config-files = []` when it is added with `packwiz mr add`, and `packwiz mr fix` adds one to any mod that doesn't have one yet, so a `.pw.toml` file always shows the field is there to fill in with `packwiz config relate`.
+Every mod gets an empty `config-files = []` when it is added with `packwiz mr add`, and `packwiz fix` adds one to any mod that doesn't have one yet, so a `.pw.toml` file always shows the field is there to fill in with `packwiz config relate`.
 
 ## Checking a pack
 
@@ -203,7 +203,7 @@ Repurposed Structures - Neoforge/Forge  required     required   8.0 MiB  mods/re
 3 files, 11.0 MiB: 2 on both sides, 1 server only
 ```
 
-`packwiz mr validate` checks the pack, without changing it, for what would go wrong once it is exported or played, and fails (exit status 1) if it finds an error, so it can be used in a script:
+`packwiz validate` checks the pack, without changing it, for what would go wrong once it is exported or played, and fails (exit status 1) if it finds an error, so it can be used in a script:
 
 - every mod's `.pw.toml` can be read and has what it needs: a name, file name, download URL and hash, a side, and the Modrinth project and version it came from (some things a pack can do without, like a name or a recorded version, are warnings, which don't fail it)
 - no two mods are the same Modrinth project, or install to the same file
@@ -214,7 +214,7 @@ Repurposed Structures - Neoforge/Forge  required     required   8.0 MiB  mods/re
 
 What a mod depends on is what its `.pw.toml` records. A mod that records nothing is looked up on Modrinth, so that needs the network; if it can't be reached, those mods' dependencies aren't checked, and it says so, but the rest of the checks are made.
 
-`packwiz mr fix` runs `validate`, works out what can be done about what it finds, shows the changes, and asks before making any (with `--yes` it goes ahead without asking; the changes are still shown). Afterwards it checks the pack again, and fails if errors are left:
+`packwiz fix` runs `validate`, works out what can be done about what it finds, shows the changes, and asks before making any (with `--yes` it goes ahead without asking; the changes are still shown). Afterwards it checks the pack again, and fails if errors are left:
 
 ```
 Changes to make:
@@ -239,7 +239,7 @@ Output is coloured when it is going to a terminal: green for what was done, yell
 Use `--color` (or `--colour`) to choose when:
 
 ```
-packwiz list --color=always   # colour even when piped, e.g. to a pager: packwiz update --all --color=always | less -R
+packwiz list --color=always   # colour even when piped, e.g. to a pager: packwiz mr update --all --color=always | less -R
 packwiz list --color=never    # never
 packwiz list --color=auto     # the default: colour a terminal
 ```

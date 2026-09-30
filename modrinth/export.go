@@ -173,7 +173,7 @@ var exportCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Print(breakdown(exported))
 		for _, p := range promotions {
-			ui.Warning.Printf("Warning: %s is only exported for the server, but %s needs it on the client; 'packwiz modrinth validate' says more\n", ui.Bold.Sprint(p.mod.Name), ui.Bold.Sprint(p.neededBy.Name))
+			ui.Warning.Printf("Warning: %s is only exported for the server, but %s needs it on the client; 'packwiz validate' says more\n", ui.Bold.Sprint(p.mod.Name), ui.Bold.Sprint(p.neededBy.Name))
 		}
 
 		err = session.SaveIndex()
