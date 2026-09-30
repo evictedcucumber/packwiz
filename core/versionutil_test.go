@@ -110,28 +110,6 @@ func TestNeoForge261snapshot6(t *testing.T) {
 	expectInvalid(t, "neoforge", "26.1-snapshot-6", "26.1.0.0-alpha.11+snapshot-7")
 }
 
-func TestWithQueryType(t *testing.T) {
-	base := MakeQuery(ModLoaders["neoforge"], "1.20.1")
-	if base.QueryType != Latest {
-		t.Fatalf("MakeQuery() QueryType = %v, want Latest", base.QueryType)
-	}
-
-	updated := base.WithQueryType(Recommended)
-	if updated.QueryType != Recommended {
-		t.Errorf("WithQueryType(Recommended) QueryType = %v, want Recommended", updated.QueryType)
-	}
-	if updated.Loader.Name != base.Loader.Name {
-		t.Errorf("WithQueryType() Loader = %v, want %v", updated.Loader, base.Loader)
-	}
-	if updated.McVersion != base.McVersion {
-		t.Errorf("WithQueryType() McVersion = %q, want %q", updated.McVersion, base.McVersion)
-	}
-	// The original query must be untouched.
-	if base.QueryType != Latest {
-		t.Errorf("original query QueryType = %v, want Latest (WithQueryType must not mutate the receiver)", base.QueryType)
-	}
-}
-
 func TestComponentToFriendlyName(t *testing.T) {
 	cases := []struct {
 		component string

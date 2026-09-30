@@ -8,19 +8,10 @@ import (
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
-// setColorFlag gives --color a value as the command line would, for the duration of the test. (A viper override can't be
-// taken back, and would stay in force for the tests that follow.)
+// setColorFlag gives the color option a value, as the environment or the config file would, for the duration of the test
 func setColorFlag(t *testing.T, value string) {
 	t.Helper()
-	flag := rootCmd.PersistentFlags().Lookup("color")
-	old, oldChanged := flag.Value.String(), flag.Changed
-	if err := rootCmd.PersistentFlags().Set("color", value); err != nil {
-		t.Fatalf("failed to set --color: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = flag.Value.Set(old)
-		flag.Changed = oldChanged
-	})
+	cmdtest.SetViper(t, "color", value)
 }
 
 func TestApplyColorSetsTheMode(t *testing.T) {
@@ -61,20 +52,6 @@ func TestApplyColorRejectsAnUnknownMode(t *testing.T) {
 	}
 	if got := ui.SetMode(ui.Never); got != ui.Never {
 		t.Errorf("mode = %v, want it left alone when the value is invalid", got)
-	}
-}
-
-func TestColourIsAnotherNameForTheColorFlag(t *testing.T) {
-	flags := rootCmd.PersistentFlags()
-	color := flags.Lookup("color")
-	if color == nil {
-		t.Fatal("the root command has no --color flag")
-	}
-	if got := flags.Lookup("colour"); got != color {
-		t.Errorf("--colour = %v, want the same flag as --color", got)
-	}
-	if color.DefValue != "auto" {
-		t.Errorf("--color defaults to %q, want auto", color.DefValue)
 	}
 }
 
@@ -181,7 +158,7 @@ func TestPinReportsSuccessInGreenWithTheNameInBold(t *testing.T) {
 	setUpListFixture(t)
 	cmdtest.SetColor(t, ui.Always)
 
-	out := cmdtest.CaptureStdout(t, func() { pinCmd.Run(pinCmd, []string{"alpha"}) })
+	out := cmdtest.CaptureStdout(t, func() { PinCmd.Run(PinCmd, []string{"alpha"}) })
 
 	if want := ui.Success.Sprintf("%s pinned successfully!", ui.Bold.Sprint("alpha")); !strings.Contains(out, want) {
 		t.Errorf("output missing %q:\n%q", want, out)

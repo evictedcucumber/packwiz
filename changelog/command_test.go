@@ -25,7 +25,8 @@ func setUpPack(t *testing.T, version string) {
 	if err := os.WriteFile("index.toml", []byte("hash-format = \"sha256\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write index.toml fixture: %v", err)
 	}
-	cmdtest.SetViperBool(t, "non-interactive", true)
+	// Releasing asks first
+	cmdtest.SetStdin(t, strings.Repeat("y\n", 50))
 
 	oldNow := now
 	now = func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) }
@@ -491,7 +492,6 @@ func TestReleaseRejectsBadVersionOverrideWithoutWriting(t *testing.T) {
 func TestReleaseDeclinedWritesNothing(t *testing.T) {
 	repo := releasedOnce(t)
 	repo.commit("fix(config): add config/a.json")
-	cmdtest.SetViperBool(t, "non-interactive", false)
 	stdin, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("failed to create pipe: %v", err)

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -288,21 +287,6 @@ func TestHelpFollowsStdoutAndUsageFollowsStderr(t *testing.T) {
 			t.Errorf("usage is coloured although stderr isn't a terminal: %q", usage)
 		}
 	})
-}
-
-func TestFlagErrorAppliesTheColorFlagAndReturnsTheError(t *testing.T) {
-	cmdtest.SetColor(t, ui.Never)
-	setColorFlag(t, "always")
-	bad := errors.New("unknown flag: --bogus")
-
-	got := rootCmd.FlagErrorFunc()(listCmd, bad)
-
-	if got != bad {
-		t.Errorf("the flag error func returned %v, want the error it was given", got)
-	}
-	if mode := ui.SetMode(ui.Never); mode != ui.Always {
-		t.Errorf("mode = %v, want Always: --color came before the flag that couldn't be parsed", mode)
-	}
 }
 
 func TestErrorPrefixFollowsTheColorMode(t *testing.T) {

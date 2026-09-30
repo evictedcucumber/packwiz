@@ -69,9 +69,6 @@ var initCmd = &cobra.Command{
 		mcVersion := viper.GetString("init.mc-version")
 		if len(mcVersion) > 0 && !mcVersions.IsValid(mcVersion) {
 			ui.Error.Println("\"" + mcVersion + "\" is not a valid Minecraft version!")
-			if viper.GetBool("non-interactive") {
-				os.Exit(1)
-			}
 			mcVersion = ""
 		}
 		if len(mcVersion) == 0 {
@@ -101,9 +98,6 @@ var initCmd = &cobra.Command{
 		if len(modLoaderName) > 0 && !isValidLoaderChoice(modLoaderName) {
 			ui.Error.Println("\"" + modLoaderName + "\" is not a supported mod loader! Use \"none\" to specify no modloader, or to configure one manually.")
 			ui.Info.Println("The following mod loaders are supported: " + strings.Join(validLoaderChoices, ", "))
-			if viper.GetBool("non-interactive") {
-				os.Exit(1)
-			}
 			modLoaderName = ""
 		}
 		if len(modLoaderName) == 0 {
@@ -137,9 +131,6 @@ var initCmd = &cobra.Command{
 			componentVersion := viper.GetString("init." + loader.Name + "-version")
 			if len(componentVersion) > 0 && !isValidComponentVersion(componentVersion) {
 				ui.Error.Println("\"" + componentVersion + "\" is not a valid " + loader.FriendlyName + " version!")
-				if viper.GetBool("non-interactive") {
-					os.Exit(1)
-				}
 				componentVersion = ""
 			}
 			if len(componentVersion) == 0 {
@@ -261,10 +252,6 @@ var stdinReader = bufio.NewReader(os.Stdin)
 
 func initReadValue(prompt string, def string) string {
 	fmt.Print(ui.Prompt(prompt))
-	if viper.GetBool("non-interactive") {
-		ui.Info.Printf("%s\n", def)
-		return def
-	}
 	value, err := stdinReader.ReadString('\n')
 	if err != nil {
 		ui.Error.Printf("Error reading input: %s\n", err)
@@ -280,8 +267,7 @@ func initReadValue(prompt string, def string) string {
 
 // initReadValidValue repeatedly prompts until isValid accepts the entered value, printing
 // invalidMsg's result in between attempts. This keeps a single bad answer from aborting the
-// whole init process. In non-interactive mode, initReadValue immediately returns def, so def
-// must always be valid.
+// whole init process.
 func initReadValidValue(prompt string, def string, isValid func(string) bool, invalidMsg func(string) string) string {
 	for {
 		value := initReadValue(prompt, def)

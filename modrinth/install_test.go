@@ -395,8 +395,8 @@ func TestInstallVersionPinnedModIsNotUpdated(t *testing.T) {
 	addTestVersion(t, pack, &index, testVersion("v1", "1.0.0"), "")
 	editTestMod(t, func(m *core.Mod) { m.Pin = true })
 	before := readFile(t, testMetaPath)
-	// Even -y, which answers every prompt, must not get an update past a pin
-	cmdtest.SetViperBool(t, "non-interactive", true)
+	// Even answering yes must not get an update past a pin
+	cmdtest.SetStdin(t, "y\n")
 
 	out, err := addAgain(t, pack, &index, testVersion("v2", "2.0.0"), "")
 

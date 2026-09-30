@@ -21,7 +21,6 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 ## Features
 - Git-friendly TOML-based metadata format
 - MultiMC pack installer/updater, with support for optional mods and fast automatic updates - perfect for servers!
-- Pack distribution with HTTP servers, with a built in local server for testing
 - Easy installation and updating of multiple mods at once from Modrinth
 - Exporting to Modrinth packs, listing what goes in each one and which sides it is for
 - `packwiz list --markdown` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
@@ -111,7 +110,7 @@ What comes from the log isn't there without one. Nothing is committed, so `packw
 
 [Configured Defaults](https://modrinth.com/mod/configured-defaults) copies the files in a `configureddefaults` folder into the game directory when they are missing there, so a pack update doesn't overwrite what players changed. The folder can hold any file or folder of the game directory, not just `config/`.
 
-A pack that has the mod added keeps all of its files there. `packwiz refresh` tracks only the mods' metadata files and what is in `configureddefaults/`, so the folder's files are what the index lists, what `packwiz serve` hands out, what `packwiz mr export` puts in the pack, and what `packwiz git commit` and the changelog describe as config:
+A pack that has the mod added keeps all of its files there. `packwiz refresh` tracks only the mods' metadata files and what is in `configureddefaults/`, so the folder's files are what the index lists, what `packwiz mr export` puts in the pack, and what `packwiz git commit` and the changelog describe as config:
 
 ```
 fix(config): change configureddefaults/config/sodium.json
@@ -179,7 +178,7 @@ Sodium
 
 Entries are always written as above, as if the pack kept its files at the root of the game directory. A pack that has [Configured Defaults](#configured-defaults) instead keeps everything in `configureddefaults/`, and `config-files` follows it there too: `config/sodium-options.json` claims `configureddefaults/config/sodium-options.json` once the mod is installed, with no need to rewrite it either way.
 
-`packwiz config relate <mod> <config file/dir>` adds a path to a mod's config-files, given the name of its `.pw.toml` file (as `packwiz pin` and `packwiz remove` take) and a file or folder that exists in the pack:
+`packwiz config relate <mod> <config file/dir>` adds a path to a mod's config-files, given the name of its `.pw.toml` file (as `packwiz mr pin` takes) and a file or folder that exists in the pack:
 
 ```
 packwiz config relate sodium config/sodium-options.json
@@ -214,7 +213,7 @@ Repurposed Structures - Neoforge/Forge  required     required   8.0 MiB  mods/re
 
 What a mod depends on is what its `.pw.toml` records. A mod that records nothing is looked up on Modrinth, so that needs the network; if it can't be reached, those mods' dependencies aren't checked, and it says so, but the rest of the checks are made.
 
-`packwiz fix` runs `validate`, works out what can be done about what it finds, shows the changes, and asks before making any (with `--yes` it goes ahead without asking; the changes are still shown). Afterwards it checks the pack again, and fails if errors are left:
+`packwiz fix` runs `validate`, works out what can be done about what it finds, shows the changes, and asks before making any (the changes are shown first). Afterwards it checks the pack again, and fails if errors are left:
 
 ```
 Changes to make:
@@ -236,17 +235,9 @@ Everything else `validate` finds, such as a mod that is incompatible with anothe
 
 Output is coloured when it is going to a terminal: green for what was done, yellow for warnings, red for errors, cyan for notices, and bold or faded text to pick out names from file names and progress. `--help`, and the usage and error messages that come from getting a command wrong, are coloured too. It is never coloured when it is piped or redirected, so scripts, logs and files see the same plain text as always (colour is only added to the text, never changes it), and nothing that packwiz writes to your pack or to git has any in it. Each stream is decided on its own: help is written to stdout, so `packwiz --help > help.txt` is plain but `packwiz --help 2> errors.log` is still coloured, and the error and usage that come from getting a command wrong (`packwiz list extra`) are written to stderr, so `packwiz list extra 2> errors.log` has none in the log.
 
-Use `--color` (or `--colour`) to choose when:
+Set `PACKWIZ_COLOR` to choose when, for every command: `always` colours even when piped (e.g. to a pager: `PACKWIZ_COLOR=always packwiz mr update --all | less -R`), `never` never does, and `auto` (the default) colours a terminal. `color = "never"` in packwiz's config file (`.packwiz.toml` in packwiz's data folder) does the same, and the environment variable overrides it. With `auto`, the [`NO_COLOR`](https://no-color.org) environment variable turns colour off, as does `TERM=dumb`.
 
-```
-packwiz list --color=always   # colour even when piped, e.g. to a pager: packwiz mr update --all --color=always | less -R
-packwiz list --color=never    # never
-packwiz list --color=auto     # the default: colour a terminal
-```
-
-`PACKWIZ_COLOR` sets the same thing for every command, as does `color = "never"` in packwiz's config file (`.packwiz.toml` in packwiz's data folder, whose path `packwiz --help` shows under `--config`, or the file given with `--config`); the flag overrides both. With `auto`, the [`NO_COLOR`](https://no-color.org) environment variable turns colour off, as does `TERM=dumb`.
-
-On Windows, colour is used in a console that can show it, such as Windows Terminal or a recent Windows 10 console host, and in the terminals of Git Bash (mintty), Cygwin and MSYS2, which aren't consoles but are recognised by the name of the pipe they give a program. If colour doesn't show up in one, ask for it with `--color=always` or `PACKWIZ_COLOR=always`.
+On Windows, colour is used in a console that can show it, such as Windows Terminal or a recent Windows 10 console host, and in the terminals of Git Bash (mintty), Cygwin and MSYS2, which aren't consoles but are recognised by the name of the pipe they give a program. If colour doesn't show up in one, ask for it with `PACKWIZ_COLOR=always`.
 
 ## Installation
 This fork does not currently publish prebuilt binaries, so install from source:

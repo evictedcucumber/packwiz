@@ -134,11 +134,10 @@ func AssertColourOnlyAdds(t *testing.T, fn func()) (plain, coloured string) {
 	return plain, coloured
 }
 
-// SetStdin makes os.Stdin read input for the duration of the test, and turns off non-interactive mode, so that
+// SetStdin makes os.Stdin read input for the duration of the test, so that
 // prompts (cmdshared.PromptYesNo) are answered from it, one line each.
 func SetStdin(t *testing.T, input string) {
 	t.Helper()
-	SetViperBool(t, "non-interactive", false)
 
 	f, err := os.CreateTemp(t.TempDir(), "stdin")
 	if err != nil {

@@ -12,7 +12,7 @@ func TestPinCmdSetsPinFlag(t *testing.T) {
 	setUpListFixture(t)
 
 	out := cmdtest.CaptureStdout(t, func() {
-		pinCmd.Run(pinCmd, []string{"alpha"})
+		PinCmd.Run(PinCmd, []string{"alpha"})
 	})
 	if !strings.Contains(out, "alpha pinned successfully!") {
 		t.Errorf("output = %q, want a success message", out)
@@ -23,7 +23,7 @@ func TestPinCmdSetsPinFlag(t *testing.T) {
 		t.Fatalf("LoadMod() returned error: %v", err)
 	}
 	if !mod.Pin {
-		t.Error("Pin = false, want true after pinCmd")
+		t.Error("Pin = false, want true after PinCmd")
 	}
 }
 
@@ -31,11 +31,11 @@ func TestUnpinCmdClearsPinFlag(t *testing.T) {
 	setUpListFixture(t)
 
 	cmdtest.CaptureStdout(t, func() {
-		pinCmd.Run(pinCmd, []string{"alpha"})
+		PinCmd.Run(PinCmd, []string{"alpha"})
 	})
 
 	out := cmdtest.CaptureStdout(t, func() {
-		unpinCmd.Run(unpinCmd, []string{"alpha"})
+		UnpinCmd.Run(UnpinCmd, []string{"alpha"})
 	})
 	if !strings.Contains(out, "alpha unpinned successfully!") {
 		t.Errorf("output = %q, want a success message", out)
@@ -46,6 +46,6 @@ func TestUnpinCmdClearsPinFlag(t *testing.T) {
 		t.Fatalf("LoadMod() returned error: %v", err)
 	}
 	if mod.Pin {
-		t.Error("Pin = true, want false after unpinCmd")
+		t.Error("Pin = true, want false after UnpinCmd")
 	}
 }

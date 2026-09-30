@@ -86,14 +86,6 @@ func MakeQuery(loader ModLoaderComponent, mcVersion string) VersionListQuery {
 	}
 }
 
-func (in VersionListQuery) WithQueryType(queryType QueryType) VersionListQuery {
-	return VersionListQuery{
-		Loader:    in.Loader,
-		McVersion: in.McVersion,
-		QueryType: queryType,
-	}
-}
-
 // Queries the versions of a modloader
 func DoQuery(q VersionListQuery) (*ModLoaderVersions, error) {
 	return q.Loader.VersionListGetter(q)

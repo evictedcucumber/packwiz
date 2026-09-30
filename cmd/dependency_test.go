@@ -13,7 +13,7 @@ func TestMarkDependencyCmd(t *testing.T) {
 
 	// gamma starts as a main mod in the fixture.
 	out := cmdtest.CaptureStdout(t, func() {
-		markDependencyCmd.Run(markDependencyCmd, []string{"gamma"})
+		MarkDependencyCmd.Run(MarkDependencyCmd, []string{"gamma"})
 	})
 	if !strings.Contains(out, "gamma marked as a dependency successfully!") {
 		t.Errorf("output = %q, want a success message", out)
@@ -24,7 +24,7 @@ func TestMarkDependencyCmd(t *testing.T) {
 		t.Fatalf("LoadMod() returned error: %v", err)
 	}
 	if !mod.AddedAsDependency {
-		t.Error("AddedAsDependency = false, want true after markDependencyCmd")
+		t.Error("AddedAsDependency = false, want true after MarkDependencyCmd")
 	}
 }
 
@@ -33,7 +33,7 @@ func TestUnmarkDependencyCmd(t *testing.T) {
 
 	// beta starts as a dependency in the fixture.
 	out := cmdtest.CaptureStdout(t, func() {
-		unmarkDependencyCmd.Run(unmarkDependencyCmd, []string{"beta"})
+		UnmarkDependencyCmd.Run(UnmarkDependencyCmd, []string{"beta"})
 	})
 	if !strings.Contains(out, "beta marked as a main mod successfully!") {
 		t.Errorf("output = %q, want a success message", out)
@@ -44,6 +44,6 @@ func TestUnmarkDependencyCmd(t *testing.T) {
 		t.Fatalf("LoadMod() returned error: %v", err)
 	}
 	if mod.AddedAsDependency {
-		t.Error("AddedAsDependency = true, want false after unmarkDependencyCmd")
+		t.Error("AddedAsDependency = true, want false after UnmarkDependencyCmd")
 	}
 }

@@ -14,19 +14,19 @@ import (
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
-func TestPromptYesNoStylesThePromptAndTheAnswerItGives(t *testing.T) {
-	cmdtest.SetViperBool(t, "non-interactive", true)
+func TestPromptYesNoStylesThePrompt(t *testing.T) {
+	cmdtest.SetStdin(t, "y\ny\n")
 	const prompt = "Would you like to add them? [Y/n]: "
 
 	cmdtest.SetColor(t, ui.Never)
 	plain := cmdtest.CaptureStdout(t, func() { PromptYesNo(prompt) })
-	if want := prompt + "Y (non-interactive mode)\n"; plain != want {
+	if want := prompt; plain != want {
 		t.Errorf("output without colour = %q, want %q", plain, want)
 	}
 
 	cmdtest.SetColor(t, ui.Always)
 	coloured := cmdtest.CaptureStdout(t, func() { PromptYesNo(prompt) })
-	if want := ui.Prompt(prompt) + ui.Info.Sprint("Y (non-interactive mode)") + "\n"; coloured != want {
+	if want := ui.Prompt(prompt); coloured != want {
 		t.Errorf("output with colour = %q, want %q", coloured, want)
 	}
 	if ui.Strip(coloured) != plain {

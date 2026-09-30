@@ -274,7 +274,6 @@ func TestWithoutARepositoryDeclinedReleaseWritesNothing(t *testing.T) {
 	releasedOnceWithoutARepository(t)
 	writeMod(t, "Lithium", core.ServerSide, "0.12.1")
 	before, indexBefore := releaseFiles(t), readFile(t, "index.toml")
-	cmdtest.SetViperBool(t, "non-interactive", false)
 	cmdtest.SetStdin(t, "n\n")
 
 	var released bool

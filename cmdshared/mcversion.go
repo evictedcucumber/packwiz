@@ -3,8 +3,6 @@ package cmdshared
 import (
 	"encoding/json"
 	"github.com/evictedcucumber/packwiz/core"
-	"github.com/evictedcucumber/packwiz/internal/ui"
-	"os"
 	"sort"
 	"time"
 )
@@ -30,14 +28,6 @@ func (m McVersionManifest) IsValid(version string) bool {
 		}
 	}
 	return false
-}
-
-func (m McVersionManifest) CheckValid(version string) {
-	if m.IsValid(version) {
-		return
-	}
-	ui.Error.Println("Given version is not a valid Minecraft version!")
-	os.Exit(1)
 }
 
 func GetValidMCVersions() (McVersionManifest, error) {

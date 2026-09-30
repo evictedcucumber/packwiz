@@ -121,7 +121,7 @@ folders (see "packwiz config list"). A folder is given a trailing "/", to claim 
 again with the same arguments does nothing more.
 
 --mod is its slug (unless it was renamed), the name of its .pw.toml file, or a path to that file, the same as
-"packwiz pin" and "packwiz remove" take; give it once per mod. Every <config file/dir> is then added to every mod
+"packwiz mr pin" and "packwiz remove" take; give it once per mod. Every <config file/dir> is then added to every mod
 given, so a config file shared between several mods can be related to all of them in one command. <config file/dir>
 is a path to a file or folder that exists in the pack, from the current directory or the pack's root; if the pack
 keeps its files in a mod's own folder (see Configured Defaults), it is written as if that folder didn't exist, the

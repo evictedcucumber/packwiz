@@ -4,18 +4,7 @@ import (
 	"testing"
 
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
-	"github.com/spf13/viper"
 )
-
-func TestPromptYesNoNonInteractiveAlwaysYes(t *testing.T) {
-	old := viper.GetBool("non-interactive")
-	viper.Set("non-interactive", true)
-	t.Cleanup(func() { viper.Set("non-interactive", old) })
-
-	if !PromptYesNo("Continue? ") {
-		t.Error("PromptYesNo() = false, want true in non-interactive mode")
-	}
-}
 
 // Piped-in input answers every prompt of a command, so one prompt must not use up the answers to the ones after it
 func TestPromptYesNoReadsOneAnswerPerLine(t *testing.T) {

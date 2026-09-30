@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/evictedcucumber/packwiz/internal/ui"
-	"github.com/spf13/viper"
 	"io"
 	"os"
 	"strings"
@@ -30,10 +29,6 @@ func stdin() *bufio.Reader {
 
 func PromptYesNo(prompt string) bool {
 	fmt.Print(ui.Prompt(prompt))
-	if viper.GetBool("non-interactive") {
-		ui.Info.Println("Y (non-interactive mode)")
-		return true
-	}
 	answer, err := stdin().ReadString('\n')
 	// The last answer of piped input needn't end in a newline (printf 'y'); only having no answer at all is a failure
 	if err != nil && !(errors.Is(err, io.EOF) && answer != "") {

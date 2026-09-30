@@ -99,9 +99,6 @@ func usageFunc(c *cobra.Command) error {
 
 // helpFunc writes the help for a command, to stdout, coloured if that is a terminal.
 func helpFunc(c *cobra.Command, _ []string) {
-	// Help is printed before a command's initializers run, which is where colour is applied
-	applyColorAfterFlags()
-
 	text, err := helpText(c)
 	if err != nil {
 		c.PrintErrln(err)

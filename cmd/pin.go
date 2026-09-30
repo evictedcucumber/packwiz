@@ -64,8 +64,8 @@ func pinMod(args []string, pinned bool) {
 	ui.Success.Printf("%s %s successfully!\n", ui.Bold.Sprint(args[0]), message)
 }
 
-// pinCmd represents the pin command
-var pinCmd = &cobra.Command{
+// PinCmd represents the pin command
+var PinCmd = &cobra.Command{
 	Use:     "pin",
 	Short:   "Pin a file so it does not get updated automatically",
 	Aliases: []string{"hold"},
@@ -75,8 +75,8 @@ var pinCmd = &cobra.Command{
 	},
 }
 
-// unpinCmd represents the unpin command
-var unpinCmd = &cobra.Command{
+// UnpinCmd represents the unpin command
+var UnpinCmd = &cobra.Command{
 	Use:     "unpin",
 	Short:   "Unpin a file so it receives updates",
 	Aliases: []string{"unhold"},
@@ -84,9 +84,4 @@ var unpinCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		pinMod(args, false)
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(pinCmd)
-	rootCmd.AddCommand(unpinCmd)
 }

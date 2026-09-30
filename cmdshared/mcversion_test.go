@@ -70,10 +70,3 @@ func TestMcVersionManifestIsValid(t *testing.T) {
 		t.Error("IsValid(\"\") = true, want false")
 	}
 }
-
-func TestMcVersionManifestCheckValidValidVersion(t *testing.T) {
-	m := testManifest(t)
-	// Only the valid branch is safe to exercise here: the invalid branch
-	// calls os.Exit(1), which would kill the test process.
-	m.CheckValid("1.20.1")
-}

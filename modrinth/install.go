@@ -9,7 +9,6 @@ import (
 
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	modrinthApi "github.com/evictedcucumber/packwiz/modrinth/api"
-	"github.com/spf13/viper"
 
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/ui"
@@ -407,7 +406,7 @@ func confirmUpdate(existing *core.Mod, version *modrinthApi.Version, file *modri
 		ui.Success.Printf("\"%s\" is already added and up to date! %s\n", ui.Bold.Sprint(existing.Name), ui.Muted.Sprintf("(%s)", existing.FileName))
 		return false, nil
 	}
-	// Checked before asking, so that -y can't be used to get past it
+	// Checked before asking
 	if existing.Pin {
 		return false, fmt.Errorf("\"%s\" is pinned; run the unpin command to allow updating", existing.Name)
 	}
@@ -506,17 +505,14 @@ func newFileMeta(project *modrinthApi.Project, version *modrinthApi.Version, fil
 		AddedAsDependency: isDependency,
 		ConfigFiles:       &[]string{},
 	}
-	folder := viper.GetString("meta-folder")
-	if folder == "" {
-		folder, err = getProjectTypeFolder(*project.ProjectType, version.Loaders, pack.GetCompatibleLoaders())
-		if err != nil {
-			return core.Mod{}, err
-		}
+	folder, err := getProjectTypeFolder(*project.ProjectType, version.Loaders, pack.GetCompatibleLoaders())
+	if err != nil {
+		return core.Mod{}, err
 	}
 	if project.Slug != nil {
-		modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, *project.Slug+core.MetaExtension))
+		modMeta.SetMetaPath(filepath.Join(folder, *project.Slug+core.MetaExtension))
 	} else {
-		modMeta.SetMetaPath(filepath.Join(viper.GetString("meta-folder-base"), folder, core.SlugifyName(*project.Title)+core.MetaExtension))
+		modMeta.SetMetaPath(filepath.Join(folder, core.SlugifyName(*project.Title)+core.MetaExtension))
 	}
 	return modMeta, nil
 }

@@ -75,7 +75,8 @@ func setUpPack(t *testing.T, root, version string) testPack {
 		}
 	}
 	cmdtest.SetViper(t, "pack-file", filepath.Join(root, "pack.toml"))
-	cmdtest.SetViperBool(t, "non-interactive", true)
+	// Releasing asks first
+	cmdtest.SetStdin(t, strings.Repeat("y\n", 50))
 
 	pack := core.Pack{Name: "Test Pack", Version: version, PackFormat: core.CurrentPackFormat, Versions: map[string]string{"minecraft": "1.21"}}
 	if err := pack.Write(); err != nil {

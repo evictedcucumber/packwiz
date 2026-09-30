@@ -205,17 +205,17 @@ func TestFixDeclinedChangesNothing(t *testing.T) {
 	}
 }
 
-// --yes makes the changes without asking, and they are shown all the same
-func TestFixWithYesMakesTheChangesWithoutAsking(t *testing.T) {
+// Answering yes makes the changes, and they are shown before asking
+func TestFixMakesTheChangesWhenAnsweredYes(t *testing.T) {
 	pack, index, libPath, _ := fixPackWithAServerModAModNeeds(t)
-	cmdtest.SetViperBool(t, "non-interactive", true)
+	cmdtest.SetStdin(t, "y\n")
 
 	_, out, err := fix(t, pack, index)
 	if err != nil {
 		t.Fatalf("runFix() returned error: %v", err)
 	}
 
-	for _, want := range []string{"Changes to make:\n", "  side: server -> both, as \"alpha\" needs it on the client\n", "[Y/n]: Y (non-interactive mode)\n", "Changed 1 file.\n"} {
+	for _, want := range []string{"Changes to make:\n", "  side: server -> both, as \"alpha\" needs it on the client\n", "[Y/n]: ", "Changed 1 file.\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -357,7 +357,7 @@ func TestFixAddsADependencyThatIsOnBothSidesAsItIs(t *testing.T) {
 	alpha := validMod("alpha")
 	alpha.deps = []core.ModDependency{{ID: "lib1", Type: "required"}}
 	addMod(t, &index, alpha)
-	cmdtest.SetViperBool(t, "non-interactive", true)
+	cmdtest.SetStdin(t, "y\n")
 
 	_, out, err := fix(t, pack, index)
 	if err != nil {
@@ -722,7 +722,7 @@ func TestFixCommandExitStatus(t *testing.T) {
 		pack.Versions["neoforge"] = "21.1.0"
 		pack.Version = "1.0.0"
 		httpmock.Activate(t) // Nothing here should be looked up
-		cmdtest.SetViperBool(t, "non-interactive", true)
+		cmdtest.SetStdin(t, "y\n")
 		switch scenario {
 		case "unfixable":
 			bad := validMod("alpha")

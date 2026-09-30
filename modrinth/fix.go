@@ -34,7 +34,7 @@ changes that would fix them, and ask before making any:
 Everything else that is found needs a decision that only you can make, so it is left alone and reported. Once the
 changes are made the pack is checked again, and the command fails if any errors are left.
 
-The changes are always shown. With --yes they are made without asking.`,
+The changes are always shown.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		pack, err := core.LoadPack()

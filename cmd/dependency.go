@@ -64,8 +64,8 @@ func markModAsDependency(args []string, isDependency bool) {
 	ui.Success.Printf("%s %s successfully!\n", ui.Bold.Sprint(args[0]), message)
 }
 
-// markDependencyCmd represents the mark-dependency command
-var markDependencyCmd = &cobra.Command{
+// MarkDependencyCmd represents the mark-dependency command
+var MarkDependencyCmd = &cobra.Command{
 	Use:   "mark-dependency",
 	Short: "Mark a mod as having been added as a dependency of another mod, rather than a main mod",
 	Args:  cobra.ExactArgs(1),
@@ -74,17 +74,12 @@ var markDependencyCmd = &cobra.Command{
 	},
 }
 
-// unmarkDependencyCmd represents the unmark-dependency command
-var unmarkDependencyCmd = &cobra.Command{
+// UnmarkDependencyCmd represents the unmark-dependency command
+var UnmarkDependencyCmd = &cobra.Command{
 	Use:   "unmark-dependency",
 	Short: "Mark a mod as a main mod, rather than a dependency of another mod",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		markModAsDependency(args, false)
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(markDependencyCmd)
-	rootCmd.AddCommand(unmarkDependencyCmd)
 }
