@@ -23,7 +23,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - MultiMC pack installer/updater, with support for optional mods and fast automatic updates - perfect for servers!
 - Easy installation and updating of multiple mods at once from Modrinth
 - Exporting to Modrinth packs, listing what goes in each one and which sides it is for
-- `packwiz list --markdown` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
+- `packwiz list --save` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
 - `packwiz validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz fix` fixes what it can, showing the changes and asking first
 - `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, and `packwiz validate` checks the same
 - `packwiz tui` opens an interface in the terminal, for now for config files: the same tree as `packwiz config list`, with keys to relate a file to the mods that own it, or take a claim out again
@@ -38,6 +38,7 @@ A pack manages its own release history, from its git history. `packwiz git commi
 
 ```
 packwiz changelog          # preview the release the commits since the last one would make, including changes not committed yet
+packwiz changelog --save   # write CHANGELOG.md from the releases already recorded, without releasing
 packwiz changelog release  # commit any changes, then record a release: bump pack.toml's version and update CHANGELOG.md
 packwiz git commit         # commit each mod that was added, updated or removed on its own, then everything else
 packwiz git release        # changelog release, then commit it as "chore(release): X.Y.Z" and tag it "vX.Y.Z"
@@ -121,7 +122,7 @@ Files anywhere else, such as `config/` (which would replace players' own setting
 
 ## Listing a pack
 
-`packwiz list` prints the names of what is in the pack: its mods, and any resource packs and shader packs. `packwiz list --markdown` writes them to `MODS.md`, next to `pack.toml`, to put in a README or a pack page:
+`packwiz list` prints the names of what is in the pack: its mods, and any resource packs and shader packs. `packwiz list --save` writes them to `MODS.md`, next to `pack.toml`, to put in a README or a pack page:
 
 ```
 # Cozy Adventures
@@ -143,7 +144,7 @@ A relaxed pack for exploring, building & farming
 - Complementary Shaders - Reimagined
 ```
 
-The names are in alphabetical order under a heading for each kind of file, going by the folder its `.pw.toml` is in. There are no versions, and nothing marks the mods that were added as dependencies; `--only main` leaves those out of the list instead, and `--side client` or `--side server` lists what is needed on one side, as they do for the plain list. `--output docs/mods.md` writes the file somewhere else (`--output -` prints it), and doesn't need `--markdown`. `MODS.md` isn't distributed with the pack, so if you choose another name inside the pack's folder, add it to `.packwizignore`.
+The names are in alphabetical order under a heading for each kind of file, going by the folder its `.pw.toml` is in. There are no versions, and nothing marks the mods that were added as dependencies; `--only main` leaves those out of the list instead, and `--side client` or `--side server` lists what is needed on one side, as they do for the plain list. `--output docs/mods.md` writes the file somewhere else (`--output -` prints it), and doesn't need `--save`. `MODS.md` isn't distributed with the pack, so if you choose another name inside the pack's folder, add it to `.packwizignore`.
 
 ## Config files
 

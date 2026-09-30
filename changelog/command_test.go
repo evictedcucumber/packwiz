@@ -929,3 +929,21 @@ func TestPlan(t *testing.T) {
 		})
 	}
 }
+
+func TestSaveWritesChangelogFromHistory(t *testing.T) {
+	setUpPack(t, "1.0.0")
+	h := History{Releases: []Release{{Version: "1.0.0", Date: "2026-01-01"}}}
+	if err := h.Write(historyPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSave(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(markdownPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != RenderMarkdown(h.Releases) {
+		t.Errorf("CHANGELOG.md = %q", got)
+	}
+}

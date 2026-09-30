@@ -18,7 +18,7 @@ var listCmd = &cobra.Command{
 	Short: "List all the mods in the modpack",
 	Long: `List the mods in the modpack, and anything else with a metadata file, such as resource packs and shader packs.
 
-With --markdown, or --output, the list is written to a markdown file instead of printed: the pack's name and description, then the names of what is in it, in alphabetical order under a heading for each kind. It has no versions, and doesn't say what was added as a dependency. --side and --only choose what is listed, as they do for the plain list (--only main leaves the dependencies out).`,
+With --save, or --output, the list is written to a markdown file instead of printed: the pack's name and description, then the names of what is in it, in alphabetical order under a heading for each kind. It has no versions, and doesn't say what was added as a dependency. --side and --only choose what is listed, as they do for the plain list (--only main leaves the dependencies out).`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 
@@ -83,7 +83,7 @@ With --markdown, or --output, the list is written to a markdown file instead of 
 			return strings.ToLower(mods[i].Name) < strings.ToLower(mods[j].Name)
 		})
 
-		if viper.GetBool("list.markdown") || viper.IsSet("list.output") {
+		if viper.GetBool("list.save") || viper.IsSet("list.output") {
 			if err := writeMarkdownList(markdownListPath(), pack, index, mods); err != nil {
 				ui.Error.Println(err)
 				os.Exit(1)
@@ -122,15 +122,15 @@ func init() {
 	_ = viper.BindPFlag("list.only", listCmd.Flags().Lookup("only"))
 	listCmd.Flags().Bool("show-kind", false, "Show whether each mod is a main mod or a dependency")
 	_ = viper.BindPFlag("list.show-kind", listCmd.Flags().Lookup("show-kind"))
-	listCmd.Flags().Bool("markdown", false, "Write the list to a markdown file ("+core.ModListFile+" in the pack folder, unless --output says where) instead of printing it")
-	_ = viper.BindPFlag("list.markdown", listCmd.Flags().Lookup("markdown"))
-	listCmd.Flags().StringP("output", "o", "", "Write the list as markdown to this file, or print it if \"-\" (implies --markdown)")
+	listCmd.Flags().Bool("save", false, "Write the list to a markdown file ("+core.ModListFile+" in the pack folder, unless --output says where) instead of printing it")
+	_ = viper.BindPFlag("list.save", listCmd.Flags().Lookup("save"))
+	listCmd.Flags().StringP("output", "o", "", "Write the list as markdown to this file, or print it if \"-\" (implies --save)")
 	_ = viper.BindPFlag("list.output", listCmd.Flags().Lookup("output"))
 
 	// The markdown list is of names only, so what these add to the plain list has nowhere to go
-	for _, markdown := range []string{"markdown", "output"} {
+	for _, save := range []string{"save", "output"} {
 		for _, plain := range []string{"version", "show-kind"} {
-			listCmd.MarkFlagsMutuallyExclusive(markdown, plain)
+			listCmd.MarkFlagsMutuallyExclusive(save, plain)
 		}
 	}
 }

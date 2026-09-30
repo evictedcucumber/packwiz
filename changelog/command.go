@@ -25,6 +25,7 @@ const firstVersion = "1.0.0"
 var (
 	releaseVersionFlag string
 	sinceFlag          string
+	saveFlag           bool
 )
 
 // changelogCmd represents the changelog command. On its own it previews the next release.
@@ -35,9 +36,18 @@ var changelogCmd = &cobra.Command{
 the release they would make and the version it would have. Nothing is committed or saved.
 
 A pack that isn't in a git repository has no commits to read, so its changes are found by comparing it with the pack as
-it was at the last release instead.`,
+it was at the last release instead.
+
+With --save, nothing is previewed: CHANGELOG.md is written from the releases recorded in changelog.toml.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		if saveFlag {
+			if err := runSave(); err != nil {
+				ui.Error.Println(err)
+				os.Exit(1)
+			}
+			return
+		}
 		if err := runPreview(sinceFlag); err != nil {
 			ui.Error.Println(err)
 			os.Exit(1)
@@ -68,6 +78,19 @@ release lists what has changed in the pack since the last one, which it keeps a 
 			os.Exit(1)
 		}
 	},
+}
+
+// runSave writes CHANGELOG.md from the releases recorded in the history, without releasing anything
+func runSave() error {
+	history, err := LoadHistory(historyPath())
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", HistoryFile, err)
+	}
+	if err := writeFileAtomic(markdownPath(), []byte(RenderMarkdown(history.Releases))); err != nil {
+		return fmt.Errorf("failed to write %s: %w", MarkdownFile, err)
+	}
+	ui.Success.Printf("Wrote %s.\n", ui.Bold.Sprint(MarkdownFile))
+	return nil
 }
 
 // runPreview prints the release the pack's changes would make, including those that haven't been committed yet,
@@ -146,6 +169,8 @@ func RunRelease(versionOverride, since string) (Release, bool, error) {
 func init() {
 	changelogCmd.AddCommand(releaseCmd)
 	changelogCmd.PersistentFlags().StringVar(&sinceFlag, "since", "", "Read the commits made after this one (a hash, tag or branch), rather than after the last release")
+	changelogCmd.Flags().BoolVar(&saveFlag, "save", false, "Write CHANGELOG.md from the recorded releases instead of previewing the next one")
+	changelogCmd.MarkFlagsMutuallyExclusive("save", "since")
 	releaseCmd.Flags().StringVar(&releaseVersionFlag, "version", "", "Release this version instead of the one worked out from the commits; it must be greater than the last release")
 
 	cmd.Add(changelogCmd)

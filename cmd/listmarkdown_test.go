@@ -225,7 +225,7 @@ func readMarkdownFile(t *testing.T, file string) string {
 
 func TestListMarkdownWritesTheModListToThePackFolder(t *testing.T) {
 	setUpMarkdownFixture(t)
-	setListFlag(t, "markdown", "true")
+	setListFlag(t, "save", "true")
 
 	out := cmdtest.CaptureStdout(t, func() {
 		listCmd.Run(listCmd, nil)
@@ -243,7 +243,7 @@ func TestListMarkdownWritesTheModListToThePackFolder(t *testing.T) {
 // Versions and what was added as a dependency are left out, however they are recorded
 func TestListMarkdownHasNoVersionsAndNoDependencyMarks(t *testing.T) {
 	setUpMarkdownFixture(t)
-	setListFlag(t, "markdown", "true")
+	setListFlag(t, "save", "true")
 	cmdtest.CaptureStdout(t, func() {
 		listCmd.Run(listCmd, nil)
 	})
@@ -299,7 +299,7 @@ func TestListOutputDashPrintsTheMarkdown(t *testing.T) {
 
 func TestListMarkdownFileHasNoColour(t *testing.T) {
 	setUpMarkdownFixture(t)
-	setListFlag(t, "markdown", "true")
+	setListFlag(t, "save", "true")
 
 	plain, coloured := cmdtest.AssertColourOnlyAdds(t, func() {
 		listCmd.Run(listCmd, nil)
@@ -319,7 +319,7 @@ func TestListMarkdownFileHasNoColour(t *testing.T) {
 
 func TestListMarkdownIsFilteredLikeTheList(t *testing.T) {
 	setUpMarkdownFixture(t)
-	setListFlag(t, "markdown", "true")
+	setListFlag(t, "save", "true")
 	setListFlag(t, "only", "main")
 	cmdtest.CaptureStdout(t, func() {
 		listCmd.Run(listCmd, nil)
@@ -349,7 +349,7 @@ func TestListMarkdownIsFilteredLikeTheList(t *testing.T) {
 func TestListMarkdownWhenTheFiltersLeaveNothing(t *testing.T) {
 	// In the plain fixture the only dependency is on the server, so on the client there are none
 	setUpListFixture(t)
-	setListFlag(t, "markdown", "true")
+	setListFlag(t, "save", "true")
 	setListFlag(t, "only", "dependencies")
 	setListFlag(t, "side", core.ClientSide)
 	cmdtest.CaptureStdout(t, func() {
@@ -362,10 +362,10 @@ func TestListMarkdownWhenTheFiltersLeaveNothing(t *testing.T) {
 	}
 }
 
-// --markdown is for the names alone, so the flags that put more on each line of the plain list aren't allowed with it
+// --save is for the names alone, so the flags that put more on each line of the plain list aren't allowed with it
 func TestListMarkdownCannotBeCombinedWithVersionOrShowKind(t *testing.T) {
 	// Each combination is a test of its own, as flags are put back when a test ends and not before
-	for _, markdown := range []string{"markdown", "output"} {
+	for _, markdown := range []string{"save", "output"} {
 		t.Run("--"+markdown+" alone", func(t *testing.T) {
 			if err := setAndValidate(t, markdown); err != nil {
 				t.Errorf("--%s on its own is an error: %v", markdown, err)

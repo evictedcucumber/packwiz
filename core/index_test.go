@@ -371,7 +371,7 @@ func TestIndexRefresh(t *testing.T) {
 	}
 }
 
-// The list of mods that `packwiz list --markdown` writes is made from the pack, so it isn't part of what is distributed
+// The list of mods that `packwiz list --save` writes is made from the pack, so it isn't part of what is distributed
 func TestIndexRefreshDoesNotTrackTheModList(t *testing.T) {
 	dir := t.TempDir()
 
