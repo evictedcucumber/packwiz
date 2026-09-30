@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -23,6 +24,10 @@ type markdownEntry struct {
 	name string
 	// path is its metadata file, in forward slash format relative to the pack's folder
 	path string
+	// url is the page of the project it is a file of, or empty if it has none to link to
+	url string
+	// version is its version, or empty if nothing is known of it
+	version string
 }
 
 // markdownSections are the sections of the list for the folders that packwiz puts files in, in the order they are
@@ -79,8 +84,8 @@ func compareSections(a, b string) int {
 }
 
 // renderMarkdownList makes the markdown list of what is in the pack: its name and description, then the names of its
-// files under a heading for each kind, in alphabetical order. That is all it says of them: no versions, and nothing of
-// what was added as a dependency.
+// files under a heading for each kind, in alphabetical order, each linked to its page and followed by its version. It
+// says nothing of what was added as a dependency.
 func renderMarkdownList(pack core.Pack, entries []markdownEntry) string {
 	sections := make(map[string][]markdownEntry)
 	for _, e := range entries {
@@ -109,13 +114,34 @@ func renderMarkdownList(pack core.Pack, entries []markdownEntry) string {
 			return strings.Compare(a.path, b.path)
 		})
 		for _, e := range files {
-			b.WriteString("- " + escapeMarkdown(entryName(e)) + "\n")
+			b.WriteString("- " + entryLine(e) + "\n")
 		}
 	}
 	if len(entries) == 0 {
 		b.WriteString("\n_Nothing to list._\n")
 	}
 	return b.String()
+}
+
+// entryLine is a file as a list item: its name, as a link if it has a page, and then its version
+func entryLine(e markdownEntry) string {
+	line := escapeMarkdown(entryName(e))
+	if e.url != "" {
+		line = "[" + line + "](" + e.url + ")"
+	}
+	if version := escapeInline(e.version); version != "" {
+		line += " \u2014 " + version
+	}
+	return line
+}
+
+// modrinthPageURL is the page of a Modrinth project, which Modrinth redirects to the right kind of project from its ID
+func modrinthPageURL(mod *core.Mod) string {
+	id, _ := mod.Update["modrinth"]["mod-id"].(string)
+	if id == "" {
+		return ""
+	}
+	return "https://modrinth.com/project/" + url.PathEscape(id)
 }
 
 // entryName is how a file is listed: by its name, or by the name of its metadata file if it has none
@@ -139,11 +165,17 @@ var (
 // escapeMarkdown makes text that is on a line of its own (a name, a description) show as it is written rather than as
 // markdown, on one line. Only what would change how it looks is escaped, so an ordinary name is left as it is.
 func escapeMarkdown(text string) string {
-	text = strings.Join(strings.Fields(text), " ")
-	text = markdownSpecials.ReplaceAllString(text, `\$0`)
-	text = markdownReference.ReplaceAllString(text, `\&$1`)
+	text = escapeInline(text)
 	text = markdownNumbered.ReplaceAllString(text, `$1\$2`)
 	return markdownBlock.ReplaceAllString(text, `\$0`)
+}
+
+// escapeInline is escapeMarkdown for text that is in the middle of a line, where only what means something anywhere needs
+// escaping: a version that starts "0." is not a numbered list there
+func escapeInline(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	text = markdownSpecials.ReplaceAllString(text, `\$0`)
+	return markdownReference.ReplaceAllString(text, `\&$1`)
 }
 
 // markdownListPath is where the markdown list is written: where --output says, or else in the pack's folder
@@ -162,7 +194,7 @@ func writeMarkdownList(dest string, pack core.Pack, index core.Index, mods []*co
 		if err != nil {
 			return err
 		}
-		entries[i] = markdownEntry{name: mod.Name, path: file}
+		entries[i] = markdownEntry{name: mod.Name, path: file, url: modrinthPageURL(mod), version: mod.DisplayVersion()}
 	}
 	text := renderMarkdownList(pack, entries)
 

@@ -18,7 +18,7 @@ var listCmd = &cobra.Command{
 	Short: "List all the mods in the modpack",
 	Long: `List the mods in the modpack, and anything else with a metadata file, such as resource packs and shader packs.
 
-With --save, or --output, the list is written to a markdown file instead of printed: the pack's name and description, then the names of what is in it, in alphabetical order under a heading for each kind. It has no versions, and doesn't say what was added as a dependency. --side and --only choose what is listed, as they do for the plain list (--only main leaves the dependencies out).`,
+With --save, or --output, the list is written to a markdown file instead of printed: the pack's name and description, then what is in it, in alphabetical order under a heading for each kind, each as a link to its Modrinth page followed by its version. It doesn't say what was added as a dependency. --side and --only choose what is listed, as they do for the plain list (--only main leaves the dependencies out).`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 

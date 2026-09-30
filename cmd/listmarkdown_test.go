@@ -71,16 +71,16 @@ func TestEscapeMarkdown(t *testing.T) {
 func TestRenderMarkdownList(t *testing.T) {
 	pack := core.Pack{Name: "My *Pack*", Description: "Cozy  building\nand farming"}
 	entries := []markdownEntry{
-		{"Sodium", "mods/sodium.pw.toml"},
-		{"iris", "mods/iris.pw.toml"},
-		{"Lithium", "src/mods/sub/lithium.pw.toml"},
-		{"", "mods/nameless.pw.toml"},
-		{"Faithful", "resourcepacks/faithful.pw.toml"},
-		{"Rethinking Voxels", "shaderpacks/rv.pw.toml"},
-		{"Terralith", "config/paxi/datapacks/terralith.pw.toml"},
-		{"WorldEdit", "plugins/worldedit.pw.toml"},
-		{"Zed", "extras/zed.pw.toml"},
-		{"Loose", "loose.pw.toml"},
+		{name: "Sodium", path: "mods/sodium.pw.toml", url: "https://modrinth.com/project/AANobbMI", version: "0.5.8+mc1.21"},
+		{name: "iris", path: "mods/iris.pw.toml", url: "https://modrinth.com/project/YL57xq9U"},
+		{name: "Lithium", path: "src/mods/sub/lithium.pw.toml"},
+		{name: "", path: "mods/nameless.pw.toml"},
+		{name: "Faithful", path: "resourcepacks/faithful.pw.toml"},
+		{name: "Rethinking Voxels", path: "shaderpacks/rv.pw.toml"},
+		{name: "Terralith", path: "config/paxi/datapacks/terralith.pw.toml"},
+		{name: "WorldEdit", path: "plugins/worldedit.pw.toml"},
+		{name: "Zed", path: "extras/zed.pw.toml"},
+		{name: "Loose", path: "loose.pw.toml"},
 	}
 	want := `# My \*Pack\*
 
@@ -88,10 +88,10 @@ Cozy building and farming
 
 ## Mods
 
-- iris
+- [iris](https://modrinth.com/project/YL57xq9U)
 - Lithium
 - nameless
-- Sodium
+- [Sodium](https://modrinth.com/project/AANobbMI) — 0.5.8+mc1.21
 
 ## Resource Packs
 
@@ -134,9 +134,9 @@ func TestRenderMarkdownListWithNothingInIt(t *testing.T) {
 // The order things were read in is a map's, so the file must not depend on it, even for two files with one name
 func TestRenderMarkdownListIsTheSameInAnyOrder(t *testing.T) {
 	entries := []markdownEntry{
-		{"Same", "mods/b.pw.toml"},
-		{"Same", "mods/a.pw.toml"},
-		{"Other", "mods/c.pw.toml"},
+		{name: "Same", path: "mods/b.pw.toml"},
+		{name: "Same", path: "mods/a.pw.toml"},
+		{name: "Other", path: "mods/c.pw.toml"},
 	}
 	reversed := []markdownEntry{entries[2], entries[1], entries[0]}
 
@@ -151,6 +151,8 @@ func TestRenderMarkdownListIsTheSameInAnyOrder(t *testing.T) {
 func setUpMarkdownFixture(t *testing.T) {
 	t.Helper()
 	setUpListFixture(t)
+	// A mod with update data needs its source to be known to be read
+	cmdtest.RegisterVersionSource(t, "modrinth", nil)
 
 	files := map[string]string{
 		"resourcepacks/faithful.pw.toml": `name = "Faithful"
@@ -176,6 +178,10 @@ added-as-dependency = true
 [download]
 hash-format = "sha256"
 hash = "z"
+
+[update.modrinth]
+mod-id = "Zz9Zz9Zz"
+version = "zv"
 `,
 	}
 	index, err := os.OpenFile("index.toml", os.O_APPEND|os.O_WRONLY, 0)
@@ -200,18 +206,18 @@ const markdownFixtureList = `# Test Pack
 
 ## Mods
 
-- Alpha Mod
-- Beta Mod
-- Gamma Mod
-- Zeta\_Mod \[Lite\]
+- Alpha Mod — alpha.jar
+- Beta Mod — beta.jar
+- Gamma Mod — gamma.jar
+- [Zeta\_Mod \[Lite\]](https://modrinth.com/project/Zz9Zz9Zz) — 3.2.1
 
 ## Resource Packs
 
-- Faithful
+- Faithful — 9.9.9
 
 ## Shader Packs
 
-- Complementary Shaders
+- Complementary Shaders — complementary.zip
 `
 
 func readMarkdownFile(t *testing.T, file string) string {
@@ -240,8 +246,8 @@ func TestListMarkdownWritesTheModListToThePackFolder(t *testing.T) {
 	}
 }
 
-// Versions and what was added as a dependency are left out, however they are recorded
-func TestListMarkdownHasNoVersionsAndNoDependencyMarks(t *testing.T) {
+// What was added as a dependency is left out, however it is recorded, and the dependency is listed with the rest
+func TestListMarkdownHasNoDependencyMarks(t *testing.T) {
 	setUpMarkdownFixture(t)
 	setListFlag(t, "save", "true")
 	cmdtest.CaptureStdout(t, func() {
@@ -249,13 +255,12 @@ func TestListMarkdownHasNoVersionsAndNoDependencyMarks(t *testing.T) {
 	})
 
 	got := readMarkdownFile(t, core.ModListFile)
-	for _, unwanted := range []string{"9.9.9", "3.2.1", ".jar", ".zip", "dependency", "[main]", "added"} {
+	for _, unwanted := range []string{"dependency", "[main]", "added"} {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("%s = %q, should not have %q in it", core.ModListFile, got, unwanted)
 		}
 	}
-	// A dependency is listed with the rest
-	if !strings.Contains(got, "- Beta Mod\n") {
+	if !strings.Contains(got, "- Beta Mod \u2014 beta.jar\n") {
 		t.Errorf("%s = %q, want the mod that was added as a dependency listed like the others", core.ModListFile, got)
 	}
 }
@@ -330,16 +335,16 @@ func TestListMarkdownIsFilteredLikeTheList(t *testing.T) {
 
 ## Mods
 
-- Alpha Mod
-- Gamma Mod
+- Alpha Mod — alpha.jar
+- Gamma Mod — gamma.jar
 
 ## Resource Packs
 
-- Faithful
+- Faithful — 9.9.9
 
 ## Shader Packs
 
-- Complementary Shaders
+- Complementary Shaders — complementary.zip
 `
 	if got := readMarkdownFile(t, core.ModListFile); got != want {
 		t.Errorf("%s =\n%s\nwant\n%s", core.ModListFile, got, want)
