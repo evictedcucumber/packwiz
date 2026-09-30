@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"path"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -54,12 +53,12 @@ var (
 	keyPageDown = key.NewBinding(key.WithKeys("pgdown"))
 )
 
-// picker asks which mods to relate config files to. The mods are a list to choose from, that can be filtered by typing
+// picker asks who to relate config files to: the pack, its mod loader and the mods. They are a list to choose from, that can be filtered by typing
 // part of a name, and the files can be claimed one by one or as the folders that they are in.
 type picker struct {
 	// subjects are the files being related: paths relative to the pack, as the index has them
 	subjects  []string
-	mods      []*core.Mod
+	owners    []owner
 	configDir string
 
 	// files are the entries that claim the subjects themselves, and folders the ones that claim the folders they are in
@@ -68,10 +67,10 @@ type picker struct {
 	// folder is whether the folders are claimed rather than the files
 	folder bool
 
-	// chosen are the mods that are picked, by the path of their metadata file
+	// chosen are the owners that are picked, by their key
 	chosen map[string]bool
-	// visible are the mods that the filter lets through, in order
-	visible []*core.Mod
+	// visible are the owners that the filter lets through, the best match first
+	visible []pickerEntry
 	filter  input
 	// filtering is whether keys go to the filter, rather than being commands
 	filtering bool
@@ -81,8 +80,18 @@ type picker struct {
 	width, height int
 }
 
-func newPicker(subjects []string, mods []*core.Mod, configDir string) *picker {
-	p := &picker{subjects: subjects, mods: mods, configDir: configDir, chosen: make(map[string]bool)}
+// pickerEntry is a mod in the picker's list, and how the filter matched it.
+type pickerEntry struct {
+	owner owner
+	// score is how well the filter matched, which is what the list is in the order of while there is one
+	score int
+	// namePositions and slugPositions are the characters of the mod's name and of its slug that the filter matched, as
+	// indexes of their runes, to show them. The slug is only shown when it was matched.
+	namePositions, slugPositions []int
+}
+
+func newPicker(subjects []string, owners []owner, configDir string) *picker {
+	p := &picker{subjects: subjects, owners: owners, configDir: configDir, chosen: make(map[string]bool)}
 	for _, s := range subjects {
 		file := core.ConfigEntry(s, false, configDir)
 		folder := file
@@ -116,47 +125,68 @@ func (p *picker) canChooseScope() bool {
 	return !slices.Equal(p.files, p.folders)
 }
 
-// refilter finds the mods that the filter lets through, and puts the cursor at the first.
+// refilter finds the owners that the filter matches, and puts the cursor at the first. With nothing typed that is every
+// owner in the order they are in; with a filter it is those that it matches fuzzily, the best match first, and of matches
+// that are as good the shorter name, as fzf orders them.
 func (p *picker) refilter() {
-	needle := strings.ToLower(strings.TrimSpace(p.filter.String()))
+	q := parseQuery(p.filter.String())
 	p.visible = p.visible[:0]
-	for _, m := range p.mods {
-		if needle == "" || strings.Contains(strings.ToLower(m.Name), needle) || strings.Contains(strings.ToLower(slugOf(m)), needle) {
-			p.visible = append(p.visible, m)
+	for _, o := range p.owners {
+		if q.empty() {
+			p.visible = append(p.visible, pickerEntry{owner: o})
+		} else if e, ok := matchOwner(q, o); ok {
+			p.visible = append(p.visible, e)
 		}
+	}
+	if !q.empty() {
+		slices.SortStableFunc(p.visible, func(a, b pickerEntry) int {
+			if a.score != b.score {
+				return b.score - a.score
+			}
+			return len([]rune(a.owner.name)) - len([]rune(b.owner.name))
+		})
 	}
 	p.cursor, p.offset = 0, 0
 }
 
-// slugOf is the name of a mod's metadata file without its extension, which is what most people call it.
-func slugOf(m *core.Mod) string {
-	name := filepath.Base(m.GetFilePath())
-	return strings.TrimSuffix(strings.TrimSuffix(name, core.MetaExtension), core.MetaExtensionOld)
+// matchOwner matches a query against an owner, which it has to do for every word of it, each against the owner's name or,
+// if that doesn't have it, its slug.
+func matchOwner(q query, o owner) (pickerEntry, bool) {
+	e := pickerEntry{owner: o}
+	for _, term := range q.terms {
+		if score, positions, ok := matchTerm(term, o.name); ok {
+			e.score += score
+			e.namePositions = append(e.namePositions, positions...)
+		} else if score, positions, ok := matchTerm(term, o.slug); ok {
+			e.score += score
+			e.slugPositions = append(e.slugPositions, positions...)
+		} else {
+			return pickerEntry{}, false
+		}
+	}
+	e.namePositions = mergePositions(e.namePositions)
+	e.slugPositions = mergePositions(e.slugPositions)
+	return e, true
 }
 
-// claimsAll is whether a mod's config-files has all of the entries already.
-func claimsAll(m *core.Mod, entries []string) bool {
-	if m.ConfigFiles == nil {
-		return false
-	}
+// claimsAll is whether an owner's config-files has all of the entries already.
+func claimsAll(o owner, entries []string) bool {
 	for _, e := range entries {
-		if !slices.Contains(*m.ConfigFiles, e) {
+		if !slices.Contains(o.entries, e) {
 			return false
 		}
 	}
 	return true
 }
 
-// result is what was chosen: the mods, by the path of their metadata file and by name (in the order of the list), and
-// the entries to record in each.
-func (p *picker) result() (modPaths, modNames, entries []string) {
-	for _, m := range p.mods {
-		if p.chosen[m.GetFilePath()] {
-			modPaths = append(modPaths, m.GetFilePath())
-			modNames = append(modNames, m.Name)
+// result is what was chosen: the owners, in the order of the list, and the entries to record for each.
+func (p *picker) result() (owners []owner, entries []string) {
+	for _, o := range p.owners {
+		if p.chosen[o.key()] {
+			owners = append(owners, o)
 		}
 	}
-	return modPaths, modNames, slices.Clone(p.entries())
+	return owners, slices.Clone(p.entries())
 }
 
 // titleLines are the lines of the box before the list: what is being related, what would be claimed, the filter and a
@@ -252,7 +282,7 @@ func (p *picker) updateBrowsing(msg tea.KeyPressMsg) (overlay, overlayResult) {
 	switch {
 	case key.Matches(msg, keyPickerToggle):
 		if len(p.visible) > 0 {
-			id := p.visible[p.cursor].GetFilePath()
+			id := p.visible[p.cursor].owner.key()
 			if p.chosen[id] {
 				delete(p.chosen, id)
 			} else {
@@ -271,7 +301,7 @@ func (p *picker) updateBrowsing(msg tea.KeyPressMsg) (overlay, overlayResult) {
 			if len(p.visible) == 0 {
 				return p, overlayOpen
 			}
-			p.chosen[p.visible[p.cursor].GetFilePath()] = true
+			p.chosen[p.visible[p.cursor].owner.key()] = true
 		}
 		return p, overlayConfirmed
 	case key.Matches(msg, keyPickerCancel):
@@ -340,18 +370,26 @@ func (p *picker) view() []string {
 		lines = append(lines, ui.Muted.Sprint("No mod matches"))
 	}
 	for i := p.offset; i < min(p.offset+p.listHeight(), len(p.visible)); i++ {
-		m := p.visible[i]
+		e := p.visible[i]
 		cursor, box := "  ", "[ ]"
-		if p.chosen[m.GetFilePath()] {
+		if p.chosen[e.owner.key()] {
 			box = "[x]"
 		}
-		name := m.Name
+		// What the filter found is picked out, in the colour of the cursor as it is what is being looked for
+		name := highlight(e.owner.name, e.namePositions, ui.Info)
 		if i == p.cursor {
 			cursor = ui.Info.Sprint("> ")
 			name = ui.Bold.Sprint(name)
 		}
 		line := cursor + box + " " + name
-		if claimsAll(m, p.entries()) {
+		if note := e.owner.note(); note != "" {
+			line += ui.Muted.Sprint("  " + note)
+		}
+		if len(e.slugPositions) > 0 {
+			// The name didn't have all of it, so what did is shown
+			line += "  " + ui.Muted.Sprint(highlight(e.owner.slug, e.slugPositions, ui.Info))
+		}
+		if claimsAll(e.owner, p.entries()) {
 			line += ui.Muted.Sprint("  (already claims)")
 		}
 		lines = append(lines, line)
@@ -359,10 +397,10 @@ func (p *picker) view() []string {
 	return frame(lines, inner)
 }
 
-// unrelatePrompt asks whether to take entries out of a mod's config-files.
+// unrelatePrompt asks whether to take entries out of an owner's config-files.
 type unrelatePrompt struct {
-	modPath string
-	modName string
+	// owner is who the entries are taken out of the config-files of
+	owner   owner
 	entries []string
 	// lines say what is being removed, one for each entry
 	lines []string
@@ -391,7 +429,7 @@ func (u *unrelatePrompt) setSize(width, height int) {
 }
 
 func (u *unrelatePrompt) view() []string {
-	lines := []string{ui.Bold.Sprint("Remove from " + u.modName + "'s config-files?"), ""}
+	lines := []string{ui.Bold.Sprint("Remove from " + u.owner.name + "'s config-files?"), ""}
 	// A file can be claimed by an entry for each folder it is in as well as its own, which is more than a small
 	// terminal has room for: what doesn't fit is counted, as all of it is removed
 	room := max(u.height-2-len(lines), 1)

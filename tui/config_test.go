@@ -9,6 +9,7 @@ import (
 
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
+	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
 // The tree of the pack that setUpPack makes, as the config screen draws it.
@@ -43,17 +44,32 @@ func goTo(t *testing.T, s *configScreen, row int) {
 	}
 }
 
-// goToFile moves the cursor to the row of a file, wherever it is in the tree now.
-func goToFile(t *testing.T, s *configScreen, file string) {
+// goToRowWhere moves the cursor to the first row of the tree, from the top, that is drawn as something match accepts. It
+// fails the test, showing the screen, if there is none: walking down until one turns up would never end if it didn't.
+func goToRowWhere(t *testing.T, s *configScreen, what string, match func(drawn string) bool) {
 	t.Helper()
 	press(t, s, "g")
 	for range len(s.rows) {
-		if strings.HasSuffix(cursorRow(t, s), file) && !strings.Contains(cursorRow(t, s), "(missing)") {
+		if match(cursorRow(t, s)) {
 			return
 		}
 		press(t, s, "j")
 	}
-	t.Fatalf("no row of the tree is %s:\n%s", file, s.view())
+	t.Fatalf("no row of the tree is %s:\n%s", what, s.view())
+}
+
+// goToFile moves the cursor to the row of a file, wherever it is in the tree now.
+func goToFile(t *testing.T, s *configScreen, file string) {
+	t.Helper()
+	goToRowWhere(t, s, file, func(drawn string) bool {
+		return strings.HasSuffix(drawn, file) && !strings.Contains(drawn, "(missing)")
+	})
+}
+
+// goToMissing moves the cursor to the row of an entry that matches no file.
+func goToMissing(t *testing.T, s *configScreen, entry string) {
+	t.Helper()
+	goToRowWhere(t, s, entry+" (missing)", func(drawn string) bool { return strings.HasSuffix(drawn, entry+" (missing)") })
 }
 
 func TestConfigScreenShowsWhatConfigListShows(t *testing.T) {
@@ -243,13 +259,13 @@ func TestRelateAFileToAMod(t *testing.T) {
 		t.Fatal("r didn't open the picker")
 	}
 	view := s.view()
-	for _, want := range []string{"Relate config/orphan.json to", "Claims: config/orphan.json", "[ ] Alpha Mod", "[ ] Beta Mod"} {
+	for _, want := range []string{"Relate config/orphan.json to", "Claims: config/orphan.json", "[ ] Pack  the pack as a whole", "[ ] Alpha Mod", "[ ] Beta Mod"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the picker doesn't have %q:\n%s", want, view)
 		}
 	}
 
-	press(t, s, "j", "space", "enter")
+	press(t, s, "j", "j", "space", "enter") // down past the pack and Alpha Mod, to Beta Mod
 	if s.modal() {
 		t.Error("the picker is still open after enter")
 	}
@@ -283,7 +299,7 @@ func TestRelateAFileToAMod(t *testing.T) {
 func TestRelateIsWhatConfigListSees(t *testing.T) {
 	s := newConfig(t)
 	goTo(t, s, rowOrphan)
-	press(t, s, "r", "j", "enter") // nothing is ticked, so the mod under the cursor is the one
+	press(t, s, "r", "j", "j", "enter") // nothing is ticked, so the mod under the cursor, Beta Mod, is the one
 
 	pack, err := core.LoadPack()
 	if err != nil {
@@ -297,7 +313,7 @@ func TestRelateIsWhatConfigListSees(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAllMods() returned error: %v", err)
 	}
-	got, err := index.ConfigFileTree(mods)
+	got, err := index.ConfigFileTree(mods, pack)
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -327,7 +343,7 @@ func TestRelateAFolderInsteadOfTheFile(t *testing.T) {
 	if view := s.view(); !strings.Contains(view, "Claims: config/other/\n") && !strings.Contains(view, "Claims: config/other/ ") {
 		t.Errorf("tab didn't change it to the folder:\n%s", view)
 	}
-	press(t, s, "j", "enter")
+	press(t, s, "j", "j", "enter")
 
 	if got := claims(t, "beta"); !slices.Equal(got, []string{"config/other/"}) {
 		t.Errorf("Beta Mod's config-files is %v, want the folder", got)
@@ -366,7 +382,7 @@ func TestRelateSeveralMarkedFilesTogether(t *testing.T) {
 	if view := s.view(); !strings.Contains(view, "Relate 2 files to") || !strings.Contains(view, "Claims: config/orphan.json, config/other/b.json") {
 		t.Errorf("the picker isn't for the two marked files:\n%s", view)
 	}
-	press(t, s, "j", "enter")
+	press(t, s, "j", "j", "enter")
 
 	if got := claims(t, "beta"); !slices.Equal(got, []string{"config/orphan.json", "config/other/b.json"}) {
 		t.Errorf("Beta Mod's config-files is %v, want both files", got)
@@ -421,7 +437,7 @@ func TestRelateAGroupRelatesEveryFileInIt(t *testing.T) {
 	if view := s.view(); !strings.Contains(view, "Relate 3 files to") {
 		t.Errorf("the picker isn't for the group's three files:\n%s", view)
 	}
-	press(t, s, "j", "enter")
+	press(t, s, "j", "j", "enter")
 	if got := claims(t, "beta"); !slices.Equal(got, []string{"config/orphan.json", "config/other/a.json", "config/other/b.json"}) {
 		t.Errorf("Beta Mod's config-files is %v, want all three", got)
 	}
@@ -433,7 +449,7 @@ func TestRelateAGroupRelatesEveryFileInIt(t *testing.T) {
 func TestRelateToSeveralMods(t *testing.T) {
 	s := newConfig(t)
 	goTo(t, s, rowOrphan)
-	press(t, s, "r", "space", "j", "space", "enter")
+	press(t, s, "r", "j", "space", "j", "space", "enter") // Alpha Mod and Beta Mod, after the pack
 
 	for _, slug := range []string{"alpha", "beta"} {
 		if got := claims(t, slug); !slices.Contains(got, "config/orphan.json") {
@@ -466,7 +482,7 @@ func TestRelateSomethingAModAlreadyClaimsChangesNothing(t *testing.T) {
 	if view := s.view(); !strings.Contains(view, "Alpha Mod  (already claims)") {
 		t.Errorf("the picker doesn't say that Alpha Mod already claims the file:\n%s", view)
 	}
-	press(t, s, "enter")
+	press(t, s, "j", "enter") // past the pack, to Alpha Mod
 
 	if got := statusOf(s); got != "Alpha Mod already claims config/alpha.json" {
 		t.Errorf("the status is %q", got)
@@ -480,15 +496,19 @@ func TestRelateSomethingAModAlreadyClaimsChangesNothing(t *testing.T) {
 	}
 }
 
-func TestRelateRefusesWithNoModsToRelateTo(t *testing.T) {
+// The pack is always there to relate a file to, so there is something to pick if the pack has no mods
+func TestRelateWithNoModsStillOffersThePack(t *testing.T) {
 	setUpPack(t)
-	s := configOn(t, &fakeBackend{data: configData{tree: core.ConfigFileTree{Unclaimed: []string{"config/a.json"}}}})
+	s := configOn(t, &fakeBackend{data: configData{
+		tree:   core.ConfigFileTree{Unclaimed: []string{"config/a.json"}},
+		owners: []owner{{kind: ownerPack, id: "pack", name: "Pack", slug: "pack"}},
+	}})
 	press(t, s, "j", "r")
-	if s.modal() {
-		t.Error("the picker opened with no mods to pick from")
+	if !s.modal() {
+		t.Fatal("the picker didn't open")
 	}
-	if got := statusOf(s); !strings.Contains(got, "no mods") {
-		t.Errorf("the status is %q, want it to say there are no mods", got)
+	if view := s.view(); !strings.Contains(view, "[ ] Pack  the pack as a whole") || strings.Contains(view, "No mod matches") {
+		t.Errorf("the picker doesn't offer the pack:\n%s", view)
 	}
 }
 
@@ -613,7 +633,7 @@ func TestPickerScrollsToTheCursor(t *testing.T) {
 	s.setSize(100, 11) // little room for the list: a box of six mods doesn't fit
 	goTo(t, s, rowOrphan)
 	press(t, s, "r")
-	for range 7 {
+	for range 8 { // the pack, Alpha Mod, Beta Mod and six more: Mod H is the ninth
 		press(t, s, "j")
 	}
 	view := s.view()
@@ -791,14 +811,12 @@ func TestRelateAndUnrelateResolveEntriesAgainstTheConfigDir(t *testing.T) {
 	}
 
 	// Find the file, and relate its folder to Beta Mod
-	for !strings.HasSuffix(cursorRow(t, s), "configureddefaults/config/sodium/extra.json") {
-		press(t, s, "j")
-	}
+	goToFile(t, s, "configureddefaults/config/sodium/extra.json")
 	press(t, s, "r", "tab")
 	if view := s.view(); !strings.Contains(view, "Claims: config/sodium/") {
 		t.Fatalf("the picker isn't claiming the folder as it is written without the config dir:\n%s", view)
 	}
-	press(t, s, "space") // Alpha Mod, which is first
+	press(t, s, "j", "space") // Alpha Mod, which is after the pack
 	press(t, s, "enter")
 	if got := claims(t, "alpha"); !slices.Contains(got, "config/sodium/") {
 		t.Errorf("Alpha Mod's config-files is %v, want config/sodium/ in it, without the config dir", got)
@@ -825,8 +843,8 @@ func TestRelateAndUnrelateResolveEntriesAgainstTheConfigDir(t *testing.T) {
 func TestErrorsAreShownAndTheScreenKeepsWorking(t *testing.T) {
 	setUpPack(t)
 	fake := &fakeBackend{data: configData{
-		tree: core.ConfigFileTree{Unclaimed: []string{"config/a.json", "config/b.json"}},
-		mods: []*core.Mod{fakeMod("Alpha", "alpha")},
+		tree:   core.ConfigFileTree{Unclaimed: []string{"config/a.json", "config/b.json"}},
+		owners: []owner{fakeOwner("Alpha", "alpha")},
 	}, relateErr: errors.New("the disk is full")}
 	s := configOn(t, fake)
 
@@ -878,7 +896,7 @@ func TestRefreshNoticesAreShown(t *testing.T) {
 // Changes aren't started while one is being made, but moving about is fine
 func TestKeysThatChangeThePackAreIgnoredWhileOneIsBeingMade(t *testing.T) {
 	setUpPack(t)
-	fake := &fakeBackend{data: configData{tree: core.ConfigFileTree{Unclaimed: []string{"config/a.json"}}, mods: []*core.Mod{fakeMod("Alpha", "alpha")}}}
+	fake := &fakeBackend{data: configData{tree: core.ConfigFileTree{Unclaimed: []string{"config/a.json"}}, owners: []owner{fakeOwner("Alpha", "alpha")}}}
 	s := configOn(t, fake)
 
 	_, cmd := s.update(keyMsg(t, "R"))
@@ -960,8 +978,8 @@ func TestPickerShowsWhereTheCursorIsOnlyWhenTheListScrolls(t *testing.T) {
 	s := configOn(t, packBackend{})
 	goTo(t, s, rowOrphan)
 	press(t, s, "r")
-	if view := s.view(); strings.Contains(view, "1/2") {
-		t.Errorf("the picker shows a position though both mods fit:\n%s", view)
+	if view := s.view(); strings.Contains(view, "1/3") {
+		t.Errorf("the picker shows a position though all three fit:\n%s", view)
 	}
 
 	s.overlay = nil
@@ -972,8 +990,8 @@ func TestPickerShowsWhereTheCursorIsOnlyWhenTheListScrolls(t *testing.T) {
 	s.setSize(100, 11) // room for three mods
 	goTo(t, s, rowOrphan)
 	press(t, s, "r", "j", "j", "j")
-	if view := s.view(); !strings.Contains(view, "4/8") {
-		t.Errorf("the picker doesn't show that the cursor is on the fourth of eight mods:\n%s", view)
+	if view := s.view(); !strings.Contains(view, "4/9") {
+		t.Errorf("the picker doesn't show that the cursor is on the fourth of nine owners:\n%s", view)
 	}
 }
 
@@ -984,8 +1002,8 @@ func TestUnrelatePromptWithManyEntriesFitsASmallTerminalAndCountsWhatIsLeftOut(t
 	entries := []string{"config/", "config/a/", "config/a/b/", "config/a/b/c/", "config/a/b/c/d/", "config/a/b/c/d/e.json"}
 	mod := fakeMod("Deep", "deep", entries...)
 	fake := &fakeBackend{data: configData{
-		tree: core.ConfigFileTree{Mods: []core.ModConfigFiles{{Mod: mod, Files: []string{"config/a/b/c/d/e.json"}}}},
-		mods: []*core.Mod{mod},
+		tree:   core.ConfigFileTree{Mods: []core.ModConfigFiles{{Mod: mod, Files: []string{"config/a/b/c/d/e.json"}}}},
+		owners: []owner{modOwner(mod)},
 	}}
 	s := configOn(t, fake)
 	// The smallest that the app gives a screen. Its summary and status take two of the lines, which leaves six for a
@@ -1012,5 +1030,42 @@ func TestUnrelatePromptWithManyEntriesFitsASmallTerminalAndCountsWhatIsLeftOut(t
 	press(t, s, "y")
 	if len(fake.unrelated) != 1 || !slices.Equal(fake.unrelated[0][1:], entries) {
 		t.Errorf("unrelate was called with %v, want all %d entries", fake.unrelated, len(entries))
+	}
+}
+
+// What the filter found is picked out in the list, so it is clear why each mod is there and in that place
+func TestPickerShowsWhatTheFilterMatched(t *testing.T) {
+	setUpPack(t)
+	addMod(t, "sodium", "Sodium")
+	addMod(t, "sodium-extra", "Sodium Extra")
+	addMod(t, "zzz-long-slug", "Plain")
+	s := configOn(t, packBackend{})
+	goTo(t, s, rowOrphan)
+	press(t, s, "r", "/")
+	typeText(t, s, "sod")
+
+	// The cursor is on the first, and the second is what is shown as it is written
+	cmdtest.SetColor(t, ui.Always)
+	view := s.view()
+	if want := ui.Info.Sprint("Sod") + "ium Extra"; !strings.Contains(view, want) {
+		t.Errorf("the second mod doesn't have the letters that matched picked out as %q:\n%s", want, ui.Strip(view))
+	}
+	cmdtest.SetColor(t, ui.Never)
+
+	// The letters are the same whether or not they are picked out, and with the filter cleared nothing is
+	view = s.view()
+	if !strings.Contains(view, "> [ ] Sodium\n") && !strings.Contains(view, "> [ ] Sodium ") {
+		t.Errorf("the best match isn't first:\n%s", view)
+	}
+	press(t, s, "ctrl+u")
+	typeText(t, s, "longslug")
+	view = s.view()
+	if !strings.Contains(view, "[ ] Plain  zzz-long-slug") {
+		t.Errorf("a mod found by its slug doesn't show it:\n%s", view)
+	}
+	press(t, s, "ctrl+u")
+	typeText(t, s, "plain")
+	if view := s.view(); strings.Contains(view, "zzz-long-slug") {
+		t.Errorf("the slug is shown though the name is what matched:\n%s", view)
 	}
 }

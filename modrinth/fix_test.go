@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -773,5 +774,113 @@ func TestFixCommandExitStatus(t *testing.T) {
 				t.Errorf("output missing %q:\n%s", tt.want, out)
 			}
 		})
+	}
+}
+
+func TestFixTakesEntriesOfThePackAndItsLoaderThatMatchNoFileOutOfPackToml(t *testing.T) {
+	pack, index := validatablePack(t)
+	// A mod that has a config-files already, so that nothing is done to its file
+	alpha := validMod("alpha")
+	alpha.configFiles = []string{"config/alpha.json"}
+	addMod(t, &index, alpha)
+	trackConfigFile(t, &index, "options.txt")
+	pack.ConfigFiles = map[string][]string{
+		core.ConfigOwnerPack: {"options.txt", "servers.dat"},
+		"neoforge":           {"config/neoforge-gone.toml"},
+	}
+	if err := pack.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	// Only pack.toml is changed, so the index isn't written again, and has to be as it is in a pack to begin with
+	if err := index.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	cmdtest.SetStdin(t, "y\n")
+
+	after, out, err := fix(t, pack, index)
+	if err != nil {
+		t.Fatalf("runFix() returned error: %v", err)
+	}
+
+	for _, want := range []string{
+		"Changes to make:\npack.toml:\n",
+		"  config-files: remove servers.dat from Pack, which matches no file in the pack\n",
+		"  config-files: remove config/neoforge-gone.toml from NeoForge, which matches no file in the pack\n",
+		"Changed 1 file.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output doesn't have %q:\n%s", want, out)
+		}
+	}
+
+	written, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	// What is in the pack stays, and a loader left with nothing is taken out rather than kept empty
+	if want := map[string][]string{core.ConfigOwnerPack: {"options.txt"}}; !reflect.DeepEqual(written.ConfigFiles, want) {
+		t.Errorf("pack.toml's config-files = %v, want %v", written.ConfigFiles, want)
+	}
+	if len(after.subjects) != 0 {
+		for path, sub := range after.subjects {
+			t.Errorf("problems after in %q = %+v, want none", path, sub)
+		}
+	}
+}
+
+// A mod's file and pack.toml are each changed, and the pack keeps the hash of the index that the mod's change made
+func TestFixChangesAModAndPackTomlTogether(t *testing.T) {
+	pack, index := validatablePack(t)
+	alpha := validMod("alpha")
+	alpha.absentConfigFiles = []string{"config/gone.json"}
+	path := addMod(t, &index, alpha)
+	pack.ConfigFiles = map[string][]string{core.ConfigOwnerPack: {"servers.dat"}}
+	if err := pack.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	cmdtest.SetStdin(t, "y\n")
+
+	after, out, err := fix(t, pack, index)
+	if err != nil {
+		t.Fatalf("runFix() returned error: %v", err)
+	}
+
+	if !strings.Contains(out, "Changed 2 files.") {
+		t.Errorf("output doesn't say that the mod's file and pack.toml were changed:\n%s", out)
+	}
+	if got := loadModAt(t, path).ConfigFiles; got == nil || len(*got) != 0 {
+		t.Errorf("ConfigFiles = %v, want the entry taken out", got)
+	}
+	written, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	if len(written.ConfigFiles) != 0 {
+		t.Errorf("pack.toml's config-files = %v, want none", written.ConfigFiles)
+	}
+	if written.Index.Hash == "" {
+		t.Error("pack.toml doesn't record the hash of the index after the mod's file was changed")
+	}
+	assertIndexHasHashOf(t, path)
+	if len(after.subjects) != 0 {
+		t.Errorf("problems after = %v, want none", after.subjects)
+	}
+}
+
+func TestFixDeclinedKeepsEntriesOfThePackThatMatchNoFile(t *testing.T) {
+	pack, index := validatablePack(t)
+	addMod(t, &index, validMod("alpha"))
+	pack.ConfigFiles = map[string][]string{core.ConfigOwnerPack: {"servers.dat"}}
+	if err := pack.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	before := readFile(t, "pack.toml")
+	cmdtest.SetStdin(t, "n\n")
+
+	if _, _, err := fix(t, pack, index); err != nil {
+		t.Fatalf("runFix() returned error: %v", err)
+	}
+	if readFile(t, "pack.toml") != before {
+		t.Error("pack.toml changed, want it left as it was")
 	}
 }

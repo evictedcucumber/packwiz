@@ -3,9 +3,11 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
+	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
@@ -19,12 +21,8 @@ func TestBackendLoadReadsThePack(t *testing.T) {
 	if data.pack != "Test Pack 1.2.0" {
 		t.Errorf("pack = %q, want its name and version", data.pack)
 	}
-	var names []string
-	for _, m := range data.mods {
-		names = append(names, m.Name)
-	}
-	if !slices.Equal(names, []string{"Alpha Mod", "Beta Mod"}) {
-		t.Errorf("mods = %v, want every mod, even the one that claims nothing, by name", names)
+	if got := ownerNames(data); !slices.Equal(got, []string{"Pack", "Alpha Mod", "Beta Mod"}) {
+		t.Errorf("owners = %v, want the pack, then every mod, even the one that claims nothing, by name", got)
 	}
 	if len(data.tree.Mods) != 1 || data.tree.Mods[0].Mod.Name != "Alpha Mod" {
 		t.Errorf("the tree has mods %v, want only the one that claims something", data.tree.Mods)
@@ -45,12 +43,51 @@ func TestBackendLoadSortsModsByNameWhateverTheCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load() returned error: %v", err)
 	}
-	var names []string
-	for _, m := range data.mods {
-		names = append(names, m.Name)
+	if got, want := ownerNames(data), []string{"Pack", "Alpha Mod", "Beta Mod", "Eta Upper", "zeta lower"}; !slices.Equal(got, want) {
+		t.Errorf("owners = %v, want %v", got, want)
 	}
-	if want := []string{"Alpha Mod", "Beta Mod", "Eta Upper", "zeta lower"}; !slices.Equal(names, want) {
-		t.Errorf("mods = %v, want %v", names, want)
+}
+
+func ownerNames(data configData) []string {
+	names := make([]string, len(data.owners))
+	for i, o := range data.owners {
+		names[i] = o.name
+	}
+	return names
+}
+
+// The pack and its loader are owners of config files, and what they already own is read from pack.toml
+func TestBackendLoadHasThePackAndItsLoaderAsOwners(t *testing.T) {
+	setUpPack(t)
+	withLoader(t)
+	pack, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	pack.ClaimConfigFile(core.ConfigOwnerPack, "options.txt")
+	pack.ClaimConfigFile("neoforge", "config/neoforge-common.toml")
+	if err := pack.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
+	data, err := packBackend{}.load()
+	if err != nil {
+		t.Fatalf("load() returned error: %v", err)
+	}
+	if got := ownerNames(data); !slices.Equal(got, []string{"Pack", "NeoForge", "Alpha Mod", "Beta Mod"}) {
+		t.Errorf("owners = %v, want the pack, its loader and then the mods", got)
+	}
+	want := []owner{
+		{kind: ownerPack, id: "pack", name: "Pack", slug: "pack", entries: []string{"options.txt"}},
+		{kind: ownerLoader, id: "neoforge", name: "NeoForge", slug: "neoforge", entries: []string{"config/neoforge-common.toml"}},
+	}
+	if !reflect.DeepEqual(data.owners[:2], want) {
+		t.Errorf("the first owners are %+v, want %+v", data.owners[:2], want)
+	}
+	// Neither file is in the index, so what they own is in the tree as entries that match no file
+	if len(data.tree.Owners) != 2 || len(data.tree.Owners[0].Files) != 0 ||
+		!slices.Equal(data.tree.Owners[0].Missing, []string{"options.txt"}) || !slices.Equal(data.tree.Owners[1].Missing, []string{"config/neoforge-common.toml"}) {
+		t.Errorf("Owners = %+v, want the pack and its loader, with what they own as missing", data.tree.Owners)
 	}
 }
 
@@ -65,13 +102,13 @@ func TestBackendLoadFailsOutsideAPack(t *testing.T) {
 func TestBackendRelateRecordsEntriesAndSaysWhatChanged(t *testing.T) {
 	setUpPack(t)
 	got, err := packBackend{}.relate(
-		[]string{"mods/alpha.pw.toml", "mods/beta.pw.toml"},
+		[]owner{fakeOwner("Alpha Mod", "alpha"), fakeOwner("Beta Mod", "beta")},
 		[]string{"config/alpha.json", "config/orphan.json"}, // Alpha has the first already
 	)
 	if err != nil {
 		t.Fatalf("relate() returned error: %v", err)
 	}
-	if want := (relateResult{added: 3, existing: 1, mods: 2}); got != want {
+	if want := (relateResult{added: 3, existing: 1, owners: 2}); got != want {
 		t.Errorf("relate() = %+v, want %+v", got, want)
 	}
 	if got := claims(t, "alpha"); !slices.Equal(got, []string{"config/alpha.json", "config/alpha/", "config/gone.json", "config/orphan.json"}) {
@@ -87,7 +124,7 @@ func TestBackendRelateWritesNothingWhenThereIsNothingNew(t *testing.T) {
 	setUpPack(t)
 	indexBefore, _ := os.ReadFile("index.toml")
 	alphaBefore, _ := os.ReadFile("mods/alpha.pw.toml")
-	got, err := packBackend{}.relate([]string{"mods/alpha.pw.toml"}, []string{"config/alpha.json"})
+	got, err := packBackend{}.relate([]owner{fakeOwner("Alpha Mod", "alpha")}, []string{"config/alpha.json"})
 	if err != nil {
 		t.Fatalf("relate() returned error: %v", err)
 	}
@@ -106,11 +143,11 @@ func TestBackendRelateWritesNothingWhenThereIsNothingNew(t *testing.T) {
 // the hashes of files that have changed
 func TestBackendRelateKeepsTheIndexRightWhenALaterModFails(t *testing.T) {
 	setUpPack(t)
-	got, err := packBackend{}.relate([]string{"mods/beta.pw.toml", "mods/missing.pw.toml"}, []string{"config/orphan.json"})
+	got, err := packBackend{}.relate([]owner{fakeOwner("Beta Mod", "beta"), fakeOwner("Missing", "missing")}, []string{"config/orphan.json"})
 	if err == nil {
 		t.Fatal("relate() returned no error for a mod that doesn't exist")
 	}
-	if got.mods != 1 || got.added != 1 {
+	if got.owners != 1 || got.added != 1 {
 		t.Errorf("relate() = %+v, want what was saved before the failure counted", got)
 	}
 	if got := claims(t, "beta"); !slices.Equal(got, []string{"config/orphan.json"}) {
@@ -121,14 +158,14 @@ func TestBackendRelateKeepsTheIndexRightWhenALaterModFails(t *testing.T) {
 
 func TestBackendRelateFailsForAModWithoutAMetadataFile(t *testing.T) {
 	setUpPack(t)
-	if _, err := (packBackend{}).relate([]string{"mods/nope.pw.toml"}, []string{"config/a.json"}); err == nil {
+	if _, err := (packBackend{}).relate([]owner{fakeOwner("Nope", "nope")}, []string{"config/a.json"}); err == nil {
 		t.Error("relate() returned no error for a mod that doesn't exist")
 	}
 }
 
 func TestBackendUnrelateTakesOutEntries(t *testing.T) {
 	setUpPack(t)
-	if err := (packBackend{}).unrelate("mods/alpha.pw.toml", []string{"config/alpha/", "config/gone.json"}); err != nil {
+	if err := (packBackend{}).unrelate(fakeOwner("Alpha Mod", "alpha"), []string{"config/alpha/", "config/gone.json"}); err != nil {
 		t.Fatalf("unrelate() returned error: %v", err)
 	}
 	if got := claims(t, "alpha"); !slices.Equal(got, []string{"config/alpha.json"}) {
@@ -141,7 +178,7 @@ func TestBackendUnrelateOfWhatIsAlreadyGoneWritesNothing(t *testing.T) {
 	setUpPack(t)
 	indexBefore, _ := os.ReadFile("index.toml")
 	alphaBefore, _ := os.ReadFile("mods/alpha.pw.toml")
-	if err := (packBackend{}).unrelate("mods/alpha.pw.toml", []string{"config/never-there.json"}); err != nil {
+	if err := (packBackend{}).unrelate(fakeOwner("Alpha Mod", "alpha"), []string{"config/never-there.json"}); err != nil {
 		t.Fatalf("unrelate() returned error: %v", err)
 	}
 	if after, _ := os.ReadFile("mods/alpha.pw.toml"); !slices.Equal(alphaBefore, after) {
@@ -154,7 +191,7 @@ func TestBackendUnrelateOfWhatIsAlreadyGoneWritesNothing(t *testing.T) {
 
 func TestBackendUnrelateLeavesAnEmptyConfigFilesThere(t *testing.T) {
 	setUpPack(t)
-	if err := (packBackend{}).unrelate("mods/alpha.pw.toml", []string{"config/alpha.json", "config/alpha/", "config/gone.json"}); err != nil {
+	if err := (packBackend{}).unrelate(fakeOwner("Alpha Mod", "alpha"), []string{"config/alpha.json", "config/alpha/", "config/gone.json"}); err != nil {
 		t.Fatalf("unrelate() returned error: %v", err)
 	}
 	// Left as an empty list rather than taken out, so the field stays there to fill in (see core.Mod.UnclaimConfigFile)

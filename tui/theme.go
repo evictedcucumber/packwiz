@@ -133,3 +133,30 @@ func centre(box []string, width, height int) []string {
 	}
 	return out[:height]
 }
+
+// highlight shows the characters of text that are at positions (indexes of its runes) in style. Runs of them are styled
+// together, so a match is one style rather than one for each letter of it.
+func highlight(text string, positions []int, style ui.Style) string {
+	if len(positions) == 0 {
+		return text
+	}
+	matched := make(map[int]bool, len(positions))
+	for _, p := range positions {
+		matched[p] = true
+	}
+	runes := []rune(text)
+	var b strings.Builder
+	for i := 0; i < len(runes); {
+		j := i
+		for j < len(runes) && matched[j] == matched[i] {
+			j++
+		}
+		if segment := string(runes[i:j]); matched[i] {
+			b.WriteString(style.Sprint(segment))
+		} else {
+			b.WriteString(segment)
+		}
+		i = j
+	}
+	return b.String()
+}

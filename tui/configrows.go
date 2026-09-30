@@ -45,8 +45,8 @@ const (
 	missingRow
 )
 
-// invalidGroup is the id of the group of files that no mod claims. The id of a mod's group is the path of its metadata
-// file, which always has an extension, so it is never this.
+// invalidGroup is the id of the group of files that nothing claims. The id of any other group is the key of its owner (see
+// owner.key), which is never this.
 const invalidGroup = "(invalid)"
 
 // row is a line of the config screen's tree.
@@ -54,8 +54,8 @@ type row struct {
 	kind rowKind
 	// group is the id of the group the row is in, or is the heading of
 	group string
-	// mod is the mod that claims the row's file, or the group is for: nil in the group of files nothing claims
-	mod *core.Mod
+	// owner is who claims the row's file, or the group is for: of kind ownerNone in the group of files nothing claims
+	owner owner
 	// path is the file of a fileRow, or the config-files entry of a missingRow (written as it is in the mod's file)
 	path string
 
@@ -82,26 +82,36 @@ func (r row) key() rowKey {
 	return rowKey{r.kind, r.group, r.path}
 }
 
-// buildRows makes the rows of the tree that "packwiz config list" prints: a group for each mod with what it claims
-// (files that are tracked, then entries that match none), then the files that nothing claims. Only what filter shows is
-// in it, and a group with nothing to show is left out, as it is in the command. The rows of a group that is folded are
-// left out and the group is marked, as its files are still its own.
+// buildRows makes the rows of the tree that "packwiz config list" prints: a group for the pack and for its mod loader, if
+// they claim anything, then one for each mod, with what it claims (files that are tracked, then entries that match none),
+// then the files that nothing claims. Only what filter shows is in it, and a group with nothing to show is left out, as it
+// is in the command. The rows of a group that is folded are left out and the group is marked, as its files are still its
+// own.
 func buildRows(tree core.ConfigFileTree, filter stateFilter, folded map[string]bool) []row {
 	var rows []row
-	for _, m := range tree.Mods {
-		id := m.Mod.GetFilePath()
+	add := func(o owner, files, missing []string) {
 		var children []row
 		if filter.showsValid() {
-			for _, f := range m.Files {
-				children = append(children, row{kind: fileRow, group: id, mod: m.Mod, path: f})
+			for _, f := range files {
+				children = append(children, row{kind: fileRow, group: o.key(), owner: o, path: f})
 			}
 		}
 		if filter.showsMissing() {
-			for _, e := range m.Missing {
-				children = append(children, row{kind: missingRow, group: id, mod: m.Mod, path: e})
+			for _, e := range missing {
+				children = append(children, row{kind: missingRow, group: o.key(), owner: o, path: e})
 			}
 		}
-		rows = appendGroup(rows, row{kind: groupRow, group: id, mod: m.Mod, title: m.Mod.Name}, children, folded[id])
+		rows = appendGroup(rows, row{kind: groupRow, group: o.key(), owner: o, title: o.name}, children, folded[o.key()])
+	}
+	for _, o := range tree.Owners {
+		kind := ownerLoader
+		if o.Owner == core.ConfigOwnerPack {
+			kind = ownerPack
+		}
+		add(owner{kind: kind, id: o.Owner, name: o.Name, slug: o.Owner, entries: o.Entries}, o.Files, o.Missing)
+	}
+	for _, m := range tree.Mods {
+		add(modOwner(m.Mod), m.Files, m.Missing)
 	}
 	if filter.showsInvalid() {
 		var children []row
@@ -135,12 +145,16 @@ func appendGroup(rows []row, heading row, children []row, folded bool) []row {
 
 // stateCounts is how many config files are in each state.
 type stateCounts struct {
-	// valid is how many files mods claim, counting a file that more than one mod claims once for each
+	// valid is how many files are claimed, counting a file that more than one owner claims once for each
 	valid, invalid, missing int
 }
 
 func countStates(tree core.ConfigFileTree) stateCounts {
 	counts := stateCounts{invalid: len(tree.Unclaimed)}
+	for _, o := range tree.Owners {
+		counts.valid += len(o.Files)
+		counts.missing += len(o.Missing)
+	}
 	for _, m := range tree.Mods {
 		counts.valid += len(m.Files)
 		counts.missing += len(m.Missing)

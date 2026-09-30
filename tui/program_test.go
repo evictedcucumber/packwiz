@@ -89,10 +89,10 @@ func TestProgramRelatesAFileFromKeyPresses(t *testing.T) {
 			t.Fatalf("failed to send keys: %v", err)
 		}
 	}
-	// Down to config/orphan.json, relate it, pick Beta Mod (down, and space), and confirm with enter
+	// Down to config/orphan.json, relate it, pick Beta Mod (down past the pack and Alpha Mod, and space), and confirm with enter
 	key("jjjjjj")
 	key("r")
-	key("j")
+	key("jj") // past the pack and Alpha Mod
 	key(" ")
 	key("\r")
 

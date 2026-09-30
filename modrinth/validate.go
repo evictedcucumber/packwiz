@@ -108,6 +108,16 @@ type validation struct {
 	missing []dependencyNeed
 	// missingConfigFiles are the entries of a mod's config-files that match no file in the pack, by mod, for fixing it
 	missingConfigFiles []missingConfig
+	// missingOwnerConfigFiles are the same for the pack and its mod loader, whose config-files are in pack.toml
+	missingOwnerConfigFiles []missingOwnerConfig
+}
+
+// missingOwnerConfig is the entries of the pack's or its loader's config-files in pack.toml, as written there, that match
+// no file in the pack
+type missingOwnerConfig struct {
+	// owner is who they are for, as it is in pack.toml's config-files, and name is that as it is written for people
+	owner, name string
+	entries     []string
 }
 
 // missingConfig is the entries of a mod's config-files, as written in its metadata file, that match no file in the pack
@@ -128,7 +138,7 @@ func validatePack(pack core.Pack, index core.Index) *validation {
 	}
 	v.checkDuplicates(entries)
 	v.checkDependencies(pack, entries)
-	v.checkConfigFiles(index, entries)
+	v.checkConfigFiles(pack, index, entries)
 	return v
 }
 
@@ -324,21 +334,44 @@ func (v *validation) checkDependencies(pack core.Pack, entries []entry) {
 	}
 }
 
-// checkConfigFiles warns about tracked files that no mod's config-files claims, normally something in the pack's
-// config/ folder left behind by a mod that has since been removed, or never linked to the mod that installed it; and
-// about entries in a mod's config-files that match no file in the pack, normally a config file that has since been
-// deleted or renamed.
-func (v *validation) checkConfigFiles(index core.Index, entries []entry) {
+// checkConfigFiles warns about tracked files that no mod, the pack or its mod loader claims in their config-files,
+// normally something in the pack's config/ folder left behind by a mod that has since been removed, or never linked to
+// the mod that installed it; and about entries that match no file in the pack, normally a config file that has since
+// been deleted or renamed. The entries of the pack and its loader are in pack.toml, which is also checked for an owner
+// that is neither.
+func (v *validation) checkConfigFiles(pack core.Pack, index core.Index, entries []entry) {
 	mods := make([]*core.Mod, len(entries))
 	byMod := make(map[*core.Mod]entry, len(entries))
 	for i, e := range entries {
 		mods[i] = e.mod
 		byMod[e.mod] = e
 	}
-	tree, err := index.ConfigFileTree(mods)
+	tree, err := index.ConfigFileTree(mods, pack)
 	if err != nil {
 		v.warnf(packEntry, "config files couldn't be checked: %v", err)
 		return
+	}
+
+	for _, owner := range slices.Sorted(maps.Keys(pack.ConfigFiles)) {
+		if !pack.IsConfigOwner(owner) {
+			v.warnf(packEntry, "pack.toml's config-files has %q, which is neither the pack nor a mod loader that it has", owner)
+		}
+	}
+
+	for _, o := range tree.Owners {
+		if len(o.Missing) == 0 {
+			continue
+		}
+		who := o.Name
+		if o.Owner == core.ConfigOwnerPack {
+			who = "the pack"
+		}
+		noun, verb := "entries", "match"
+		if len(o.Missing) == 1 {
+			noun, verb = "entry", "matches"
+		}
+		v.warnf(packEntry, "pack.toml's config-files for %s has %d %s that %s no file in the pack: %s", who, len(o.Missing), noun, verb, listNames(o.Missing, 5))
+		v.missingOwnerConfigFiles = append(v.missingOwnerConfigFiles, missingOwnerConfig{owner: o.Owner, name: o.Name, entries: o.Missing})
 	}
 
 	for _, m := range tree.Mods {
@@ -361,7 +394,7 @@ func (v *validation) checkConfigFiles(index core.Index, entries []entry) {
 	if len(tree.Unclaimed) == 1 {
 		noun, verb = "file", "isn't"
 	}
-	v.warnf(packEntry, "%d %s %s claimed by any mod's config-files: %s", len(tree.Unclaimed), noun, verb, listNames(tree.Unclaimed, 5))
+	v.warnf(packEntry, "%d %s %s claimed by any mod, the mod loader or the pack: %s", len(tree.Unclaimed), noun, verb, listNames(tree.Unclaimed, 5))
 }
 
 // installedProjects is the projects the pack has, by ID, with the name of the mod that is each. Forgified Fabric API

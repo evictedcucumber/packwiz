@@ -38,7 +38,7 @@ func TestConfigFileTreeExcludesMetaFilesAndAModsOwnDestFile(t *testing.T) {
 	track(t, idx, "mods/alpha.pw.toml", "mods/alpha.jar")
 
 	mods := []*Mod{modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar")}
-	tree, err := idx.ConfigFileTree(mods)
+	tree, err := idx.ConfigFileTree(mods, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestConfigFileTreeGroupsFilesByMod(t *testing.T) {
 	track(t, idx, "mods/alpha.pw.toml", "mods/alpha.jar", "config/alpha.json", "config/alpha/sub.json", "config/orphan.json")
 
 	mods := []*Mod{modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json", "config/alpha/")}
-	tree, err := idx.ConfigFileTree(mods)
+	tree, err := idx.ConfigFileTree(mods, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestConfigFileTreeSortsModsByName(t *testing.T) {
 		modAt("Zeta Mod", "mods/zeta.pw.toml", "zeta.jar", "config/zeta.json"),
 		modAt("alpha mod", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json"),
 	}
-	tree, err := idx.ConfigFileTree(mods)
+	tree, err := idx.ConfigFileTree(mods, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestConfigFileTreeListsAFileUnderEveryModThatClaimsIt(t *testing.T) {
 		modAt("Beta", "mods/beta.pw.toml", "beta.jar", "config/shared.json"),
 		modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/shared.json"),
 	}
-	tree, err := idx.ConfigFileTree(mods)
+	tree, err := idx.ConfigFileTree(mods, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestConfigFileTreeResolvedAgainstTheConfigDir(t *testing.T) {
 	defaultsMod.SetMetaPath("mods/defaults.pw.toml")
 	alphaMod := modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json", "config/alpha/")
 
-	tree, err := idx.ConfigFileTree([]*Mod{defaultsMod, alphaMod})
+	tree, err := idx.ConfigFileTree([]*Mod{defaultsMod, alphaMod}, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestConfigFileTreeUnclaimedSortedByPath(t *testing.T) {
 	idx := newIndexFixture(t)
 	track(t, idx, "config/z.json", "config/a.json", "config/m.json")
 
-	tree, err := idx.ConfigFileTree(nil)
+	tree, err := idx.ConfigFileTree(nil, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestConfigFileTreeReportsEntriesThatMatchNoTrackedFile(t *testing.T) {
 
 	mods := []*Mod{modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar",
 		"config/z-gone.json", "config/alpha.json", "config/a-gone/", "config/kept/", "config/z-gone.json")}
-	tree, err := idx.ConfigFileTree(mods)
+	tree, err := idx.ConfigFileTree(mods, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestConfigFileTreeIncludesAModWithOnlyMissingEntries(t *testing.T) {
 		modAt("Beta", "mods/beta.pw.toml", "beta.jar", "config/beta.json"),
 		modAt("Gamma", "mods/gamma.pw.toml", "gamma.jar"),
 	}
-	tree, err := idx.ConfigFileTree(mods)
+	tree, err := idx.ConfigFileTree(mods, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestConfigFileTreeMissingIsPerMod(t *testing.T) {
 		modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/shared.json", "config/alpha.json"),
 		modAt("Beta", "mods/beta.pw.toml", "beta.jar", "config/shared.json"),
 	}
-	tree, err := idx.ConfigFileTree(mods)
+	tree, err := idx.ConfigFileTree(mods, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestConfigFileTreeMissingIsLookedForInTheConfigDir(t *testing.T) {
 	defaultsMod.SetMetaPath("mods/defaults.pw.toml")
 	alphaMod := modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json", "config/gone.json")
 
-	tree, err := idx.ConfigFileTree([]*Mod{defaultsMod, alphaMod})
+	tree, err := idx.ConfigFileTree([]*Mod{defaultsMod, alphaMod}, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestClaimingEntries(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ClaimingEntries(mod, "", tt.path)
+			got := ClaimingEntries(mod.ConfigEntries(), "", tt.path)
 			slices.Sort(got)
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("ClaimingEntries(%q) = %v, want %v", tt.path, got, tt.want)
@@ -321,18 +321,18 @@ func TestClaimingEntries(t *testing.T) {
 	}
 
 	t.Run("a mod with no config-files claims nothing", func(t *testing.T) {
-		if got := ClaimingEntries(modAt("Bare", "mods/bare.pw.toml", "bare.jar"), "", "config/alpha.json"); len(got) != 0 {
+		if got := ClaimingEntries(modAt("Bare", "mods/bare.pw.toml", "bare.jar").ConfigEntries(), "", "config/alpha.json"); len(got) != 0 {
 			t.Errorf("ClaimingEntries() = %v, want none", got)
 		}
 	})
 
 	t.Run("entries are resolved against the config dir, and returned as written", func(t *testing.T) {
-		got := ClaimingEntries(mod, "configureddefaults", "configureddefaults/config/alpha/sub.json")
+		got := ClaimingEntries(mod.ConfigEntries(), "configureddefaults", "configureddefaults/config/alpha/sub.json")
 		slices.Sort(got)
 		if want := []string{"config/alpha/", "config/alpha/sub.json"}; !slices.Equal(got, want) {
 			t.Errorf("ClaimingEntries() = %v, want %v", got, want)
 		}
-		if got := ClaimingEntries(mod, "configureddefaults", "config/alpha.json"); len(got) != 0 {
+		if got := ClaimingEntries(mod.ConfigEntries(), "configureddefaults", "config/alpha.json"); len(got) != 0 {
 			t.Errorf("a path outside the config dir: ClaimingEntries() = %v, want none", got)
 		}
 	})
@@ -345,13 +345,13 @@ func TestClaimingEntriesAgreeWithConfigFileTree(t *testing.T) {
 	track(t, idx, "mods/alpha.pw.toml", "config/alpha.json", "config/alpha/sub.json", "config/orphan.json")
 	mod := modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json", "config/alpha/")
 
-	tree, err := idx.ConfigFileTree([]*Mod{mod})
+	tree, err := idx.ConfigFileTree([]*Mod{mod}, Pack{})
 	if err != nil {
 		t.Fatalf("ConfigFileTree() returned error: %v", err)
 	}
 	for _, p := range append(slices.Clone(tree.Mods[0].Files), tree.Unclaimed...) {
 		claimed := slices.Contains(tree.Mods[0].Files, p)
-		if got := len(ClaimingEntries(mod, "", p)) > 0; got != claimed {
+		if got := len(ClaimingEntries(mod.ConfigEntries(), "", p)) > 0; got != claimed {
 			t.Errorf("%s: ClaimingEntries says claimed = %v, ConfigFileTree says %v", p, got, claimed)
 		}
 	}
@@ -373,5 +373,136 @@ func TestEntryClaims(t *testing.T) {
 		if got := EntryClaims(tt.entry, tt.configDir, tt.path); got != tt.want {
 			t.Errorf("EntryClaims(%q, %q, %q) = %v, want %v", tt.entry, tt.configDir, tt.path, got, tt.want)
 		}
+	}
+}
+
+// packOf makes a pack that has the mod loader neoforge and these config files, by owner
+func packOf(configFiles map[string][]string) Pack {
+	return Pack{Versions: map[string]string{"minecraft": "1.21.1", "neoforge": "21.1.0"}, ConfigFiles: configFiles}
+}
+
+func TestConfigFileTreeHasTheOwnersThatAreNotModsFirst(t *testing.T) {
+	idx := newIndexFixture(t)
+	track(t, idx, "mods/alpha.pw.toml", "options.txt", "config/neoforge-common.toml", "config/neoforge-client.toml",
+		"config/alpha.json", "config/orphan.json")
+
+	pack := packOf(map[string][]string{
+		"neoforge": {"config/neoforge-common.toml", "config/neoforge-client.toml", "config/neoforge-old.toml"},
+		"pack":     {"options.txt"},
+	})
+	mods := []*Mod{modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/alpha.json")}
+	tree, err := idx.ConfigFileTree(mods, pack)
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
+	}
+
+	// The pack is first, whatever the keys sort as, then the loader, and the mods are in their own list
+	if len(tree.Owners) != 2 || tree.Owners[0].Owner != "pack" || tree.Owners[1].Owner != "neoforge" {
+		t.Fatalf("Owners = %+v, want the pack and then neoforge", tree.Owners)
+	}
+	if got := tree.Owners[0]; got.Name != "Pack" || !slices.Equal(got.Files, []string{"options.txt"}) || len(got.Missing) != 0 {
+		t.Errorf("the pack is %+v, want options.txt claimed and nothing missing", got)
+	}
+	loader := tree.Owners[1]
+	if loader.Name != "NeoForge" {
+		t.Errorf("the loader is named %q, want it written for people", loader.Name)
+	}
+	if want := []string{"config/neoforge-client.toml", "config/neoforge-common.toml"}; !slices.Equal(loader.Files, want) {
+		t.Errorf("the loader's files are %v, want %v, sorted", loader.Files, want)
+	}
+	if want := []string{"config/neoforge-old.toml"}; !slices.Equal(loader.Missing, want) {
+		t.Errorf("the loader's missing entries are %v, want %v", loader.Missing, want)
+	}
+	if want := []string{"config/neoforge-common.toml", "config/neoforge-client.toml", "config/neoforge-old.toml"}; !slices.Equal(loader.Entries, want) {
+		t.Errorf("the loader's entries are %v, want all of them as they are written", loader.Entries)
+	}
+	if len(tree.Mods) != 1 || tree.Mods[0].Mod.Name != "Alpha" {
+		t.Errorf("Mods = %+v, want just Alpha", tree.Mods)
+	}
+	// Only what nothing claims is left
+	if !slices.Equal(tree.Unclaimed, []string{"config/orphan.json"}) {
+		t.Errorf("Unclaimed = %v, want only what nothing claims, not what the pack or the loader do", tree.Unclaimed)
+	}
+}
+
+func TestConfigFileTreeOmitsOwnersWithNothingToShow(t *testing.T) {
+	idx := newIndexFixture(t)
+	track(t, idx, "options.txt")
+	tree, err := idx.ConfigFileTree(nil, packOf(nil))
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
+	}
+	if len(tree.Owners) != 0 {
+		t.Errorf("Owners = %+v, want none: nothing claims anything", tree.Owners)
+	}
+	if !slices.Equal(tree.Unclaimed, []string{"options.txt"}) {
+		t.Errorf("Unclaimed = %v", tree.Unclaimed)
+	}
+}
+
+// A file can belong to the loader and to a mod that configures it, and then is listed under both
+func TestConfigFileTreeListsAFileUnderEveryOwnerThatClaimsIt(t *testing.T) {
+	idx := newIndexFixture(t)
+	track(t, idx, "mods/alpha.pw.toml", "config/shared.toml")
+	tree, err := idx.ConfigFileTree(
+		[]*Mod{modAt("Alpha", "mods/alpha.pw.toml", "alpha.jar", "config/shared.toml")},
+		packOf(map[string][]string{"neoforge": {"config/shared.toml"}}))
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
+	}
+	if len(tree.Owners) != 1 || len(tree.Owners[0].Files) != 1 || len(tree.Mods) != 1 || len(tree.Mods[0].Files) != 1 {
+		t.Errorf("tree = %+v, want the file under both the loader and the mod", tree)
+	}
+	if len(tree.Unclaimed) != 0 {
+		t.Errorf("Unclaimed = %v, want none", tree.Unclaimed)
+	}
+}
+
+// An owner that the pack doesn't have is shown as it is written, rather than its files looking as if nothing claimed them
+func TestConfigFileTreeShowsAnOwnerThatThePackDoesNotHave(t *testing.T) {
+	idx := newIndexFixture(t)
+	track(t, idx, "config/fabric.toml")
+	tree, err := idx.ConfigFileTree(nil, packOf(map[string][]string{"fabric": {"config/fabric.toml"}}))
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
+	}
+	if len(tree.Owners) != 1 || tree.Owners[0].Owner != "fabric" || tree.Owners[0].Name != "fabric" {
+		t.Errorf("Owners = %+v, want fabric, named as it is written", tree.Owners)
+	}
+}
+
+// Entries of the pack and its loader are written without the config folder too, as mods' are
+func TestConfigFileTreeResolvesOwnersAgainstTheConfigDir(t *testing.T) {
+	registerConfigDirSource(t, "defaults", "configureddefaults")
+	idx := newIndexFixture(t)
+	track(t, idx, "mods/defaults.pw.toml", "configureddefaults/options.txt", "configureddefaults/config/neoforge-common.toml")
+	defaults := modAt("Defaults", "mods/defaults.pw.toml", "defaults.jar")
+	defaults.Update = map[string]map[string]interface{}{"defaults": {"version": "any"}}
+
+	tree, err := idx.ConfigFileTree([]*Mod{defaults}, packOf(map[string][]string{
+		"pack":     {"options.txt"},
+		"neoforge": {"config/neoforge-common.toml"},
+	}))
+	if err != nil {
+		t.Fatalf("ConfigFileTree() returned error: %v", err)
+	}
+	if len(tree.Owners) != 2 || !slices.Equal(tree.Owners[0].Files, []string{"configureddefaults/options.txt"}) ||
+		!slices.Equal(tree.Owners[1].Files, []string{"configureddefaults/config/neoforge-common.toml"}) {
+		t.Errorf("Owners = %+v, want the files in the config folder claimed by entries without it", tree.Owners)
+	}
+	if len(tree.Unclaimed) != 0 {
+		t.Errorf("Unclaimed = %v, want none", tree.Unclaimed)
+	}
+}
+
+func TestClaimingEntriesWorksOnAnOwnersEntries(t *testing.T) {
+	entries := []string{"options.txt", "config/", "config/neoforge-common.toml"}
+	got := ClaimingEntries(entries, "", "config/neoforge-common.toml")
+	slices.Sort(got)
+	if want := []string{"config/", "config/neoforge-common.toml"}; !slices.Equal(got, want) {
+		t.Errorf("ClaimingEntries() = %v, want %v", got, want)
+	}
+	if got := ClaimingEntries(nil, "", "options.txt"); len(got) != 0 {
+		t.Errorf("ClaimingEntries() of nothing = %v", got)
 	}
 }

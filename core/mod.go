@@ -58,6 +58,14 @@ type Mod struct {
 	ConfigFiles *[]string `toml:"config-files,omitempty"`
 }
 
+// ConfigEntries are the entries of m's ConfigFiles, none if it has none.
+func (m *Mod) ConfigEntries() []string {
+	if m.ConfigFiles == nil {
+		return nil
+	}
+	return *m.ConfigFiles
+}
+
 // EnsureConfigFiles gives m an empty ConfigFiles if it doesn't have one yet, so its file shows the field is there to
 // fill in. It leaves an existing ConfigFiles, even an empty one, as it is.
 func (m *Mod) EnsureConfigFiles() {

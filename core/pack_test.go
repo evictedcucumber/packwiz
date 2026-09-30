@@ -3,6 +3,9 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -491,5 +494,118 @@ func TestPackSaveIndexWritesTheIndexAndTheHashThePackRecordsForIt(t *testing.T) 
 	_, _ = h.Write(data)
 	if want := h.HashToString(h.Sum(nil)); loadedPack.Index.Hash != want {
 		t.Errorf("the pack records index hash %q, but the index's is %q", loadedPack.Index.Hash, want)
+	}
+}
+
+func TestPackConfigFilesRoundTripThroughPackToml(t *testing.T) {
+	packFile := withPackFile(t, "")
+	pack := Pack{Name: "Test", PackFormat: CurrentPackFormat, Versions: map[string]string{"minecraft": "1.21.1", "neoforge": "21.1.0"}}
+	pack.Index.File = "index.toml"
+	pack.ClaimConfigFile(ConfigOwnerPack, "options.txt")
+	pack.ClaimConfigFile("neoforge", "config/neoforge-common.toml")
+	pack.ClaimConfigFile("neoforge", "config/neoforge-client.toml")
+	if err := pack.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(packFile)
+	if err != nil {
+		t.Fatalf("failed to read pack.toml: %v", err)
+	}
+	for _, want := range []string{"[config-files]", `pack = ["options.txt"]`, `neoforge = ["config/neoforge-common.toml", "config/neoforge-client.toml"]`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("pack.toml doesn't have %q:\n%s", want, data)
+		}
+	}
+
+	loaded, err := LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	if !reflect.DeepEqual(loaded.ConfigFiles, pack.ConfigFiles) {
+		t.Errorf("ConfigFiles = %v after a round trip, want %v", loaded.ConfigFiles, pack.ConfigFiles)
+	}
+}
+
+// A pack with nothing claimed has no table for it, as every pack did before there was one
+func TestPackWithoutConfigFilesWritesNoTableForThem(t *testing.T) {
+	packFile := withPackFile(t, "")
+	pack := Pack{Name: "Test", PackFormat: CurrentPackFormat}
+	pack.Index.File = "index.toml"
+	if err := pack.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	data, _ := os.ReadFile(packFile)
+	if strings.Contains(string(data), "config-files") {
+		t.Errorf("pack.toml has a config-files table though nothing is claimed:\n%s", data)
+	}
+
+	pack.ClaimConfigFile(ConfigOwnerPack, "options.txt")
+	pack.UnclaimConfigFile(ConfigOwnerPack, "options.txt")
+	if err := pack.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	data, _ = os.ReadFile(packFile)
+	if strings.Contains(string(data), "config-files") {
+		t.Errorf("pack.toml has a config-files table once everything was taken out:\n%s", data)
+	}
+}
+
+func TestPackClaimAndUnclaimConfigFile(t *testing.T) {
+	var pack Pack
+	if !pack.ClaimConfigFile("pack", "options.txt") {
+		t.Error("ClaimConfigFile() on a new pack reported nothing was added")
+	}
+	if pack.ClaimConfigFile("pack", "options.txt") {
+		t.Error("ClaimConfigFile() of the same path reported it was added again")
+	}
+	pack.ClaimConfigFile("pack", "servers.dat")
+	pack.ClaimConfigFile("neoforge", "options.txt")
+	if got := pack.ConfigFiles["pack"]; !slices.Equal(got, []string{"options.txt", "servers.dat"}) {
+		t.Errorf("the pack's config files are %v, want them in the order they were added", got)
+	}
+
+	if pack.UnclaimConfigFile("pack", "nope") || pack.UnclaimConfigFile("fabric", "options.txt") {
+		t.Error("UnclaimConfigFile() of what wasn't claimed reported it was removed")
+	}
+	if !pack.UnclaimConfigFile("pack", "options.txt") {
+		t.Error("UnclaimConfigFile() reported nothing was removed")
+	}
+	if got := pack.ConfigFiles["pack"]; !slices.Equal(got, []string{"servers.dat"}) {
+		t.Errorf("the pack's config files are %v, want only what wasn't taken out", got)
+	}
+	// Taking out the last leaves no owner, rather than an owner with nothing
+	pack.UnclaimConfigFile("pack", "servers.dat")
+	if _, there := pack.ConfigFiles["pack"]; there {
+		t.Error("the pack is still an owner after its last file was taken out")
+	}
+	if got := pack.ConfigFiles["neoforge"]; !slices.Equal(got, []string{"options.txt"}) {
+		t.Errorf("the loader's config files are %v, want them left alone", got)
+	}
+}
+
+func TestPackConfigOwners(t *testing.T) {
+	withLoader := Pack{Versions: map[string]string{"minecraft": "1.21.1", "neoforge": "21.1.0"}}
+	if got := withLoader.ConfigOwners(); !slices.Equal(got, []string{"pack", "neoforge"}) {
+		t.Errorf("ConfigOwners() = %v, want the pack and then its loader", got)
+	}
+	without := Pack{Versions: map[string]string{"minecraft": "1.21.1"}}
+	if got := without.ConfigOwners(); !slices.Equal(got, []string{"pack"}) {
+		t.Errorf("ConfigOwners() of a pack with no loader = %v, want just the pack", got)
+	}
+
+	for owner, want := range map[string]bool{"pack": true, "neoforge": true, "fabric": false, "": false} {
+		if got := withLoader.IsConfigOwner(owner); got != want {
+			t.Errorf("IsConfigOwner(%q) = %v, want %v", owner, got, want)
+		}
+	}
+	if without.IsConfigOwner("neoforge") {
+		t.Error("a pack with no loader says neoforge can own config files")
+	}
+
+	for owner, want := range map[string]string{"pack": "Pack", "neoforge": "NeoForge", "fabric": "fabric"} {
+		if got := withLoader.ConfigOwnerName(owner); got != want {
+			t.Errorf("ConfigOwnerName(%q) = %q, want %q", owner, got, want)
+		}
 	}
 }

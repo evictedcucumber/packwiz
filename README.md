@@ -25,8 +25,8 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - Exporting to Modrinth packs, listing what goes in each one and which sides it is for
 - `packwiz list --save` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
 - `packwiz validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz fix` fixes what it can, showing the changes and asking first
-- `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, and `packwiz validate` checks the same
-- `packwiz tui` opens an interface in the terminal, for now for config files: the same tree as `packwiz config list`, with keys to relate a file to the mods that own it, or take a claim out again
+- `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, or the mod loader (NeoForge's own config) or the pack as a whole (`options.txt`), and `packwiz validate` checks the same
+- `packwiz tui` opens an interface in the terminal, for now for config files: the same tree as `packwiz config list`, with keys to relate a file to the pack, its mod loader or the mods that own it, or take a claim out again
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
 - Configured Defaults support: a pack that has the mod keeps its config, and any other default files, in `configureddefaults/`
@@ -148,9 +148,16 @@ The names are in alphabetical order under a heading for each kind of file, going
 
 ## Config files
 
-`packwiz config list` shows the pack's tracked files that aren't a mod's own metadata or destination file - normally what is in `config/` - as a tree of the mod each belongs to, with the files nothing claims under "Invalid" at the end:
+`packwiz config list` shows the pack's tracked files that aren't a mod's own metadata or destination file - normally what is in `config/` - as a tree of who each belongs to, with the files nothing claims under "Invalid" at the end. A config file belongs to a mod, to the pack's mod loader (NeoForge's own `config/neoforge-common.toml`, say) or to the pack as a whole (`options.txt`, which is Minecraft's and no mod's). The pack and the loader come first, then the mods:
 
 ```
+Pack
+└── options.txt
+
+NeoForge
+├── config/neoforge-client.toml
+└── config/neoforge-common.toml
+
 Sodium
 └── config/sodium-options.json
 Iris
@@ -166,7 +173,15 @@ A mod records which files it owns in its `.pw.toml`'s `config-files`, a path, or
 config-files = ["config/sodium-options.json", "config/iris/"]
 ```
 
-This is written by hand, with `packwiz config relate`; nothing derives it. `--state valid` shows only what is claimed, and `--state invalid` only what isn't - the same as the "Invalid" section, for example a config file left behind by a mod that has since been removed, or never linked to the mod that installed it (as `--only main` does for `packwiz list`). `packwiz validate` reports the same files as a warning.
+The pack and its loader keep theirs in `pack.toml`, under `[config-files]`, written the same way and named `pack` or by the loader, as it is in `[versions]`:
+
+```
+[config-files]
+pack = ["options.txt"]
+neoforge = ["config/neoforge-client.toml", "config/neoforge-common.toml"]
+```
+
+All of this is written by hand, or with `packwiz config relate`; nothing derives it, so `options.txt` belongs to the pack once you say so, and is listed under "Invalid" until then. `--state valid` shows only what is claimed, and `--state invalid` only what isn't - the same as the "Invalid" section, for example a config file left behind by a mod that has since been removed, or never linked to the mod that installed it (as `--only main` does for `packwiz list`). `packwiz validate` reports the same files as a warning.
 
 An entry that no tracked file matches - a config file that has since been deleted or renamed, or a folder with nothing left in it - is listed under its mod too, marked `(missing)`, and `--state missing` shows only those:
 
@@ -176,18 +191,20 @@ Sodium
 └── config/sodium-old.json (missing)
 ```
 
-`packwiz validate` warns about them for the mod that has them, and `packwiz fix` takes them out of its `config-files`. What is in the pack is what its index says, so after adding or deleting a config file run `packwiz refresh` first: until then the index still has the old files, and a file that is on disk but not yet in the index counts as missing.
+`packwiz validate` warns about them for the mod, the pack or the loader that has them, and `packwiz fix` takes them out of its `config-files`. What is in the pack is what its index says, so after adding or deleting a config file run `packwiz refresh` first: until then the index still has the old files, and a file that is on disk but not yet in the index counts as missing.
 
 Entries are always written as above, as if the pack kept its files at the root of the game directory. A pack that has [Configured Defaults](#configured-defaults) instead keeps everything in `configureddefaults/`, and `config-files` follows it there too: `config/sodium-options.json` claims `configureddefaults/config/sodium-options.json` once the mod is installed, with no need to rewrite it either way.
 
-`packwiz config relate <mod> <config file/dir>` adds a path to a mod's config-files, given the name of its `.pw.toml` file (as `packwiz mr pin` takes) and a file or folder that exists in the pack:
+`packwiz config relate` adds a path to the config-files of whoever it is told: `--mod` for a mod, given the name of its `.pw.toml` file (as `packwiz mr pin` takes) and repeated for each mod, `--loader` for the pack's mod loader and `--pack` for the pack as a whole, in any combination, and a file or folder that exists in the pack:
 
 ```
-packwiz config relate sodium config/sodium-options.json
-packwiz config relate iris config/iris
+packwiz config relate --mod sodium config/sodium-options.json
+packwiz config relate --mod iris config/iris
+packwiz config relate --pack options.txt
+packwiz config relate --loader config/neoforge-common.toml config/neoforge-client.toml
 ```
 
-A folder is given a trailing `/` automatically. If the pack has Configured Defaults, the path is written as if it didn't - the same normalizing `packwiz config list` does - so it reads the same whether or not the mod is installed. Running it again with the same arguments does nothing more.
+A folder is given a trailing `/` automatically. If the pack has Configured Defaults, the path is written as if it didn't - the same normalizing `packwiz config list` does - so it reads the same whether or not the mod is installed. Running it again with the same arguments does nothing more. `--loader` fails for a pack that has no mod loader.
 
 Every mod gets an empty `config-files = []` when it is added with `packwiz mr add`, and `packwiz fix` adds one to any mod that doesn't have one yet, so a `.pw.toml` file always shows the field is there to fill in with `packwiz config relate`.
 
@@ -199,16 +216,16 @@ Every mod gets an empty `config-files = []` when it is added with `packwiz mr ad
 | --- | --- |
 | `↑` `↓` (or `k` `j`), `g` `G`, page up and down | move through the tree |
 | `←` `→` (or `h` `l`), `enter` on a mod | fold and unfold what a mod owns; `←` from a file goes to its mod |
-| `r` (or `enter` on a file) | relate the file to mods |
-| `x` | take a mod's claim on a file out, or an entry that matches no file |
+| `r` (or `enter` on a file) | relate the file to the pack, its mod loader or mods |
+| `x` | take an owner's claim on a file out, or an entry that matches no file |
 | `space`, `esc` | mark a file, to relate several together (on a mod or "Invalid", every file in it); `esc` unmarks them all |
 | `f` | show all files, then only the valid, the invalid and the missing ones, as `--state` does |
 | `R` | refresh the index, so files added or deleted since show up |
 | `?`, `q` | all of the keys, and quit |
 
-`r` asks which mods to give the file to: type `/` to filter them by name, `space` picks one, and `enter` relates the file to what is picked, or to the mod under the cursor if none is. Several mods can be picked for a file they share. `tab` switches between claiming the file and claiming the folder it is in, and what would be written to each mod's `config-files` is shown above the list. Marked files are related together, and a mod that already claims everything being related is labelled as such. `x` shows the entry that would be taken out, and how many files it covers if it is a folder, and asks before doing it.
+`r` asks who to give the file to, the pack and the loader first ("Pack" is the pack as a whole, for `options.txt` and the like; the loader is NeoForge) and then the mods: type `/` to search them, `space` picks one, and `enter` relates the file to what is picked, or to the mod under the cursor if none is. The search is fuzzy, the way fzf's is, and nothing has to be installed for it: `sdm` finds Sodium, letters only have to be in order, several words (`sod ex`) all have to match in any order, case doesn't matter, and the mod's slug is searched too when its name doesn't match. The best match is first, so `enter` takes it, and the letters that matched are picked out. Several can be picked for a file they share. `tab` switches between claiming the file and claiming the folder it is in, and what would be written to each one's `config-files` is shown above the list. Marked files are related together, and an owner that already claims everything being related is labelled as such. `x` shows the entry that would be taken out, and how many files it covers if it is a folder, and asks before doing it.
 
-It writes what `packwiz config relate` writes, through the same code, so the `.pw.toml` files, the index and `pack.toml` are left as if the commands had made the changes, and a pack that keeps its files in `configureddefaults/` has its entries written without it, as they are there. Colour follows `PACKWIZ_COLOR` and `NO_COLOR` like everything else, and everything selected or marked is shown with a symbol as well as a colour. It needs a terminal at least 40 columns wide and 10 lines high.
+It writes what `packwiz config relate` writes, through the same code, so the `.pw.toml` files, the index and `pack.toml` (where the pack's and the loader's claims go) are left as if the commands had made the changes, and a pack that keeps its files in `configureddefaults/` has its entries written without it, as they are there. Colour follows `PACKWIZ_COLOR` and `NO_COLOR` like everything else, and everything selected or marked is shown with a symbol as well as a colour. It needs a terminal at least 40 columns wide and 10 lines high.
 
 ## Checking a pack
 
@@ -230,7 +247,7 @@ Repurposed Structures - Neoforge/Forge  required     required   8.0 MiB  mods/re
 - every required dependency is in the pack, and nothing in it is incompatible with something else
 - every mod that a mod on the client requires is on the client too: Modrinth lists some libraries, mostly for world generation, as unsupported on the client, but a mod that requires one crashes the game without it. `packwiz mr add` puts such a mod on both sides, and `validate` (and a warning from `export`) finds one that isn't
 - `pack.toml` has a Minecraft version, a NeoForge version and a version for the pack
-- every tracked config file is claimed by a mod's `config-files` (see [Config files](#config-files) and `packwiz config list --state invalid`), and every entry in a mod's `config-files` matches a file in the pack (`packwiz config list --state missing`)
+- every tracked config file is claimed by a mod's `config-files`, or by the pack's or its loader's in `pack.toml` (see [Config files](#config-files) and `packwiz config list --state invalid`), and every entry in any of them matches a file in the pack (`packwiz config list --state missing`); `pack.toml`'s `[config-files]` names only `pack` and a loader the pack has
 
 What a mod depends on is what its `.pw.toml` records. A mod that records nothing is looked up on Modrinth, so that needs the network; if it can't be reached, those mods' dependencies aren't checked, and it says so, but the rest of the checks are made.
 
@@ -248,7 +265,7 @@ Would you like to make these changes? [Y/n]:
 - a mod that is only on the server, but that a mod on the client requires, is put on both sides
 - a required dependency that isn't in the pack is added, at its latest version, as `packwiz mr add` would add it, and put on both sides if a mod on the client requires it (one that can't be found a version of, or whose file name is already taken, is left and reported)
 - a mod with no side is given one (`both`, which it was treated as having), and a mod that doesn't record its version has it recorded
-- a mod with no `config-files` gets an empty one, ready for `packwiz config relate` to fill in, and an entry in a mod's `config-files` that matches no file in the pack is taken out (run `packwiz refresh` first, as a file that isn't in the index yet counts as missing)
+- a mod with no `config-files` gets an empty one, ready for `packwiz config relate` to fill in, and an entry in a mod's `config-files`, or in the pack's or its loader's in `pack.toml`, that matches no file in the pack is taken out (run `packwiz refresh` first, as a file that isn't in the index yet counts as missing)
 
 Everything else `validate` finds, such as a mod that is incompatible with another, needs a decision, so it is left for you.
 

@@ -278,7 +278,7 @@ func TestValidateWarnsAboutConfigFilesNothingClaims(t *testing.T) {
 
 	v := validatePack(pack, index)
 
-	assertProblems(t, v, "", "warning: 1 file isn't claimed by any mod's config-files: config/orphan.json")
+	assertProblems(t, v, "", "warning: 1 file isn't claimed by any mod, the mod loader or the pack: config/orphan.json")
 }
 
 func TestValidateDoesNotWarnAboutClaimedConfigFiles(t *testing.T) {
@@ -308,7 +308,7 @@ func TestValidateCombinesSeveralOrphanedConfigFilesIntoOneWarning(t *testing.T) 
 
 	v := validatePack(pack, index)
 
-	assertProblems(t, v, "", "warning: 2 files aren't claimed by any mod's config-files: config/a.json, config/b.json")
+	assertProblems(t, v, "", "warning: 2 files aren't claimed by any mod, the mod loader or the pack: config/a.json, config/b.json")
 }
 
 func TestValidateWarnsAboutAModsConfigFilesThatMatchNoFile(t *testing.T) {
@@ -765,4 +765,69 @@ func TestValidateCommandExitStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateDoesNotWarnAboutFilesThatThePackOrItsLoaderClaims(t *testing.T) {
+	pack, index := validatablePack(t)
+	addMod(t, &index, validMod("alpha"))
+	for _, p := range []string{"options.txt", "config/neoforge-common.toml", "config/neoforge-client.toml"} {
+		trackConfigFile(t, &index, p)
+	}
+	pack.ConfigFiles = map[string][]string{
+		core.ConfigOwnerPack: {"options.txt"},
+		"neoforge":           {"config/neoforge-common.toml", "config/neoforge-client.toml"},
+	}
+
+	v := validatePack(pack, index)
+
+	assertProblems(t, v, "")
+}
+
+// What the pack claims leaves less for nothing to claim, but doesn't hide the rest
+func TestValidateStillWarnsAboutFilesNothingClaimsWhenThePackClaimsOthers(t *testing.T) {
+	pack, index := validatablePack(t)
+	addMod(t, &index, validMod("alpha"))
+	for _, p := range []string{"options.txt", "config/orphan.json"} {
+		trackConfigFile(t, &index, p)
+	}
+	pack.ConfigFiles = map[string][]string{core.ConfigOwnerPack: {"options.txt"}}
+
+	v := validatePack(pack, index)
+
+	assertProblems(t, v, "", "warning: 1 file isn't claimed by any mod, the mod loader or the pack: config/orphan.json")
+}
+
+func TestValidateWarnsAboutEntriesOfThePackAndItsLoaderThatMatchNoFile(t *testing.T) {
+	pack, index := validatablePack(t)
+	addMod(t, &index, validMod("alpha"))
+	trackConfigFile(t, &index, "options.txt")
+	pack.ConfigFiles = map[string][]string{
+		core.ConfigOwnerPack: {"options.txt", "servers.dat"},
+		"neoforge":           {"config/neoforge-gone.toml", "config/neoforge-old/"},
+	}
+
+	v := validatePack(pack, index)
+
+	// The pack is said first, then its loader, as they are listed
+	assertProblems(t, v, "",
+		"warning: pack.toml's config-files for the pack has 1 entry that matches no file in the pack: servers.dat",
+		"warning: pack.toml's config-files for NeoForge has 2 entries that match no file in the pack: config/neoforge-gone.toml, config/neoforge-old/")
+	if v.errors() != 0 {
+		t.Errorf("errors = %d, want none: an entry for a file that isn't there is only a warning", v.errors())
+	}
+	if len(v.missingOwnerConfigFiles) != 2 || v.missingOwnerConfigFiles[0].owner != core.ConfigOwnerPack || v.missingOwnerConfigFiles[1].name != "NeoForge" {
+		t.Errorf("missingOwnerConfigFiles = %+v, want the pack's and the loader's, for fixing them", v.missingOwnerConfigFiles)
+	}
+}
+
+// Files that an owner that the pack doesn't have claims are still claimed, but the owner is reported
+func TestValidateWarnsAboutAnOwnerThatIsNeitherThePackNorAModLoaderItHas(t *testing.T) {
+	pack, index := validatablePack(t)
+	addMod(t, &index, validMod("alpha"))
+	trackConfigFile(t, &index, "config/fabric.toml")
+	pack.ConfigFiles = map[string][]string{"fabric": {"config/fabric.toml"}}
+
+	v := validatePack(pack, index)
+
+	assertProblems(t, v, "", `warning: pack.toml's config-files has "fabric", which is neither the pack nor a mod loader that it has`)
 }

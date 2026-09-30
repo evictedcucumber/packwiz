@@ -28,6 +28,71 @@ type Pack struct {
 	Versions map[string]string                 `toml:"versions"`
 	Export   map[string]map[string]interface{} `toml:"export"`
 	Options  map[string]interface{}            `toml:"options"`
+
+	// ConfigFiles lists the config files that no mod owns, by who owns them: ConfigOwnerPack for the pack as a whole
+	// (options.txt, say), or the name of a mod loader the pack has, as it is in Versions, for the loader's own
+	// (neoforge's config/neoforge-common.toml). What a mod owns is in its own metadata file (see Mod.ConfigFiles); the
+	// entries are written the same way, a path or a path ending in "/" to claim everything under it, and "packwiz
+	// config relate" adds to them. An owner with nothing to claim is left out, rather than kept with an empty list.
+	ConfigFiles map[string][]string `toml:"config-files,omitempty"`
+}
+
+// ConfigOwnerPack is the owner of the config files that belong to the pack as a whole, rather than to a mod or to its
+// mod loader (see Pack.ConfigFiles): options.txt, for one.
+const ConfigOwnerPack = "pack"
+
+// LoaderName is how a mod loader is written for people, given its name as it is in a pack's versions.
+func LoaderName(loader string) string {
+	if loader == "neoforge" {
+		return "NeoForge"
+	}
+	return loader
+}
+
+// ConfigOwners lists who can own config files that no mod does (see Pack.ConfigFiles): the pack, then each mod loader it
+// has.
+func (pack Pack) ConfigOwners() []string {
+	return append([]string{ConfigOwnerPack}, pack.GetLoaders()...)
+}
+
+// IsConfigOwner reports whether owner is one that can own config files in this pack: the pack itself, or a mod loader
+// that it has.
+func (pack Pack) IsConfigOwner(owner string) bool {
+	return slices.Contains(pack.ConfigOwners(), owner)
+}
+
+// ConfigOwnerName is how an owner of config files is written for people: "Pack", the name of a loader, or an owner
+// that isn't one of these as it is written in the pack (see IsConfigOwner).
+func (pack Pack) ConfigOwnerName(owner string) string {
+	if owner == ConfigOwnerPack {
+		return "Pack"
+	}
+	return LoaderName(owner)
+}
+
+// ClaimConfigFile adds path to what owner's config files are, and reports whether it did: false if it was there.
+func (pack *Pack) ClaimConfigFile(owner, path string) bool {
+	if slices.Contains(pack.ConfigFiles[owner], path) {
+		return false
+	}
+	if pack.ConfigFiles == nil {
+		pack.ConfigFiles = make(map[string][]string)
+	}
+	pack.ConfigFiles[owner] = append(pack.ConfigFiles[owner], path)
+	return true
+}
+
+// UnclaimConfigFile takes path out of owner's config files, however many times it is there, and reports whether it was
+// there. An owner left with none is taken out, so pack.toml doesn't keep an empty list for it.
+func (pack *Pack) UnclaimConfigFile(owner, path string) bool {
+	if !slices.Contains(pack.ConfigFiles[owner], path) {
+		return false
+	}
+	pack.ConfigFiles[owner] = slices.DeleteFunc(pack.ConfigFiles[owner], func(entry string) bool { return entry == path })
+	if len(pack.ConfigFiles[owner]) == 0 {
+		delete(pack.ConfigFiles, owner)
+	}
+	return true
 }
 
 // CurrentPackFormat identifies packs created by this fork of packwiz. It is

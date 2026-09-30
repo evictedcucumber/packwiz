@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
@@ -22,9 +23,15 @@ func newLongApp(t *testing.T, width, height int) *app {
 	}
 	writeFile(t, "config/a-folder-with-a-long-name/another-long-folder-name/and-a-file-with-a-name-that-is-long-as-well.json", "{}")
 	writeFile(t, "config/orphan-with-a-long-name-so-that-it-cannot-fit-in-forty-columns.json", "{}")
+	// The pack and its loader own files too, which are drawn as groups of their own
+	withLoader(t)
+	writeFile(t, "options.txt", "x")
+	writeFile(t, "config/neoforge-with-a-long-name-so-that-it-cannot-fit-in-forty-columns-either.toml", "x")
 	if _, err := (packBackend{}).refresh(); err != nil {
 		t.Fatalf("refresh() returned error: %v", err)
 	}
+	claimInPack(t, core.ConfigOwnerPack, "options.txt")
+	claimInPack(t, "neoforge", "config/neoforge-with-a-long-name-so-that-it-cannot-fit-in-forty-columns-either.toml")
 	data, err := packBackend{}.load()
 	if err != nil {
 		t.Fatalf("load() returned error: %v", err)

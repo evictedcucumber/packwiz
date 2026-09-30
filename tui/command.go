@@ -25,18 +25,19 @@ var tuiCmd = &cobra.Command{
 	Short: "Open the interactive terminal interface",
 	Long: `Open an interactive interface for the pack in the current directory.
 
-It has the pack's config files: the same tree as "packwiz config list", of the mod that claims each file, with the files
-nothing claims under "Invalid". Move through it with the arrow keys (or j and k), fold a mod's files with the left and
-right arrow keys, and change which mod owns what:
+It has the pack's config files: the same tree as "packwiz config list", of the pack, its mod loader or the mod that claims
+each file, with the files nothing claims under "Invalid". Move through it with the arrow keys (or j and k), fold a group
+of files with the left and right arrow keys, and change who owns what:
 
-  r        relate the file the cursor is on (or every file that is marked) to one or more mods
-  x        stop a mod claiming a file, or take out an entry that matches no file
-  space    mark a file, to relate several together; on a mod, every file it claims
+  r        relate the file the cursor is on (or every file that is marked) to the pack, its mod loader or mods
+  x        stop an owner claiming a file, or take out an entry that matches no file
+  space    mark a file, to relate several together; on a group, every file in it
   f        show all files, then only the valid, the invalid or the missing ones
   R        refresh the index, so that files added or deleted since show up
 
-Relating writes what "packwiz config relate" does, and asks for the mods to give the files to, and whether to claim
-each file or the folder it is in. Press ? for all of the keys, and q to quit.
+Relating writes what "packwiz config relate" does, and asks who to give the files to: the pack as a whole (options.txt,
+say), its mod loader (NeoForge's own config files) and then the mods (type / to search them, fuzzily, as fzf does: "sdm"
+finds Sodium), and whether to claim each file or the folder it is in. Press ? for all of the keys, and q to quit.
 
 It needs a terminal to run in.`,
 	Args: cobra.NoArgs,

@@ -28,8 +28,9 @@ changes that would fix them, and ask before making any:
   - a mod that has no side is given one (both, which is what it is treated as having)
   - a mod that doesn't record its version has it recorded
   - a mod that doesn't have a config-files gets an empty one, ready for 'packwiz config relate' to fill in
-  - an entry in a mod's config-files that matches no file in the pack, such as one for a config file that has since
-    been deleted, is taken out (what is in the pack is what its index says, so run 'packwiz refresh' first)
+  - an entry in a mod's config-files, or in pack.toml's config-files for the pack or its mod loader, that matches no
+    file in the pack, such as one for a config file that has since been deleted, is taken out (what is in the pack is
+    what its index says, so run 'packwiz refresh' first)
 
 Everything else that is found needs a decision that only you can make, so it is left alone and reported. Once the
 changes are made the pack is checked again, and the command fails if any errors are left.
@@ -82,16 +83,26 @@ type fileChange struct {
 	removeConfigFiles []string
 }
 
+// packChange is entries of pack.toml's config-files, for the pack or its mod loader, to take out as they match no file in
+// the pack
+type packChange struct {
+	// owner is who they are for, as it is in pack.toml, and name that as it is written for people
+	owner, name string
+	remove      []string
+}
+
 // fixPlan is what fixing a pack would do
 type fixPlan struct {
 	// changes are the files it would make or change, in the order of their paths
 	changes []*fileChange
+	// packChanges are what it would change in pack.toml, in the order of the owners
+	packChanges []packChange
 	// skipped is what it could have done but couldn't, and why
 	skipped []string
 }
 
 func (p *fixPlan) empty() bool {
-	return len(p.changes) == 0
+	return len(p.changes) == 0 && len(p.packChanges) == 0
 }
 
 // runFix checks the pack, shows what could be done about what it finds, and makes those changes if it is told to. It
@@ -215,6 +226,9 @@ func planFixes(pack core.Pack, index core.Index, v *validation) *fixPlan {
 
 	for _, m := range v.missingConfigFiles {
 		changeOf(m.by.path, m.by.name).removeConfigFiles = m.entries
+	}
+	for _, m := range v.missingOwnerConfigFiles {
+		plan.packChanges = append(plan.packChanges, packChange{owner: m.owner, name: m.name, remove: m.entries})
 	}
 
 	plan.planVersions(v, changeOf)
@@ -355,6 +369,14 @@ func (p *fixPlan) print() {
 			fmt.Println("  " + line)
 		}
 	}
+	if len(p.packChanges) > 0 {
+		fmt.Println(ui.Bold.Sprint("pack.toml") + ":")
+		for _, c := range p.packChanges {
+			for _, entry := range c.remove {
+				fmt.Printf("  config-files: remove %s from %s, which matches no file in the pack\n", entry, c.name)
+			}
+		}
+	}
 	fmt.Println()
 }
 
@@ -399,8 +421,20 @@ func (p *fixPlan) apply(pack *core.Pack, index *core.Index) (int, error) {
 		changed++
 	}
 
-	// What was changed is saved even if something else wasn't, so that the index matches the files
-	if changed > 0 {
+	// What pack.toml claims for the pack and its loader is taken out of the pack, which is written below
+	packChanged := false
+	for _, c := range p.packChanges {
+		for _, entry := range c.remove {
+			if pack.UnclaimConfigFile(c.owner, entry) {
+				packChanged = true
+			}
+		}
+	}
+
+	// What was changed is saved even if something else wasn't, so that the index matches the files. The pack is saved
+	// with the index, whose hash it records, and when only it was changed, on its own
+	switch {
+	case changed > 0:
 		if err := index.Write(); err != nil {
 			errs = append(errs, err)
 		} else if err := pack.UpdateIndexHash(); err != nil {
@@ -408,6 +442,13 @@ func (p *fixPlan) apply(pack *core.Pack, index *core.Index) (int, error) {
 		} else if err := pack.Write(); err != nil {
 			errs = append(errs, err)
 		}
+	case packChanged:
+		if err := pack.Write(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if packChanged {
+		changed++
 	}
 	return changed, errors.Join(errs...)
 }

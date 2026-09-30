@@ -385,10 +385,8 @@ func (s *configScreen) openRelate() (screen, tea.Cmd) {
 	switch {
 	case len(subjects) == 0:
 		s.status = warningStatus("Nothing to relate here: move to a file or a group of files")
-	case len(s.data.mods) == 0:
-		s.status = warningStatus("The pack has no mods to relate config files to")
 	default:
-		s.open(newPicker(subjects, s.data.mods, s.data.configDir))
+		s.open(newPicker(subjects, s.data.owners, s.data.configDir))
 	}
 	return s, nil
 }
@@ -399,47 +397,56 @@ func (s *configScreen) openUnrelate() (screen, tea.Cmd) {
 		return s, nil
 	}
 	r, ok := s.current()
-	if !ok || r.mod == nil || r.kind == groupRow {
-		s.status = warningStatus("Nothing to unrelate here: move to a file that a mod claims")
+	if !ok || r.owner.kind == ownerNone || r.kind == groupRow {
+		s.status = warningStatus("Nothing to unrelate here: move to a file that something claims")
 		return s, nil
 	}
 
-	prompt := &unrelatePrompt{modPath: r.mod.GetFilePath(), modName: r.mod.Name}
+	prompt := &unrelatePrompt{owner: r.owner}
 	if r.kind == missingRow {
 		prompt.entries = []string{r.path}
 		prompt.lines = []string{r.path + ui.Muted.Sprint("  (matches no file in the pack)")}
 	} else {
-		prompt.entries = core.ClaimingEntries(r.mod, s.data.configDir, r.path)
+		prompt.entries = core.ClaimingEntries(r.owner.entries, s.data.configDir, r.path)
 		for _, entry := range prompt.entries {
 			line := entry
-			if n := s.coveredBy(r.mod, entry); n > 1 {
+			if n := s.coveredBy(r.owner, entry); n > 1 {
 				line += ui.Muted.Sprintf("  (covers %s)", count(n, "file", "files"))
 			}
 			prompt.lines = append(prompt.lines, line)
 		}
 	}
 	if len(prompt.entries) == 0 {
-		s.status = warningStatus("No entry of " + r.mod.Name + "'s config-files claims that file")
+		s.status = warningStatus("No entry of " + r.owner.name + "'s config-files claims that file")
 		return s, nil
 	}
 	s.open(prompt)
 	return s, nil
 }
 
-// coveredBy is how many of the tracked files that a mod claims one of its config-files entries claims.
-func (s *configScreen) coveredBy(mod *core.Mod, entry string) int {
-	for _, m := range s.data.tree.Mods {
-		if m.Mod == mod {
-			n := 0
-			for _, f := range m.Files {
-				if core.EntryClaims(entry, s.data.configDir, f) {
-					n++
-				}
+// coveredBy is how many of the tracked files that an owner claims one of its config-files entries claims.
+func (s *configScreen) coveredBy(o owner, entry string) int {
+	var files []string
+	if o.kind == ownerMod {
+		for _, m := range s.data.tree.Mods {
+			if m.Mod.GetFilePath() == o.id {
+				files = m.Files
 			}
-			return n
+		}
+	} else {
+		for _, x := range s.data.tree.Owners {
+			if x.Owner == o.id {
+				files = x.Files
+			}
 		}
 	}
-	return 0
+	n := 0
+	for _, f := range files {
+		if core.EntryClaims(entry, s.data.configDir, f) {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *configScreen) updateOverlay(msg tea.Msg) (screen, tea.Cmd) {
@@ -461,27 +468,34 @@ func (s *configScreen) updateOverlay(msg tea.Msg) (screen, tea.Cmd) {
 }
 
 func (s *configScreen) startRelate(p *picker) (screen, tea.Cmd) {
-	modPaths, modNames, entries := p.result()
+	owners, entries := p.result()
 	s.busy = "Saving…"
 	backend := s.backend
 	return s, func() tea.Msg {
-		result, err := backend.relate(modPaths, entries)
-		return changedMsg{text: relateSummary(result, modNames, entries), err: err}
+		result, err := backend.relate(owners, entries)
+		return changedMsg{text: relateSummary(result, owners, entries), err: err}
 	}
 }
 
 // relateSummary says what relating did.
-func relateSummary(result relateResult, modNames, entries []string) string {
+func relateSummary(result relateResult, owners []owner, entries []string) string {
 	switch {
 	case result.added == 0:
-		if len(modNames) == 1 {
-			return modNames[0] + " already claims " + entriesLine(entries)
+		if len(owners) == 1 {
+			return owners[0].name + " already claims " + entriesLine(entries)
 		}
 		return "Already claimed: nothing changed"
-	case len(modNames) == 1 && len(entries) == 1:
-		return modNames[0] + " now claims " + entries[0]
+	case len(owners) == 1 && len(entries) == 1:
+		return owners[0].name + " now claims " + entries[0]
 	}
-	text := fmt.Sprintf("Related %s to %s", count(len(entries), "entry", "entries"), count(len(modNames), "mod", "mods"))
+	// They are mods, unless the pack or its loader is among them
+	one, many := "mod", "mods"
+	for _, o := range owners {
+		if o.kind != ownerMod {
+			one, many = "owner", "owners"
+		}
+	}
+	text := fmt.Sprintf("Related %s to %s", count(len(entries), "entry", "entries"), count(len(owners), one, many))
 	if result.existing > 0 {
 		text += fmt.Sprintf(" (%d already claimed)", result.existing)
 	}
@@ -492,10 +506,10 @@ func (s *configScreen) startUnrelate(u *unrelatePrompt) (screen, tea.Cmd) {
 	s.busy = "Saving…"
 	backend := s.backend
 	return s, func() tea.Msg {
-		if err := backend.unrelate(u.modPath, u.entries); err != nil {
+		if err := backend.unrelate(u.owner, u.entries); err != nil {
 			return changedMsg{err: err}
 		}
-		return changedMsg{text: fmt.Sprintf("%s no longer claims %s", u.modName, entriesLine(u.entries))}
+		return changedMsg{text: fmt.Sprintf("%s no longer claims %s", u.owner.name, entriesLine(u.entries))}
 	}
 }
 
@@ -599,13 +613,13 @@ func (s *configScreen) renderRow(r row, selected bool) string {
 			arrow = "▸"
 		}
 		title := ui.Bold.Sprint(r.title)
-		if r.mod == nil {
+		if r.owner.kind == ownerNone {
 			title = ui.Bold.Sprint(ui.Warning.Sprint(r.title))
 		}
 		text = arrow + " " + title + " " + ui.Muted.Sprintf("(%d)", r.count)
 	case fileRow:
 		style := ui.Success
-		if r.mod == nil {
+		if r.owner.kind == ownerNone {
 			style = ui.Warning
 		}
 		text = ui.Muted.Sprint(branch(r.last)) + style.Sprint(r.path)

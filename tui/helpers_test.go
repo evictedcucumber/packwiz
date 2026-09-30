@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -262,20 +261,25 @@ type fakeBackend struct {
 	relateErr  error
 	refreshErr error
 	notices    []string
-	related    [][]string
-	unrelated  [][]string
-	refreshes  int
+	// related and unrelated are what relate and unrelate were called with: the keys of the owners, then the entries
+	related   [][]string
+	unrelated [][]string
+	refreshes int
 }
 
 func (f *fakeBackend) load() (configData, error) { return f.data, f.loadErr }
 
-func (f *fakeBackend) relate(modPaths, entries []string) (relateResult, error) {
-	f.related = append(f.related, append(slices.Clone(modPaths), entries...))
-	return relateResult{added: len(modPaths) * len(entries), mods: len(modPaths)}, f.relateErr
+func (f *fakeBackend) relate(owners []owner, entries []string) (relateResult, error) {
+	var call []string
+	for _, o := range owners {
+		call = append(call, o.key())
+	}
+	f.related = append(f.related, append(call, entries...))
+	return relateResult{added: len(owners) * len(entries), owners: len(owners)}, f.relateErr
 }
 
-func (f *fakeBackend) unrelate(modPath string, entries []string) error {
-	f.unrelated = append(f.unrelated, append([]string{modPath}, entries...))
+func (f *fakeBackend) unrelate(o owner, entries []string) error {
+	f.unrelated = append(f.unrelated, append([]string{o.key()}, entries...))
 	return nil
 }
 
@@ -292,4 +296,54 @@ func fakeMod(name, slug string, configFiles ...string) *core.Mod {
 	}
 	m.SetMetaPath("mods/" + slug + ".pw.toml")
 	return m
+}
+
+// fakeOwner makes a mod as an owner, as fakeMod makes it as a mod.
+func fakeOwner(name, slug string, configFiles ...string) owner {
+	return modOwner(fakeMod(name, slug, configFiles...))
+}
+
+// withLoader makes the pack that setUpPack made have the mod loader neoforge, which the pack and its loader are
+// owners of config files of.
+func withLoader(t *testing.T) {
+	t.Helper()
+	pack, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	pack.Versions["neoforge"] = "21.1.0"
+	if err := pack.Write(); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+}
+
+// packToml reads the pack's config-files, by owner, from pack.toml.
+func packToml(t *testing.T) map[string][]string {
+	t.Helper()
+	pack, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	return pack.ConfigFiles
+}
+
+// readFileQuiet reads a file as text, for a test that compares it.
+func readFileQuiet(name string) (string, error) {
+	data, err := os.ReadFile(name)
+	return string(data), err
+}
+
+// mustLoad loads what the config screen shows, for a test that needs some of it.
+func mustLoad(t *testing.T) configData {
+	t.Helper()
+	data, err := packBackend{}.load()
+	if err != nil {
+		t.Fatalf("load() returned error: %v", err)
+	}
+	return data
+}
+
+// windowSize is the message that tells a program how big its terminal is.
+func windowSize(width, height int) tea.WindowSizeMsg {
+	return tea.WindowSizeMsg{Width: width, Height: height}
 }
