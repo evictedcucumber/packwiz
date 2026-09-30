@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/fuzzy"
 )
 
 // rowTree is a tree of the kind core.Index.ConfigFileTree makes: two mods and a file that no mod claims. Alpha has two
@@ -41,7 +42,7 @@ func describe(rows []row) []string {
 }
 
 func TestBuildRowsShowsTheTreeThatConfigListPrints(t *testing.T) {
-	got := describe(buildRows(rowTree(), allStates, nil))
+	got := describe(buildRows(rowTree(), allStates, nil, fuzzy.Query{}))
 	want := []string{
 		"> Alpha", "config/a.json", "config/b.json", "missing:config/gone.json",
 		"> Beta", "missing:config/old.json",
@@ -64,7 +65,7 @@ func TestBuildRowsShowsOnlyWhatTheFilterAllows(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.filter.String(), func(t *testing.T) {
-			if got := describe(buildRows(rowTree(), tt.filter, nil)); !slices.Equal(got, tt.want) {
+			if got := describe(buildRows(rowTree(), tt.filter, nil, fuzzy.Query{})); !slices.Equal(got, tt.want) {
 				t.Errorf("rows = %v, want %v", got, tt.want)
 			}
 		})
@@ -72,13 +73,13 @@ func TestBuildRowsShowsOnlyWhatTheFilterAllows(t *testing.T) {
 }
 
 func TestBuildRowsOfNothingIsNothing(t *testing.T) {
-	if rows := buildRows(core.ConfigFileTree{}, allStates, nil); len(rows) != 0 {
+	if rows := buildRows(core.ConfigFileTree{}, allStates, nil, fuzzy.Query{}); len(rows) != 0 {
 		t.Errorf("rows = %v, want none", describe(rows))
 	}
 }
 
 func TestBuildRowsCountsAndMarksTheLastRowOfAGroup(t *testing.T) {
-	rows := buildRows(rowTree(), allStates, nil)
+	rows := buildRows(rowTree(), allStates, nil, fuzzy.Query{})
 	alpha := rows[0]
 	if alpha.count != 3 || alpha.folded {
 		t.Errorf("Alpha's group has count %d and folded %v, want 3 and false", alpha.count, alpha.folded)
@@ -96,7 +97,7 @@ func TestBuildRowsCountsAndMarksTheLastRowOfAGroup(t *testing.T) {
 
 // A group that is folded away keeps its files, as they are still its own: relating the group relates them
 func TestBuildRowsFoldedGroupHasOnlyItsHeadingButKeepsItsFiles(t *testing.T) {
-	rows := buildRows(rowTree(), allStates, map[string]bool{"mods/alpha.pw.toml": true, invalidGroup: true})
+	rows := buildRows(rowTree(), allStates, map[string]bool{"mods/alpha.pw.toml": true, invalidGroup: true}, fuzzy.Query{})
 	want := []string{"> Alpha (folded)", "> Beta", "missing:config/old.json", "> Invalid (folded)"}
 	if got := describe(rows); !slices.Equal(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
@@ -110,7 +111,7 @@ func TestBuildRowsFoldedGroupHasOnlyItsHeadingButKeepsItsFiles(t *testing.T) {
 }
 
 func TestBuildRowsGroupFilesAreOnlyFilesNotEntriesThatMatchNone(t *testing.T) {
-	rows := buildRows(rowTree(), allStates, nil)
+	rows := buildRows(rowTree(), allStates, nil, fuzzy.Query{})
 	if beta := rows[4]; beta.title != "Beta" || len(beta.files) != 0 {
 		t.Errorf("Beta's group is %+v, want one without files (its only entry matches none)", beta)
 	}
@@ -122,7 +123,7 @@ func TestBuildRowsKeysAreUniqueEvenForAFileThatTwoModsClaim(t *testing.T) {
 		{Mod: fakeMod("Beta", "beta"), Files: []string{"config/shared.json"}},
 	}}
 	seen := map[rowKey]bool{}
-	for _, r := range buildRows(tree, allStates, nil) {
+	for _, r := range buildRows(tree, allStates, nil, fuzzy.Query{}) {
 		if seen[r.key()] {
 			t.Errorf("two rows have the key %+v", r.key())
 		}
@@ -146,5 +147,84 @@ func TestCountStates(t *testing.T) {
 	got := countStates(rowTree())
 	if want := (stateCounts{valid: 2, invalid: 1, missing: 2}); got != want {
 		t.Errorf("countStates() = %+v, want %+v", got, want)
+	}
+}
+
+// Searching keeps the rows whose path, or whose group's name, has every word, fuzzily
+func TestBuildRowsWithASearchKeepsOnlyWhatMatches(t *testing.T) {
+	for _, tt := range []struct {
+		name, search string
+		want         []string
+	}{
+		{"a word in a path", "orph", []string{"> Invalid", "config/orphan.json"}},
+		// Characters in order, not together: a substring search wouldn't find it
+		{"fuzzily", "cfgorph", []string{"> Invalid", "config/orphan.json"}},
+		{"a word in a group's name finds everything in the group", "alpha", []string{"> Alpha", "config/a.json", "config/b.json", "missing:config/gone.json"}},
+		{"a word of each", "alpha gone", []string{"> Alpha", "missing:config/gone.json"}},
+		{"in either order", "gone alpha", []string{"> Alpha", "missing:config/gone.json"}},
+		{"a word of a path in a group", "alpha b.j", []string{"> Alpha", "config/b.json"}},
+		{"whatever the case", "ORPH", []string{"> Invalid", "config/orphan.json"}},
+		{"every word has to match", "orph alpha", nil},
+		{"nothing matches", "zzz", nil},
+		{"entries that match no file are searched too", "old", []string{"> Beta", "missing:config/old.json"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := describe(buildRows(rowTree(), allStates, nil, fuzzy.Parse(tt.search)))
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("rows = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildRowsWithASearchCountsAndListsOnlyWhatMatches(t *testing.T) {
+	rows := buildRows(rowTree(), allStates, nil, fuzzy.Parse("alpha b.j"))
+	if len(rows) != 2 || rows[0].count != 1 || !slices.Equal(rows[0].files, []string{"config/b.json"}) {
+		t.Errorf("rows = %+v, want a group of the one file that matches, which is what relating the group would relate", rows)
+	}
+	if !rows[1].last {
+		t.Error("the one row that matches isn't the last of its group")
+	}
+}
+
+func TestBuildRowsWithASearchSaysWhereItMatched(t *testing.T) {
+	rows := buildRows(rowTree(), allStates, nil, fuzzy.Parse("orph"))
+	file := rows[1]
+	if !slices.Equal(file.positions, []int{7, 8, 9, 10}) || file.score <= 0 {
+		t.Errorf("the file's positions are %v and its score %d, want orph in config/orphan.json to be shown", file.positions, file.score)
+	}
+	if len(rows[0].positions) != 0 {
+		t.Errorf("the group's positions are %v, want none: nothing matched its name", rows[0].positions)
+	}
+
+	// A word found in the name of the group is shown in the name, and not in the files that it finds
+	rows = buildRows(rowTree(), allStates, nil, fuzzy.Parse("alpha"))
+	if !slices.Equal(rows[0].positions, []int{0, 1, 2, 3, 4}) {
+		t.Errorf("the group's positions are %v, want its whole name", rows[0].positions)
+	}
+	if !slices.Equal(rows[3].positions, nil) || rows[3].path != "config/gone.json" && rows[3].path != "config/b.json" {
+		t.Errorf("row %+v: want a file that matched by its group's name to have nothing shown in its path", rows[3])
+	}
+}
+
+// A group that is folded hides what a search found, so a search shows it all, and it is folded again once it is gone
+func TestBuildRowsWithASearchIgnoresFolding(t *testing.T) {
+	folded := map[string]bool{"mods/alpha.pw.toml": true}
+	if got := describe(buildRows(rowTree(), allStates, folded, fuzzy.Query{})); !slices.Contains(got, "> Alpha (folded)") || slices.Contains(got, "config/a.json") {
+		t.Fatalf("rows = %v, want Alpha folded without a search", got)
+	}
+	got := describe(buildRows(rowTree(), allStates, folded, fuzzy.Parse("b.json")))
+	if want := []string{"> Alpha", "config/b.json"}; !slices.Equal(got, want) {
+		t.Errorf("rows = %v, want %v: the group isn't folded while there is a search", got, want)
+	}
+}
+
+func TestBuildRowsWithASearchAppliesToWhatTheStateFilterShows(t *testing.T) {
+	got := describe(buildRows(rowTree(), missingState, nil, fuzzy.Parse("alpha")))
+	if want := []string{"> Alpha", "missing:config/gone.json"}; !slices.Equal(got, want) {
+		t.Errorf("rows = %v, want %v: only what is missing, of what matches", got, want)
+	}
+	if got := describe(buildRows(rowTree(), validState, nil, fuzzy.Parse("orph"))); len(got) != 0 {
+		t.Errorf("rows = %v, want none: the file that matches isn't valid", got)
 	}
 }

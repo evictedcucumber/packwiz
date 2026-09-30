@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -767,5 +768,102 @@ func TestIndexSaveModWritesTheFileAndRecordsItsHash(t *testing.T) {
 	_, _ = h.Write(data)
 	if got := entry.(*indexFile).Hash; got != h.HashToString(h.Sum(nil)) {
 		t.Errorf("the index records hash %q, but the file's is %q", got, h.HashToString(h.Sum(nil)))
+	}
+}
+
+// searchFixture makes an index of mods that each have a metadata file with a name, at mods/<slug>.pw.toml
+func searchFixture(t *testing.T, mods map[string]string) *Index {
+	t.Helper()
+	dir := t.TempDir()
+	idx := &Index{HashFormat: "sha256", packRoot: dir, Files: IndexFiles{}}
+	for slug, name := range mods {
+		rel := "mods/" + slug + ".pw.toml"
+		mustWriteFile(t, filepath.Join(dir, filepath.FromSlash(rel)), modTOML(name, "", "", slug))
+		idx.Files[rel] = &indexFile{File: rel, MetaFile: true}
+	}
+	// A file that isn't a metadata file is never a mod, whatever it is called
+	idx.Files["mods/sodium-decoy.jar"] = &indexFile{File: "mods/sodium-decoy.jar"}
+	return idx
+}
+
+func slugsOf(matches []ModMatch) []string {
+	slugs := make([]string, len(matches))
+	for i, m := range matches {
+		slugs[i] = m.Slug
+	}
+	return slugs
+}
+
+func TestIndexSearchModsMatchesFuzzilyByNameOrSlug(t *testing.T) {
+	idx := searchFixture(t, map[string]string{
+		"sodium": "Sodium", "sodium-extra": "Sodium Extra", "iris": "Iris Shaders", "zzz-long-slug": "Plain",
+	})
+
+	for _, tt := range []struct {
+		text string
+		want []string
+	}{
+		{"sdm", []string{"sodium", "sodium-extra"}}, // characters in order, not together
+		{"sod ex", []string{"sodium-extra"}},        // every word, in any order
+		{"EXTRA sod", []string{"sodium-extra"}},
+		{"iris shaders", []string{"iris"}},      // by name, which isn't the slug
+		{"longslug", []string{"zzz-long-slug"}}, // by slug, when the name hasn't it
+		{"nothing", nil},
+	} {
+		got, err := idx.SearchMods(tt.text)
+		if err != nil {
+			t.Fatalf("SearchMods(%q) returned error: %v", tt.text, err)
+		}
+		if !slices.Equal(slugsOf(got), tt.want) {
+			t.Errorf("SearchMods(%q) = %v, want %v", tt.text, slugsOf(got), tt.want)
+		}
+	}
+}
+
+func TestIndexSearchModsGivesWhereTheModIsAndWhatItIsCalled(t *testing.T) {
+	idx := searchFixture(t, map[string]string{"sodium-extra": "Sodium Extra"})
+	got, err := idx.SearchMods("sodex")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("SearchMods() = %v, %v, want the one mod", got, err)
+	}
+	m := got[0]
+	if m.Name != "Sodium Extra" || m.Slug != "sodium-extra" || m.Path != idx.ResolveIndexPath("mods/sodium-extra.pw.toml") || m.Score <= 0 {
+		t.Errorf("match = %+v, want the mod's name, slug and file, and a score", m)
+	}
+}
+
+// The best match is first, then the shorter name, then the file, which is what makes the order the same every time although
+// the index is a map
+func TestIndexSearchModsIsOrderedBestFirstAndAlwaysTheSame(t *testing.T) {
+	idx := searchFixture(t, map[string]string{
+		"amod": "Amod", "zed": "Zed Mod", // the start of a word is a better match than the middle of one
+		"b": "B Sodium", "a": "A Sodium Plus", // as good, so the shorter name
+		"c2": "Sodium C", "c1": "Sodium C", // as good and as long, so the file
+	})
+	if got, _ := idx.SearchMods("mod"); !slices.Equal(slugsOf(got), []string{"zed", "amod"}) {
+		t.Errorf("mod finds %v, want the better match first", slugsOf(got))
+	}
+	for range 20 { // a map is in a different order each time
+		got, _ := idx.SearchMods("sodium")
+		if !slices.Equal(slugsOf(got), []string{"b", "c1", "c2", "a"}) {
+			t.Fatalf("sodium finds %v, want the shorter names first, and the files in order when they are the same", slugsOf(got))
+		}
+	}
+}
+
+func TestIndexSearchModsFindsNothingByNothing(t *testing.T) {
+	idx := searchFixture(t, map[string]string{"sodium": "Sodium"})
+	for _, text := range []string{"", "   "} {
+		if got, err := idx.SearchMods(text); err != nil || len(got) != 0 {
+			t.Errorf("SearchMods(%q) = %v, %v, want nothing: there is nothing to search for", text, got, err)
+		}
+	}
+}
+
+func TestIndexSearchModsFailsForAMetadataFileThatCantBeRead(t *testing.T) {
+	idx := searchFixture(t, map[string]string{"sodium": "Sodium"})
+	idx.Files["mods/gone.pw.toml"] = &indexFile{File: "mods/gone.pw.toml", MetaFile: true}
+	if _, err := idx.SearchMods("sod"); err == nil || !strings.Contains(err.Error(), "gone.pw.toml") {
+		t.Errorf("SearchMods() returned %v, want an error that says which file couldn't be read", err)
 	}
 }

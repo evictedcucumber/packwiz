@@ -16,6 +16,7 @@ import (
 var UpdateCmd = &cobra.Command{
 	Use:     "update [name]",
 	Short:   "Update an external file (or all external files) in the modpack",
+	Long:    "Update an external file, or all of them with --all.\n\n" + modRefHelp,
 	Aliases: []string{"upgrade"},
 	Args:    cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -144,11 +145,7 @@ var UpdateCmd = &cobra.Command{
 				ui.Error.Println("Must specify a valid file, or use the --all flag!")
 				os.Exit(1)
 			}
-			modPath, ok := index.FindMod(args[0])
-			if !ok {
-				ui.Error.Println("Can't find this file; please ensure you have run packwiz refresh and specify its slug, its .pw.toml file name, or a path to that file")
-				os.Exit(1)
-			}
+			modPath := findMod(index, args[0])
 			modData, err := core.LoadMod(modPath)
 			if err != nil {
 				ui.Error.Println(err)

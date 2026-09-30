@@ -132,7 +132,8 @@ combination. A folder is given a trailing "/", to claim everything under it; run
 does nothing more.
 
 --mod is its slug (unless it was renamed), the name of its .pw.toml file, or a path to that file, the same as
-"packwiz mr pin" and "packwiz remove" take; give it once per mod, and it is added to that file's config-files. A config
+"packwiz mr pin" takes, including a part of a name if that is no mod's (see "packwiz mr pin --help"); give it once per mod,
+and it is added to that file's config-files. A config
 file shared between several mods can be related to all of them in one command. --loader is for the loader's own files,
 such as NeoForge's config/neoforge-common.toml, and --pack for what belongs to no mod or loader, such as options.txt:
 both are added to pack.toml's [config-files], under "pack" or the name of the loader.
@@ -179,11 +180,7 @@ exist, the same way every other config-files entry is.`,
 		var relatedMods []*core.Mod
 		seenModPaths := make(map[string]bool, len(modRefs))
 		for _, ref := range modRefs {
-			modPath, ok := index.FindMod(ref)
-			if !ok {
-				ui.Error.Printf("Can't find %s; please ensure you have run packwiz refresh and specify its slug, its .pw.toml file name, or a path to that file\n", ui.Bold.Sprint(ref))
-				os.Exit(1)
-			}
+			modPath := findMod(index, ref)
 			if seenModPaths[modPath] {
 				continue
 			}

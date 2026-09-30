@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/fuzzy"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
@@ -30,11 +31,15 @@ var (
 	keyRelate   = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "relate"))
 	keyUnrelate = key.NewBinding(key.WithKeys("x", "delete"), key.WithHelp("x", "unrelate"))
 	keyFilter   = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter"))
+	keySearch   = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search"))
 	keyRefresh  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh index"))
 )
 
 // configKeys are the bindings of the config screen, in the order they are shown in help.
-var configKeys = []key.Binding{keyRelate, keyUnrelate, keyMark, keyFilter, keyRefresh, keyEnter, keyFold, keyUp, keyTop, keyUnmark}
+var configKeys = []key.Binding{keyRelate, keyUnrelate, keyMark, keySearch, keyFilter, keyRefresh, keyEnter, keyFold, keyUp, keyTop, keyUnmark}
+
+// searchKeys are the bindings while a search is being typed.
+var searchKeys = []key.Binding{keyFilterDone, keyFilterClear, keyPickerMove}
 
 // loadedMsg is the pack's config files having been read again.
 type loadedMsg struct {
@@ -63,6 +68,10 @@ type configScreen struct {
 	data    configData
 
 	filter stateFilter
+	// search is what is being searched for, which leaves only the files that match it (see buildRows), and searching is
+	// whether it is being typed, when keys go to it rather than being commands
+	search    input
+	searching bool
 	// folded are the groups that are folded away, by id
 	folded map[string]bool
 	// marked are the files picked to be related together, by path
@@ -90,11 +99,14 @@ func (s *configScreen) title() string { return "Config" }
 
 func (s *configScreen) init() tea.Cmd { return nil }
 
-func (s *configScreen) modal() bool { return s.overlay != nil }
+func (s *configScreen) modal() bool { return s.overlay != nil || s.searching }
 
 func (s *configScreen) keys() []key.Binding {
 	if s.overlay != nil {
 		return s.overlay.keys()
+	}
+	if s.searching {
+		return searchKeys
 	}
 	return configKeys
 }
@@ -126,11 +138,32 @@ func (s *configScreen) current() (row, bool) {
 	return s.rows[s.cursor], true
 }
 
-// rebuild makes the rows again, from the data, the filter and what is folded, keeping the cursor on the row it was on.
+// rebuild makes the rows again, from the data, the filter, the search and what is folded, keeping the cursor on the row
+// it was on.
 func (s *configScreen) rebuild() {
 	prev, had := s.current()
-	s.rows = buildRows(s.data.tree, s.filter, s.folded)
+	s.rows = buildRows(s.data.tree, s.filter, s.folded, fuzzy.Parse(s.search.String()))
 	s.cursor = s.locate(prev, had)
+	s.clampScroll()
+}
+
+// rebuildForSearch is rebuild for when what is searched for has changed: the cursor goes to the file that matches it
+// best, as that is the one that is being looked for, and it is where relating and marking start from. The first of the
+// files that match as well as each other is the one, so that the cursor doesn't move about among them. With nothing
+// searched for any more it is where it was.
+func (s *configScreen) rebuildForSearch() {
+	if s.search.empty() {
+		s.rebuild()
+		return
+	}
+	s.rows = buildRows(s.data.tree, s.filter, s.folded, fuzzy.Parse(s.search.String()))
+	best := -1
+	for i, r := range s.rows {
+		if r.kind != groupRow && (best < 0 || r.score > s.rows[best].score) {
+			best = i
+		}
+	}
+	s.cursor = max(best, 0)
 	s.clampScroll()
 }
 
@@ -213,6 +246,9 @@ func (s *configScreen) update(msg tea.Msg) (screen, tea.Cmd) {
 		if s.overlay != nil {
 			return s.updateOverlay(msg)
 		}
+		if s.searching && s.search.handle(msg) {
+			s.rebuildForSearch()
+		}
 	}
 	return s, nil
 }
@@ -248,6 +284,9 @@ func (s *configScreen) loadCmd() tea.Cmd {
 
 func (s *configScreen) updateKey(msg tea.KeyPressMsg) (screen, tea.Cmd) {
 	s.status = status{}
+	if s.searching {
+		return s.updateSearching(msg)
+	}
 	switch {
 	case key.Matches(msg, keyUp):
 		s.move(-1)
@@ -274,10 +313,16 @@ func (s *configScreen) updateKey(msg tea.KeyPressMsg) (screen, tea.Cmd) {
 	case key.Matches(msg, keyMark):
 		s.mark()
 	case key.Matches(msg, keyUnmark):
-		if n := len(s.marked); n > 0 {
+		// A search that is left on goes first, as it is what is in the way of the tree
+		if !s.search.empty() {
+			s.search.clear()
+			s.rebuild()
+		} else if n := len(s.marked); n > 0 {
 			clear(s.marked)
 			s.status = infoStatus(fmt.Sprintf("Unmarked %s", count(n, "file", "files")))
 		}
+	case key.Matches(msg, keySearch):
+		s.searching = true
 	case key.Matches(msg, keyRelate):
 		return s.openRelate()
 	case key.Matches(msg, keyUnrelate):
@@ -288,6 +333,36 @@ func (s *configScreen) updateKey(msg tea.KeyPressMsg) (screen, tea.Cmd) {
 		s.status = infoStatus("Showing " + s.filter.String())
 	case key.Matches(msg, keyRefresh):
 		return s.startRefresh()
+	}
+	return s, nil
+}
+
+// updateSearching handles a key while a search is being typed: text goes into it, and what matches is shown as it does;
+// the arrow keys move through what matches, enter leaves what was typed as the search, and esc takes it away.
+func (s *configScreen) updateSearching(msg tea.KeyPressMsg) (screen, tea.Cmd) {
+	switch {
+	case key.Matches(msg, keyFilterClear):
+		s.search.clear()
+		s.searching = false
+		s.rebuild()
+	case key.Matches(msg, keyFilterDone):
+		s.searching = false
+	case key.Matches(msg, keyMoveUp, keyMoveDown, keyPageUp, keyPageDown) && msg.Key().Text == "":
+		// Only the keys that aren't text move, as j and k are letters of a name here
+		switch {
+		case key.Matches(msg, keyMoveUp):
+			s.move(-1)
+		case key.Matches(msg, keyMoveDown):
+			s.move(1)
+		case key.Matches(msg, keyPageUp):
+			s.move(-s.listHeight())
+		default:
+			s.move(s.listHeight())
+		}
+	default:
+		if s.search.handle(msg) {
+			s.rebuildForSearch()
+		}
 	}
 	return s, nil
 }
@@ -557,10 +632,17 @@ func (s *configScreen) summary() string {
 }
 
 func (s *configScreen) statusLine() string {
-	if s.busy != "" {
+	switch {
+	case s.busy != "":
 		return ui.Muted.Sprint(s.busy)
+	case s.status.text != "":
+		return s.status.render()
+	case s.searching:
+		return ui.Bold.Sprint("/") + " " + s.search.String() + ui.Muted.Sprint("█")
+	case !s.search.empty():
+		return ui.Bold.Sprint("/") + " " + s.search.String() + ui.Muted.Sprint("  (esc clears)")
 	}
-	return s.status.render()
+	return ""
 }
 
 // listLines are the lines between the summary and the status: the tree, or the box that is open over it. There are
@@ -584,6 +666,12 @@ func (s *configScreen) listLines() []string {
 }
 
 func (s *configScreen) emptyMessage() []string {
+	if !s.search.empty() {
+		return []string{
+			ui.Muted.Sprint("No config file matches " + fmt.Sprintf("%q", s.search.String()) + "."),
+			ui.Muted.Sprint("esc clears the search."),
+		}
+	}
 	if s.filter == allStates {
 		return []string{
 			ui.Muted.Sprint("No config files are tracked in this pack."),
@@ -612,9 +700,10 @@ func (s *configScreen) renderRow(r row, selected bool) string {
 		if r.folded {
 			arrow = "▸"
 		}
-		title := ui.Bold.Sprint(r.title)
+		// What a search found in the name is picked out
+		title := ui.Bold.Sprint(highlight(r.title, r.positions, ui.Info))
 		if r.owner.kind == ownerNone {
-			title = ui.Bold.Sprint(ui.Warning.Sprint(r.title))
+			title = ui.Bold.Sprint(ui.Warning.Sprint(highlight(r.title, r.positions, ui.Info)))
 		}
 		text = arrow + " " + title + " " + ui.Muted.Sprintf("(%d)", r.count)
 	case fileRow:
@@ -622,9 +711,9 @@ func (s *configScreen) renderRow(r row, selected bool) string {
 		if r.owner.kind == ownerNone {
 			style = ui.Warning
 		}
-		text = ui.Muted.Sprint(branch(r.last)) + style.Sprint(r.path)
+		text = ui.Muted.Sprint(branch(r.last)) + style.Sprint(highlight(r.path, r.positions, ui.Info))
 	case missingRow:
-		text = ui.Muted.Sprint(branch(r.last)) + ui.Warning.Sprint(r.path+" (missing)")
+		text = ui.Muted.Sprint(branch(r.last)) + ui.Warning.Sprint(highlight(r.path, r.positions, ui.Info)+" (missing)")
 	}
 
 	line := cursor + mark + text

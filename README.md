@@ -26,7 +26,8 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - `packwiz list --save` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
 - `packwiz validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz fix` fixes what it can, showing the changes and asking first
 - `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, or the mod loader (NeoForge's own config) or the pack as a whole (`options.txt`), and `packwiz validate` checks the same
-- `packwiz tui` opens an interface in the terminal, for now for config files: the same tree as `packwiz config list`, with keys to relate a file to the pack, its mod loader or the mods that own it, or take a claim out again
+- `packwiz tui` opens an interface in the terminal, for now for config files: the same tree as `packwiz config list`, which it searches fuzzily, with keys to relate a file to the pack, its mod loader or the mods that own it, or take a claim out again
+- A mod can be named by a part of its name on the command line (`packwiz mr pin sdm`), searched for fuzzily the way fzf does, and the TUI's searches work the same way
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
 - Configured Defaults support: a pack that has the mod keeps its config, and any other default files, in `configureddefaults/`
@@ -208,6 +209,21 @@ A folder is given a trailing `/` automatically. If the pack has Configured Defau
 
 Every mod gets an empty `config-files = []` when it is added with `packwiz mr add`, and `packwiz fix` adds one to any mod that doesn't have one yet, so a `.pw.toml` file always shows the field is there to fill in with `packwiz config relate`.
 
+## Naming a mod
+
+The commands that take a mod - `packwiz mr pin`, `unpin`, `mark-dependency`, `unmark-dependency` and `update`, and `packwiz config relate --mod` - take it by its slug (the name of its `.pw.toml` file without the extension), that file name, or a path to it. If that is no mod's, what you typed is searched for in the names and slugs of the mods, fuzzily, the way fzf searches: its characters only have to be in order, and several words all have to be found, in any order, so `sdm` is Sodium and `sod ex` is Sodium Extra. Case doesn't matter.
+
+```
+$ packwiz mr pin sodex
+sodex isn't the name of a mod, so using Sodium Extra (sodium-extra), which it matches
+sodex pinned successfully!
+
+$ packwiz mr pin sdm
+"sdm" matches several mods, and it isn't clear which is meant: Sodium (sodium), Sodium Extra (sodium-extra); specify its slug, its .pw.toml file name, or a path to that file
+```
+
+What is searched for is only used if exactly one mod matches, and you are told which it was; if several do, none is chosen, as acting on the wrong mod is worse than asking again, and they are listed. A name that is exactly a mod's is always that mod, even if it is also part of the name of another. A path that isn't there is a mistake and isn't searched for. Nothing that worked before works differently: this only takes the place of the "Can't find" error.
+
 ## Terminal interface
 
 `packwiz tui` opens an interface for the pack in the current directory, in the terminal's alternate screen, so it leaves what was there when you quit. For now it has one screen, for the pack's config files: the tree that `packwiz config list` prints, which you move through instead of reading, and change while you are there.
@@ -218,10 +234,13 @@ Every mod gets an empty `config-files = []` when it is added with `packwiz mr ad
 | `←` `→` (or `h` `l`), `enter` on a mod | fold and unfold what a mod owns; `←` from a file goes to its mod |
 | `r` (or `enter` on a file) | relate the file to the pack, its mod loader or mods |
 | `x` | take an owner's claim on a file out, or an entry that matches no file |
-| `space`, `esc` | mark a file, to relate several together (on a mod or "Invalid", every file in it); `esc` unmarks them all |
+| `space`, `esc` | mark a file, to relate several together (on a mod or "Invalid", every file in it); `esc` clears a search that is left on, and then unmarks everything |
+| `/` | search the tree, fuzzily: only the files that match are shown, and the cursor goes to the best match |
 | `f` | show all files, then only the valid, the invalid and the missing ones, as `--state` does |
 | `R` | refresh the index, so files added or deleted since show up |
 | `?`, `q` | all of the keys, and quit |
+
+`/` searches the files as `r` searches the mods, below: type to narrow the tree to what matches, the arrow keys move through it while you type, `enter` leaves the search on and makes the keys commands again, and `esc` clears it. Each word has to be in a file's path or in the name of what owns it, so `sodium json` finds Sodium's json files and `sodium` all of its files; a group that was folded is shown in full while you search, and what `space` marks on a group is only what matched. The letters that matched are picked out.
 
 `r` asks who to give the file to, the pack and the loader first ("Pack" is the pack as a whole, for `options.txt` and the like; the loader is NeoForge) and then the mods: type `/` to search them, `space` picks one, and `enter` relates the file to what is picked, or to the mod under the cursor if none is. The search is fuzzy, the way fzf's is, and nothing has to be installed for it: `sdm` finds Sodium, letters only have to be in order, several words (`sod ex`) all have to match in any order, case doesn't matter, and the mod's slug is searched too when its name doesn't match. The best match is first, so `enter` takes it, and the letters that matched are picked out. Several can be picked for a file they share. `tab` switches between claiming the file and claiming the folder it is in, and what would be written to each one's `config-files` is shown above the list. Marked files are related together, and an owner that already claims everything being related is labelled as such. `x` shows the entry that would be taken out, and how many files it covers if it is a folder, and asks before doing it.
 

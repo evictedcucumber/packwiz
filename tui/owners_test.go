@@ -8,6 +8,7 @@ import (
 
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
+	"github.com/evictedcucumber/packwiz/internal/fuzzy"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
@@ -62,7 +63,7 @@ func TestBuildRowsHasThePackAndItsLoaderBeforeTheMods(t *testing.T) {
 		Mods:      []core.ModConfigFiles{{Mod: fakeMod("Alpha", "alpha"), Files: []string{"config/alpha.json"}}},
 		Unclaimed: []string{"config/orphan.json"},
 	}
-	got := describe(buildRows(tree, allStates, nil))
+	got := describe(buildRows(tree, allStates, nil, fuzzy.Query{}))
 	want := []string{
 		"> Pack", "options.txt",
 		"> NeoForge", "config/a.toml", "missing:config/gone.toml",
@@ -74,10 +75,10 @@ func TestBuildRowsHasThePackAndItsLoaderBeforeTheMods(t *testing.T) {
 	}
 
 	// The filter applies to them as it does to the mods
-	if got, want := describe(buildRows(tree, missingState, nil)), []string{"> NeoForge", "missing:config/gone.toml"}; !slices.Equal(got, want) {
+	if got, want := describe(buildRows(tree, missingState, nil, fuzzy.Query{})), []string{"> NeoForge", "missing:config/gone.toml"}; !slices.Equal(got, want) {
 		t.Errorf("missing: rows = %v, want %v", got, want)
 	}
-	if got, want := describe(buildRows(tree, invalidState, nil)), []string{"> Invalid", "config/orphan.json"}; !slices.Equal(got, want) {
+	if got, want := describe(buildRows(tree, invalidState, nil, fuzzy.Query{})), []string{"> Invalid", "config/orphan.json"}; !slices.Equal(got, want) {
 		t.Errorf("invalid: rows = %v, want %v", got, want)
 	}
 
@@ -95,7 +96,7 @@ func TestBuildRowsGiveEachOwnerItsKindAndWhatItClaims(t *testing.T) {
 		Mods:      []core.ModConfigFiles{{Mod: fakeMod("Alpha", "alpha", "config/x"), Files: []string{"config/x"}}},
 		Unclaimed: []string{"config/orphan.json"},
 	}
-	rows := buildRows(tree, allStates, nil)
+	rows := buildRows(tree, allStates, nil, fuzzy.Query{})
 	kinds := map[string]ownerKind{}
 	for _, r := range rows {
 		if r.kind == groupRow {

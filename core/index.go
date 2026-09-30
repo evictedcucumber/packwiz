@@ -7,10 +7,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/evictedcucumber/packwiz/internal/fuzzy"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	gitignore "github.com/sabhiram/go-gitignore"
 	"github.com/spf13/viper"
@@ -384,6 +386,48 @@ func (in Index) FindMod(modName string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// ModMatch is a mod that some text fuzzily matches (see Index.SearchMods).
+type ModMatch struct {
+	// Path is where the mod's metadata file is, as FindMod gives it
+	Path string
+	// Name is the mod's name, and Slug the name of its metadata file without its extension
+	Name, Slug string
+	// Score is how well the text matched, which is higher the better
+	Score int
+}
+
+// SearchMods finds the mods that text matches fuzzily (see package fuzzy) in their name or else their slug, the best
+// match first: characters only have to be in order, several words all have to be found, and case doesn't matter. Of
+// matches that are as good the one with the shorter name is first, as fzf has it, and then the one whose file comes first,
+// so that the order is always the same. It is for when FindMod finds nothing: nothing is found by nothing.
+func (in Index) SearchMods(text string) ([]ModMatch, error) {
+	query := fuzzy.Parse(text)
+	if query.Empty() {
+		return nil, nil
+	}
+	var matches []ModMatch
+	for _, p := range in.getAllMods() {
+		mod, err := LoadMod(p)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read metadata file %s: %w", p, err)
+		}
+		slug := trimMetaExtension(filepath.Base(p))
+		if m, ok := query.Match(mod.Name, slug); ok {
+			matches = append(matches, ModMatch{Path: p, Name: mod.Name, Slug: slug, Score: m.Score})
+		}
+	}
+	slices.SortFunc(matches, func(a, b ModMatch) int {
+		if a.Score != b.Score {
+			return b.Score - a.Score
+		}
+		if an, bn := len([]rune(a.Name)), len([]rune(b.Name)); an != bn {
+			return an - bn
+		}
+		return strings.Compare(a.Path, b.Path)
+	})
+	return matches, nil
 }
 
 // getAllMods finds paths to every metadata file (Mod) in the index

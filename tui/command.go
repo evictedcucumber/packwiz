@@ -32,6 +32,7 @@ of files with the left and right arrow keys, and change who owns what:
   r        relate the file the cursor is on (or every file that is marked) to the pack, its mod loader or mods
   x        stop an owner claiming a file, or take out an entry that matches no file
   space    mark a file, to relate several together; on a group, every file in it
+  /        search the files, fuzzily: only those that match are shown, and the cursor goes to the best
   f        show all files, then only the valid, the invalid or the missing ones
   R        refresh the index, so that files added or deleted since show up
 

@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/fuzzy"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
@@ -129,16 +130,16 @@ func (p *picker) canChooseScope() bool {
 // owner in the order they are in; with a filter it is those that it matches fuzzily, the best match first, and of matches
 // that are as good the shorter name, as fzf orders them.
 func (p *picker) refilter() {
-	q := parseQuery(p.filter.String())
+	q := fuzzy.Parse(p.filter.String())
 	p.visible = p.visible[:0]
 	for _, o := range p.owners {
-		if q.empty() {
+		if q.Empty() {
 			p.visible = append(p.visible, pickerEntry{owner: o})
 		} else if e, ok := matchOwner(q, o); ok {
 			p.visible = append(p.visible, e)
 		}
 	}
-	if !q.empty() {
+	if !q.Empty() {
 		slices.SortStableFunc(p.visible, func(a, b pickerEntry) int {
 			if a.score != b.score {
 				return b.score - a.score
@@ -151,22 +152,12 @@ func (p *picker) refilter() {
 
 // matchOwner matches a query against an owner, which it has to do for every word of it, each against the owner's name or,
 // if that doesn't have it, its slug.
-func matchOwner(q query, o owner) (pickerEntry, bool) {
-	e := pickerEntry{owner: o}
-	for _, term := range q.terms {
-		if score, positions, ok := matchTerm(term, o.name); ok {
-			e.score += score
-			e.namePositions = append(e.namePositions, positions...)
-		} else if score, positions, ok := matchTerm(term, o.slug); ok {
-			e.score += score
-			e.slugPositions = append(e.slugPositions, positions...)
-		} else {
-			return pickerEntry{}, false
-		}
+func matchOwner(q fuzzy.Query, ow owner) (pickerEntry, bool) {
+	m, ok := q.Match(ow.name, ow.slug)
+	if !ok {
+		return pickerEntry{}, false
 	}
-	e.namePositions = mergePositions(e.namePositions)
-	e.slugPositions = mergePositions(e.slugPositions)
-	return e, true
+	return pickerEntry{owner: ow, score: m.Score, namePositions: m.Positions[0], slugPositions: m.Positions[1]}, true
 }
 
 // claimsAll is whether an owner's config-files has all of the entries already.

@@ -20,11 +20,7 @@ func markModAsDependency(args []string, isDependency bool) {
 		ui.Error.Println(err)
 		os.Exit(1)
 	}
-	modPath, ok := index.FindMod(args[0])
-	if !ok {
-		ui.Error.Println("Can't find this file; please ensure you have run packwiz refresh and specify its slug, its .pw.toml file name, or a path to that file")
-		os.Exit(1)
-	}
+	modPath := findMod(index, args[0])
 	modData, err := core.LoadMod(modPath)
 	if err != nil {
 		ui.Error.Println(err)
@@ -68,6 +64,7 @@ func markModAsDependency(args []string, isDependency bool) {
 var MarkDependencyCmd = &cobra.Command{
 	Use:   "mark-dependency",
 	Short: "Mark a mod as having been added as a dependency of another mod, rather than a main mod",
+	Long:  "Mark a mod as having been added as a dependency of another mod, rather than a main mod.\n\n" + modRefHelp,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		markModAsDependency(args, true)
@@ -78,6 +75,7 @@ var MarkDependencyCmd = &cobra.Command{
 var UnmarkDependencyCmd = &cobra.Command{
 	Use:   "unmark-dependency",
 	Short: "Mark a mod as a main mod, rather than a dependency of another mod",
+	Long:  "Mark a mod as a main mod, rather than a dependency of another mod.\n\n" + modRefHelp,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		markModAsDependency(args, false)

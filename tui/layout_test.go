@@ -53,6 +53,12 @@ var states = map[string][]string{
 	"a prompt":            {"j", "x"},
 	"help":                {"?"},
 	"marked files":        {"G", "space", "k", "space"},
+	// The search is a line of its own below the tree, and what matched is picked out in it
+	"a search being typed":        {"/", "o", "r", "p"},
+	"a search that is left on":    {"/", "j", "s", "o", "n", "enter"},
+	"a search of a long name":     {"/", "l", "o", "n", "g"},
+	"a search that finds nothing": {"/", "z", "z", "z"},
+	"a search of a group's name":  {"/", "a", "l", "p", "h", "a"},
 }
 
 func TestEverythingDrawnFitsTheTerminal(t *testing.T) {
