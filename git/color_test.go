@@ -69,8 +69,8 @@ func TestCommitSaysWhatItCommittedInGreen(t *testing.T) {
 	out := commit(t)
 
 	want := ui.Success.Sprint("Committed:") + " chore(pack): initial commit\n"
-	if !strings.HasSuffix(cmdtest.WithoutProgress(out), want) {
-		t.Errorf("output = %q, want it to end with %q", out, want)
+	if !strings.Contains(cmdtest.WithoutProgress(out), want) {
+		t.Errorf("output = %q, want it to have %q", out, want)
 	}
 	// Colour is for the terminal: what was committed has none of it
 	if message := headMessage(t); strings.Contains(message, "\x1b") {

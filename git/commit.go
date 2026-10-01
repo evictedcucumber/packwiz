@@ -21,6 +21,9 @@ type commitStep struct {
 	// change is the change the commit is for: a mod or a config file. The last commit, which takes what changed
 	// without being a change to either, is for none.
 	change *changelog.Change
+	// initial is whether this is the repository's first commit, which holds only the pack, with an index that has no
+	// files in it yet: they are committed on their own after it, as in any other commit.
+	initial bool
 	// path is the file the commit is for, if it is a file packwiz doesn't track that is in a category (see
 	// core.FileCategories). Such a commit holds that file alone, with no index or pack.toml, as the pack doesn't change.
 	path string
@@ -87,19 +90,15 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 	if err != nil {
 		return committer{}, nil, err
 	}
-	if !hasCommits {
-		// The repository's first commit takes the whole pack: there is nothing before it for the pack to have changed from
-		d, err := c.dirty(nil)
+	if hasCommits {
+		c.head, err = r.packAt("HEAD", indexPath, c.packPath)
 		if err != nil {
-			return committer{}, nil, err
+			return committer{}, nil, fmt.Errorf("failed to read the pack as of the last commit: %w", err)
 		}
-		c.unknown, c.initial = d.unknown, true
-		return c, []commitStep{{message: InitialMessage}}, nil
-	}
-
-	c.head, err = r.packAt("HEAD", indexPath, c.packPath)
-	if err != nil {
-		return committer{}, nil, fmt.Errorf("failed to read the pack as of the last commit: %w", err)
+	} else {
+		// There is nothing before the first commit for the pack to have changed from, so every mod and file is added in a
+		// commit of its own after one that holds just the pack
+		c.initial = true
 	}
 	changes := changelog.Diff(c.head.Snapshot, current)
 	rest, d, err := c.changedBeyond(changes)
@@ -111,7 +110,11 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 	if err != nil {
 		return committer{}, nil, err
 	}
-	return c, planCommits(changes, others, rest), nil
+	steps := planCommits(changes, others, rest)
+	if c.initial {
+		steps = append([]commitStep{{message: InitialMessage, initial: true}}, steps...)
+	}
+	return c, steps, nil
 }
 
 // runCommit commits every change to the files the pack tracks: one commit for each mod or file that was added, updated,
@@ -228,7 +231,7 @@ type committer struct {
 	unclaimed []string
 	// categories sort the files that packwiz doesn't track (see core.FileCategoriesFile)
 	categories core.FileCategories
-	// initial is whether this is the repository's first commit, which takes every file of the pack, in a category or not
+	// initial is whether the repository has no commits yet, so there is an initial commit to make first
 	initial bool
 }
 
@@ -321,9 +324,12 @@ func (c committer) categorisedSteps(files []categorisedFile) ([]commitStep, erro
 	if len(files) == 0 {
 		return nil, nil
 	}
-	inHead, err := c.r.filesAt("HEAD")
-	if err != nil {
-		return nil, err
+	inHead := map[string]bool{}
+	if !c.initial {
+		var err error
+		if inHead, err = c.r.filesAt("HEAD"); err != nil {
+			return nil, err
+		}
 	}
 	var steps []commitStep
 	for _, f := range files {
@@ -403,7 +409,7 @@ func pronoun(n int, one, many string) string {
 // changedBeyond reports whether anything other than the commits for changes would be left to commit among the files
 // packwiz recognises: files that changed but weren't classified as changes, like a mod being pinned, or that are about
 // to, like a version being saved to a mod that hasn't otherwise changed. (The index and pack.toml don't count if there
-// are commits for changes, as they change with each of them.) It also returns all the files that changed.
+// are commits for changes, or it is the first commit, as they are in each of them.) It also returns all the files that changed.
 func (c committer) changedBeyond(changes []changelog.Change) (rest bool, d dirtyFiles, err error) {
 	d, err = c.dirty(c.w.Versions)
 	if err != nil {
@@ -416,7 +422,7 @@ func (c committer) changedBeyond(changes []changelog.Change) (rest bool, d dirty
 	}
 
 	for _, p := range d.known {
-		if planned[p] || (len(planned) > 0 && (p == c.indexPath || p == c.packPath)) {
+		if planned[p] || ((len(planned) > 0 || c.initial) && (p == c.indexPath || p == c.packPath)) {
 			continue
 		}
 		return true, d, nil
@@ -447,6 +453,20 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 
 	made := 0
 	for _, step := range steps {
+		if step.initial {
+			// Just the pack, with an index that has nothing in it yet
+			err := c.writeIndexAndPack(files, basePack)
+			if err == nil {
+				err = c.r.commitPaths(step.message, c.indexPath, c.packPath)
+			}
+			if err != nil {
+				_ = c.writeIndexAndPack(c.w.Index.Files, c.w.Pack)
+				return fmt.Errorf("couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again", firstLine(step.message), err)
+			}
+			made++
+			report(step.message)
+			continue
+		}
 		if step.path != "" {
 			// A file in a category: the pack doesn't change, so only the file is committed
 			if err := c.r.commitPaths(step.message, step.path); err != nil {
@@ -490,12 +510,6 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 		return err
 	}
 	left := d.known
-	if c.initial {
-		// The first commit takes every file of the pack, whether or not it is in a category
-		for _, f := range d.categorised {
-			left = append(left, f.path)
-		}
-	}
 	if len(left) == 0 {
 		if made == 0 {
 			notice.Infof("Nothing to commit.")
@@ -507,9 +521,6 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 	// no step for it if nothing had changed but the committed index was out of date, which isn't known until it has
 	// been rewritten.
 	message := OtherMessage
-	if n := len(steps); n > 0 && steps[n-1].change == nil && steps[n-1].path == "" {
-		message = steps[n-1].message
-	}
 	if err := c.r.commitPaths(message, left...); err != nil {
 		return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again to commit the rest",
 			made, len(steps), plural(len(steps), "commit"), firstLine(message), err)

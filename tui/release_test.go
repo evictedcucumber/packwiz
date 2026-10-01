@@ -434,10 +434,10 @@ func TestReleaseCommitsReleasesAndTagsARealPackWithoutWritingToTheTerminal(t *te
 		if screenText := strings.Join(body(t, s), "\n"); !strings.Contains(screenText, "Not committed yet") || !strings.Contains(screenText, "initial commit") {
 			t.Errorf("the screen doesn't say what isn't committed:\n%s", screenText)
 		}
-		// The first commit of a repository takes the whole pack
+		// The first commit of a repository holds the pack, and everything in it is committed after, on its own
 		press(t, s, "C", "y")
-		if got := statusOf(s); !strings.HasPrefix(got, "Committed: chore(pack): initial commit") {
-			t.Errorf("the status line is %q, want the commit that was made", got)
+		if got := statusOf(s); !strings.HasPrefix(got, "Made ") {
+			t.Errorf("the status line is %q, want the commits that were made", got)
 		}
 		press(t, s, "r", "y")
 	})

@@ -121,7 +121,9 @@ func TestReleaseAndTagReleasesCommitsAndTagsWithoutSayingAnythingOnTheTerminal(t
 	if !released.Made || released.Release.Version != "1.0.0" || released.Tag != "v1.0.0" {
 		t.Errorf("the release is %+v, want 1.0.0, made, and tagged v1.0.0", released)
 	}
-	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"chore(pack): initial commit", "chore(release): 1.0.0"}) {
+	if got := lastMessages(t, 4); !reflect.DeepEqual(got, []string{
+		"chore(pack): initial commit", "feat(mods): add Sodium 0.5.7 (client)", "fix(config): add config/sodium.json", "chore(release): 1.0.0",
+	}) {
 		t.Errorf("the commit messages are %q, want what releasing with the command makes", got)
 	}
 	if kind := git(t, "cat-file", "-t", "v1.0.0"); kind != "tag" {

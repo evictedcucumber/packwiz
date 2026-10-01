@@ -221,8 +221,8 @@ func TestCommitDescribesEachKindOfChange(t *testing.T) {
 	p.write(t, "config/sodium.json", "{}")
 
 	commit(t)
-	if got := headMessage(t); got != "chore(pack): initial commit" {
-		t.Errorf("first commit message = %q, want the initial commit message", got)
+	if got := lastMessages(t, 3); !reflect.DeepEqual(got, []string{"chore(pack): initial commit", "feat(mods): add Sodium 0.5.7 (client)", "fix(config): add config/sodium.json"}) {
+		t.Errorf("first commit messages = %q, want the initial commit and then each on its own", got)
 	}
 	requireClean(t)
 
@@ -779,8 +779,10 @@ func TestReleaseCommitsAndTags(t *testing.T) {
 	if !strings.Contains(out, "Committed and tagged v1.0.0") {
 		t.Errorf("output = %q, want it to report the tag", out)
 	}
-	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"chore(pack): initial commit", "chore(release): 1.0.0"}) {
-		t.Errorf("commit messages = %q, want the initial commit and then the release", got)
+	if got := lastMessages(t, 4); !reflect.DeepEqual(got, []string{
+		"chore(pack): initial commit", "feat(mods): add Sodium 0.5.7 (client)", "fix(config): add config/sodium.json", "chore(release): 1.0.0",
+	}) {
+		t.Errorf("commit messages = %q, want the initial commit, each file on its own, and then the release", got)
 	}
 	// An annotated tag, on the release commit
 	if kind := git(t, "cat-file", "-t", "v1.0.0"); kind != "tag" {
@@ -1781,24 +1783,41 @@ func TestPackTomlEditsAreNotBlamedOnAMod(t *testing.T) {
 	requireConsistentPack(t, "", revs[1])
 }
 
-func TestFirstCommitOfARepositoryIsASingleCommit(t *testing.T) {
+func TestFirstCommitOfARepositoryHoldsOnlyThePackAndTheRestAreCommittedOnTheirOwn(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
 	p.mod(t, "Iris", core.ClientSide, "1.0")
 	p.mod(t, "Lithium", core.ServerSide, "0.12.0")
 	p.write(t, "config/sodium.json", "{}")
+	p.write(t, core.FileCategoriesFile, "[categories]\ndev = [\"flake.nix\"]\n")
+	p.write(t, "flake.nix", "{}")
 
 	commit(t)
 
-	// There is nothing before it to be a change to, so the pack goes in as it is
-	if got := commitCount(t); got != 1 {
-		t.Errorf("commit count = %d, want the pack in one initial commit", got)
+	// Nothing is added to the pack in the first commit: each mod and file is added after it, as it would be later
+	want := []string{
+		"chore(pack): initial commit",
+		"feat(mods): add Iris 1.0 (client)",
+		"feat(mods)!: add Lithium 0.12.0 (server)\n\n" + wantBreakingFooter,
+		"feat(mods): add Sodium 0.5.7 (client)",
+		"fix(config): add config/sodium.json",
+		"chore(dev): add flake.nix",
+		"chore(pack): update pack files",
 	}
-	if got := headMessage(t); got != "chore(pack): initial commit" {
-		t.Errorf("commit message = %q", got)
+	if got := lastMessages(t, 7); commitCount(t) != 7 || !reflect.DeepEqual(got, want) {
+		t.Errorf("commit messages =\n%q\nwant\n%q", got, want)
 	}
-	requireConsistentPack(t, "", "HEAD")
+	commits := lastCommits(t, 7)
+	if got := commitFiles(t, commits[0]); !reflect.DeepEqual(got, []string{"index.toml", "pack.toml"}) {
+		t.Errorf("the first commit changed %v, want only the pack", got)
+	}
+	if index := git(t, "show", commits[0]+":index.toml"); strings.Contains(index, "[[files]]") {
+		t.Errorf("the first commit's index lists files:\n%s", index)
+	}
+	for _, rev := range commits {
+		requireConsistentPack(t, "", rev)
+	}
 	requireClean(t)
 }
 
