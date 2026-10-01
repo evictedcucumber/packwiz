@@ -118,6 +118,11 @@ func TestTheReadmeAndLicenseAreDocsWithoutBeingListedAnywhere(t *testing.T) {
 				t.Errorf("%s: Of(%q) = %q, %v, want docs", name, path, got, ok)
 			}
 		}
+		for _, path := range []string{".gitignore", ".gitattributes"} {
+			if got, ok := categories.Of(path); !ok || got != "dev" {
+				t.Errorf("%s: Of(%q) = %q, %v, want dev", name, path, got, ok)
+			}
+		}
 		// Only the pack's own: one in a folder is some other file, as it isn't what is exported
 		for _, path := range []string{"sub/README.md", "docs/LICENSE", "README.txt", "LICENSE.md", "readme.md"} {
 			if got, ok := categories.Of(path); ok {

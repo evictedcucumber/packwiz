@@ -63,7 +63,7 @@ const DefaultFileCategories = `# Sorts the files in this folder that packwiz doe
 # Patterns are written like those of .gitignore, relative to this folder. Files in no
 # category are left uncommitted, and "packwiz changelog release" won't release while
 # they have changes. README.md and LICENSE are always docs, unless you put them in a
-# category here, so they needn't be listed.
+# category here, so they needn't be listed. Likewise .gitignore and .gitattributes are dev.
 [categories]
 dev = ["flake.nix", "flake.lock", "lefthook.yml", ".envrc", ".editorconfig", ".gitignore", ".gitattributes"]
 docs = ["docs/"]
@@ -111,8 +111,12 @@ func LoadFileCategories(packRoot string) (FileCategories, error) {
 // them in its own file wins.
 var builtinDocs = []string{"README.md", "LICENSE"}
 
+// builtinDev are the files in the pack's folder that are development tooling whether or not the pack's FileCategoriesFile
+// says so, as for builtinDocs: git's own configuration for the pack's repository, which every pack that has one has.
+var builtinDev = []string{".gitignore", ".gitattributes"}
+
 // Of is the category of a file, given by its path relative to the pack's folder, or false if it is in none. A file that
-// is in more than one is in the first of them by name. The README and licence in the pack's folder are in docs unless the
+// is in more than one is in the first of them by name. The README and licence in the pack's folder are in docs, and .gitignore and .gitattributes in dev, unless the
 // pack's file puts them elsewhere.
 func (c FileCategories) Of(path string) (string, bool) {
 	path = strings.TrimPrefix(filepath.ToSlash(path), "./")
@@ -123,6 +127,9 @@ func (c FileCategories) Of(path string) (string, bool) {
 	}
 	if slices.Contains(builtinDocs, path) {
 		return "docs", true
+	}
+	if slices.Contains(builtinDev, path) {
+		return "dev", true
 	}
 	return "", false
 }
