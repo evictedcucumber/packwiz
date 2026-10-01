@@ -15,8 +15,9 @@ type Repository interface {
 	// hasn't been one.
 	LastChangedIn(file string) (string, error)
 	// CommitPending commits every change to the pack that hasn't been committed yet, as "packwiz git commit" does. Unlike
-	// the command, it fails without committing anything if there are files in the pack's folder that packwiz doesn't
-	// recognise, as it can't say whether they belong in a release.
+	// the command, it fails without committing anything if the pack is in a state it can't be released from: there are files
+	// in the pack's folder that packwiz doesn't recognise, as it can't say whether they belong in a release, or config
+	// files that no mod, mod loader or the pack claims.
 	CommitPending() error
 	// PendingCommits describes the commits CommitPending would make, in order, without making any.
 	PendingCommits() ([]Commit, error)

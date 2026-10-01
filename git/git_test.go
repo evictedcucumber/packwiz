@@ -78,13 +78,30 @@ func setUpPack(t *testing.T, root, version string) testPack {
 	// Releasing asks first
 	cmdtest.SetStdin(t, strings.Repeat("y\n", 50))
 
-	pack := core.Pack{Name: "Test Pack", Version: version, PackFormat: core.CurrentPackFormat, Versions: map[string]string{"minecraft": "1.21"}}
+	// The pack claims its config folder, as a pack with config files that nothing claims can't be released
+	pack := core.Pack{
+		Name: "Test Pack", Version: version, PackFormat: core.CurrentPackFormat, Versions: map[string]string{"minecraft": "1.21"},
+		ConfigFiles: map[string][]string{core.ConfigOwnerPack: {"config/"}},
+	}
 	if err := pack.Write(); err != nil {
 		t.Fatalf("failed to write pack.toml: %v", err)
 	}
 	p := testPack{root}
 	p.write(t, "index.toml", "hash-format = \"sha256\"\n")
 	return p
+}
+
+// claimForPack makes the pack claim an entry of its config-files, as written in pack.toml.
+func claimForPack(t *testing.T, entry string) {
+	t.Helper()
+	pack, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("failed to read pack.toml: %v", err)
+	}
+	pack.ClaimConfigFile(core.ConfigOwnerPack, entry)
+	if err := pack.Write(); err != nil {
+		t.Fatalf("failed to write pack.toml: %v", err)
+	}
 }
 
 func (p testPack) path(rel string) string { return filepath.Join(p.root, filepath.FromSlash(rel)) }
@@ -264,6 +281,7 @@ func TestCommitAndReleaseFollowTheConfigDir(t *testing.T) {
 		Update:   src.UpdateData(),
 	})
 	p.write(t, "configureddefaults/config/sodium.json", "{}")
+	claimForPack(t, "options.txt") // for the file added below, which isn't in config/
 	release(t, "")
 
 	if index := git(t, "show", "HEAD:index.toml"); strings.Contains(index, `"config/sodium.json"`) ||
@@ -1470,6 +1488,37 @@ func TestFilesPackwizDoesNotRecogniseAreLeftUncommitted(t *testing.T) {
 			t.Errorf("tags = %q, want a release tag", tags)
 		}
 	})
+}
+
+func TestConfigFilesNothingClaimsAreCommittedButBlockARelease(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, "options.txt", "fov:90") // outside config/, which the pack claims
+	out := commit(t)
+
+	if got := git(t, "ls-files"); !strings.Contains(got, "options.txt") {
+		t.Errorf("committed files =\n%s\nwant the config file, which is part of the pack, committed", got)
+	}
+	if !strings.Contains(out, "options.txt") || !strings.Contains(out, "isn't claimed by any mod") {
+		t.Errorf("output = %q, want a warning about the config file nothing claims", out)
+	}
+
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	before := commitCount(t)
+	err := runRelease("", "")
+	if err == nil || !strings.Contains(err.Error(), "options.txt") || !strings.Contains(err.Error(), "packwiz config relate") {
+		t.Fatalf("runRelease() = %v, want an error naming the file and how to claim it", err)
+	}
+	if got := commitCount(t); got != before {
+		t.Errorf("commit count = %d, want %d: nothing is committed when the release is refused", got, before)
+	}
+
+	claimForPack(t, "options.txt")
+	release(t, "")
+	if tags := git(t, "tag", "--list"); !strings.Contains(tags, "v") {
+		t.Errorf("tags = %q, want a release tag once the file is claimed", tags)
+	}
 }
 
 func TestTheFirstCommitLeavesUnrecognisedFilesToo(t *testing.T) {

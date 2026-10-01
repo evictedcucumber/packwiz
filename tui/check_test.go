@@ -33,18 +33,19 @@ func TestCheckChecksThePackTheFirstTimeItIsShown(t *testing.T) {
 		"warning: has no side, so it is on both",
 		"warning: isn't from Modrinth",
 		"config-files has 1 entry that matches no file in the pack: config/gone.json",
+		"error: 3 files aren't claimed by any mod, the mod loader or the pack",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the report doesn't say %q:\n%s", want, out)
 		}
 	}
 	summary := lines(s.view())[0]
-	for _, want := range []string{"2 mods", "1 error", "warnings"} {
+	for _, want := range []string{"2 mods", "2 errors", "warnings"} {
 		if !strings.Contains(summary, want) {
 			t.Errorf("the summary %q doesn't say %q", summary, want)
 		}
 	}
-	if got := statusOf(s); !strings.HasPrefix(got, "Found 1 error and ") {
+	if got := statusOf(s); !strings.HasPrefix(got, "Found 2 errors and ") {
 		t.Errorf("the status line is %q, want it to say what was found", got)
 	}
 }

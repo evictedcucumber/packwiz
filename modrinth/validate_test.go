@@ -269,7 +269,7 @@ func TestValidateFindsTheSameProjectAndTheSameFileTwice(t *testing.T) {
 	assertProblems(t, v, thirdPath, "error: installs to the same file as "+first)
 }
 
-func TestValidateWarnsAboutConfigFilesNothingClaims(t *testing.T) {
+func TestValidateFailsOnConfigFilesNothingClaims(t *testing.T) {
 	pack, index := validatablePack(t)
 	addMod(t, &index, validMod("alpha"))
 	if err := index.RefreshFileWithHash("config/orphan.json", "sha256", "unchecked", false); err != nil {
@@ -278,7 +278,7 @@ func TestValidateWarnsAboutConfigFilesNothingClaims(t *testing.T) {
 
 	v := validatePack(pack, index)
 
-	assertProblems(t, v, "", "warning: 1 file isn't claimed by any mod, the mod loader or the pack: config/orphan.json")
+	assertProblems(t, v, "", "error: 1 file isn't claimed by any mod, the mod loader or the pack: config/orphan.json")
 }
 
 func TestValidateDoesNotWarnAboutClaimedConfigFiles(t *testing.T) {
@@ -297,7 +297,7 @@ func TestValidateDoesNotWarnAboutClaimedConfigFiles(t *testing.T) {
 	assertProblems(t, v, "")
 }
 
-func TestValidateCombinesSeveralOrphanedConfigFilesIntoOneWarning(t *testing.T) {
+func TestValidateCombinesSeveralOrphanedConfigFilesIntoOneError(t *testing.T) {
 	pack, index := validatablePack(t)
 	addMod(t, &index, validMod("alpha"))
 	for _, p := range []string{"config/a.json", "config/b.json"} {
@@ -308,7 +308,7 @@ func TestValidateCombinesSeveralOrphanedConfigFilesIntoOneWarning(t *testing.T) 
 
 	v := validatePack(pack, index)
 
-	assertProblems(t, v, "", "warning: 2 files aren't claimed by any mod, the mod loader or the pack: config/a.json, config/b.json")
+	assertProblems(t, v, "", "error: 2 files aren't claimed by any mod, the mod loader or the pack: config/a.json, config/b.json")
 }
 
 func TestValidateWarnsAboutAModsConfigFilesThatMatchNoFile(t *testing.T) {
@@ -784,7 +784,7 @@ func TestValidateDoesNotWarnAboutFilesThatThePackOrItsLoaderClaims(t *testing.T)
 }
 
 // What the pack claims leaves less for nothing to claim, but doesn't hide the rest
-func TestValidateStillWarnsAboutFilesNothingClaimsWhenThePackClaimsOthers(t *testing.T) {
+func TestValidateStillFailsOnFilesNothingClaimsWhenThePackClaimsOthers(t *testing.T) {
 	pack, index := validatablePack(t)
 	addMod(t, &index, validMod("alpha"))
 	for _, p := range []string{"options.txt", "config/orphan.json"} {
@@ -794,7 +794,7 @@ func TestValidateStillWarnsAboutFilesNothingClaimsWhenThePackClaimsOthers(t *tes
 
 	v := validatePack(pack, index)
 
-	assertProblems(t, v, "", "warning: 1 file isn't claimed by any mod, the mod loader or the pack: config/orphan.json")
+	assertProblems(t, v, "", "error: 1 file isn't claimed by any mod, the mod loader or the pack: config/orphan.json")
 }
 
 func TestValidateWarnsAboutEntriesOfThePackAndItsLoaderThatMatchNoFile(t *testing.T) {

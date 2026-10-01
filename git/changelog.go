@@ -32,14 +32,15 @@ func (g gitRepository) LastChangedIn(file string) (string, error) {
 	return g.r.lastChangedIn(file)
 }
 
-// CommitPending is "packwiz git commit", except that it fails, before committing anything, if there are files that packwiz
-// doesn't recognise: a release can't say whether they belong in it.
+// CommitPending is "packwiz git commit", except that it fails, before committing anything, if the pack is in a bad state:
+// there are files that packwiz doesn't recognise, which a release can't say belong in it, or config files that nothing
+// claims.
 func (g gitRepository) CommitPending() error {
 	c, steps, err := prepareCommit(false)
 	if err != nil {
 		return err
 	}
-	if err := c.errUnknown(); err != nil {
+	if err := c.errBadState(); err != nil {
 		return err
 	}
 	return c.run(steps, printCommitted)
@@ -51,7 +52,7 @@ func (g gitRepository) CommitPendingReporting(report func(message string)) error
 	if err != nil {
 		return err
 	}
-	if err := c.errUnknown(); err != nil {
+	if err := c.errBadState(); err != nil {
 		return err
 	}
 	return c.run(steps, report)

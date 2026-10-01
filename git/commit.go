@@ -69,6 +69,9 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 		r: r, w: w, indexPath: indexPath,
 		packPath: packFile(),
 	}
+	if c.unclaimed, err = unclaimedConfig(w); err != nil {
+		return committer{}, nil, err
+	}
 
 	hasCommits, err := r.hasCommits()
 	if err != nil {
@@ -204,6 +207,22 @@ type committer struct {
 	// alone: they aren't part of the pack, so it isn't for packwiz to say what they are. Paths are relative to the
 	// pack root.
 	unknown []string
+	// unclaimed are the config files that the index tracks but that no mod, the mod loader or the pack claims. They are
+	// committed, as they are part of the pack, but the pack is in a bad state with them, so it can't be released.
+	unclaimed []string
+}
+
+// unclaimedConfig are the tracked config files that nothing claims, as paths relative to the index.
+func unclaimedConfig(w changelog.Working) ([]string, error) {
+	mods, err := w.Index.LoadAllMods()
+	if err != nil {
+		return nil, err
+	}
+	tree, err := w.Index.ConfigFileTree(mods, w.Pack)
+	if err != nil {
+		return nil, fmt.Errorf("failed to work out who owns the config files: %w", err)
+	}
+	return tree.Unclaimed, nil
 }
 
 // modPath is the path of a mod's metadata file or of a config file relative to the pack root, given the path the index
@@ -255,23 +274,44 @@ func (c committer) dirtyFiles(versions map[string]string) (known, unknown []stri
 	return slices.Compact(known), slices.Compact(unknown), nil
 }
 
-// warnUnknown says which files are being left alone because packwiz doesn't recognise them.
+// warnUnknown says which files are being left alone because packwiz doesn't recognise them, and which config files
+// nothing claims.
 func (c committer) warnUnknown() {
 	if len(c.unknown) > 0 {
 		notice.Warnf("Leaving %d %s that packwiz doesn't recognise uncommitted: %s",
 			len(c.unknown), plural(len(c.unknown), "file"), strings.Join(c.unknown, ", "))
 	}
+	if len(c.unclaimed) > 0 {
+		notice.Warnf("%d config %s claimed by any mod, the mod loader or the pack: %s",
+			len(c.unclaimed), claimedVerb(len(c.unclaimed)), strings.Join(c.unclaimed, ", "))
+	}
 }
 
-// errUnknown is the error for a release when there are files that packwiz doesn't recognise, because they would be
-// left out of it. Nothing says what they are, so a release can't be sure they don't belong in it.
-func (c committer) errUnknown() error {
-	if len(c.unknown) == 0 {
+// errBadState is the error for a release when the pack is in a state it can't be released from: there are files that
+// packwiz doesn't recognise, which would be left out of it and which it can't say don't belong in it, or config files
+// that nothing claims, which are part of the pack but belong to nothing. It is nil if there are none.
+func (c committer) errBadState() error {
+	var problems []string
+	if n := len(c.unknown); n > 0 {
+		problems = append(problems, fmt.Sprintf("the pack's folder has %d %s that packwiz doesn't recognise: %s\nCommit %s with git, or ignore %s in .gitignore",
+			n, plural(n, "file"), strings.Join(c.unknown, ", "), pronoun(n, "it", "them"), pronoun(n, "it", "them")))
+	}
+	if n := len(c.unclaimed); n > 0 {
+		problems = append(problems, fmt.Sprintf("%d config %s claimed by any mod, the mod loader or the pack: %s\nClaim %s with \"packwiz config relate\", or delete %s",
+			n, claimedVerb(n), strings.Join(c.unclaimed, ", "), pronoun(n, "it", "them"), pronoun(n, "it", "them")))
+	}
+	if len(problems) == 0 {
 		return nil
 	}
-	return fmt.Errorf("can't release while the pack's folder has %d %s that packwiz doesn't recognise: %s\nCommit %s with git, or ignore %s in .gitignore, then release again",
-		len(c.unknown), plural(len(c.unknown), "file"), strings.Join(c.unknown, ", "),
-		pronoun(len(c.unknown), "it", "them"), pronoun(len(c.unknown), "it", "them"))
+	return fmt.Errorf("can't release: %s\nThen release again", strings.Join(problems, "\n\n"))
+}
+
+// claimedVerb is "file isn't" or "files aren't", as the start of a sentence about config files that nothing claims.
+func claimedVerb(n int) string {
+	if n == 1 {
+		return "file isn't"
+	}
+	return "files aren't"
 }
 
 func pronoun(n int, one, many string) string {

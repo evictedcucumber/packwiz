@@ -334,7 +334,7 @@ func (v *validation) checkDependencies(pack core.Pack, entries []entry) {
 	}
 }
 
-// checkConfigFiles warns about tracked files that no mod, the pack or its mod loader claims in their config-files,
+// checkConfigFiles reports tracked files that no mod, the pack or its mod loader claims in their config-files,
 // normally something in the pack's config/ folder left behind by a mod that has since been removed, or never linked to
 // the mod that installed it; and about entries that match no file in the pack, normally a config file that has since
 // been deleted or renamed. The entries of the pack and its loader are in pack.toml, which is also checked for an owner
@@ -394,7 +394,7 @@ func (v *validation) checkConfigFiles(pack core.Pack, index core.Index, entries 
 	if len(tree.Unclaimed) == 1 {
 		noun, verb = "file", "isn't"
 	}
-	v.warnf(packEntry, "%d %s %s claimed by any mod, the mod loader or the pack: %s", len(tree.Unclaimed), noun, verb, listNames(tree.Unclaimed, 5))
+	v.errorf(packEntry, "%d %s %s claimed by any mod, the mod loader or the pack: %s", len(tree.Unclaimed), noun, verb, listNames(tree.Unclaimed, 5))
 }
 
 // installedProjects is the projects the pack has, by ID, with the name of the mod that is each. Forgified Fabric API

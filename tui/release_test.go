@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/evictedcucumber/packwiz/changelog"
+	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
 )
 
@@ -354,6 +355,20 @@ func TestReleaseSaysWhenNothingWasReleased(t *testing.T) {
 	}
 }
 
+// claimEverything makes the pack claim its config folder, so that no config file is left that nothing claims, which a
+// pack can't be released with.
+func claimEverything(t *testing.T) {
+	t.Helper()
+	pack, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("failed to read pack.toml: %v", err)
+	}
+	pack.ClaimConfigFile(core.ConfigOwnerPack, "config/")
+	if err := pack.Write(); err != nil {
+		t.Fatalf("failed to write pack.toml: %v", err)
+	}
+}
+
 // setUpGit makes the pack that setUpPack makes a git repository, isolated from the user's own git configuration.
 func setUpGit(t *testing.T) {
 	t.Helper()
@@ -385,6 +400,7 @@ func runGit(t *testing.T, args ...string) string {
 
 func TestReleaseCommitsReleasesAndTagsARealPackWithoutWritingToTheTerminal(t *testing.T) {
 	setUpPack(t)
+	claimEverything(t)
 	setUpGit(t)
 	s := newReleaseScreen(packBackend{})
 	s.setSize(100, 30)
