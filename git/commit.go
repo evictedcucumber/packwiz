@@ -241,6 +241,7 @@ func (c committer) known() map[string]bool {
 		changelog.HistoryFile:  true,
 		changelog.MarkdownFile: true,
 		core.ModListFile:       true,
+		core.IgnoreFile:        true,
 	}
 	for p := range c.w.Index.Files {
 		known[c.modPath(p)] = true

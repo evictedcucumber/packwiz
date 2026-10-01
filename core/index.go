@@ -143,6 +143,10 @@ func (in Index) RelIndexPath(p string) (string, error) {
 // the pack, so it isn't distributed with it (see ignoreDefaults).
 const ModListFile = "MODS.md"
 
+// IgnoreFile is the file in the pack's folder that lists what the index leaves out, in addition to ignoreDefaults. It is
+// itself left out of the index.
+const IgnoreFile = ".packwizignore"
+
 var ignoreDefaults = []string{
 	// Defaults (can be overridden with a negating pattern preceded with !)
 
@@ -215,7 +219,7 @@ func (in *Index) refresh(progressContainer *mpb.Progress, notify func(notice str
 	pathPF, _ := filepath.Abs(viper.GetString("pack-file"))
 	pathIndex, _ := filepath.Abs(in.indexFile)
 
-	pathIgnore, _ := filepath.Abs(filepath.Join(in.packRoot, ".packwizignore"))
+	pathIgnore, _ := filepath.Abs(filepath.Join(in.packRoot, IgnoreFile))
 	ignore, ignoreExists := readGitignore(pathIgnore)
 
 	var fileList []string

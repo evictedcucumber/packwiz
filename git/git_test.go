@@ -1521,6 +1521,26 @@ func TestConfigFilesNothingClaimsAreCommittedButBlockARelease(t *testing.T) {
 	}
 }
 
+func TestThePackwizIgnoreFileIsCommittedAndDoesNotBlockARelease(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, ".packwizignore", "scratch/**\n")
+	release(t, "")
+	if got := git(t, "ls-files"); !strings.Contains(got, ".packwizignore") {
+		t.Errorf("committed files =\n%s\nwant .packwizignore, which packwiz reads, committed", got)
+	}
+
+	p.write(t, ".packwizignore", "scratch/**\nnotes/**\n")
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	commit(t)
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"feat(mods): add Zoom 2.0 (client)", "chore(pack): update pack files"}) {
+		t.Errorf("commit messages = %q, want the edit to the ignore file in the chore commit", got)
+	}
+	requireClean(t)
+	release(t, "")
+}
+
 func TestTheFirstCommitLeavesUnrecognisedFilesToo(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")

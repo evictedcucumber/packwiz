@@ -39,7 +39,7 @@ describe the pack as it is in that commit, so each one is a valid pack (though f
 mod can come before one it depends on).
 
 Files that packwiz doesn't recognise (anything in the pack's directory that isn't tracked by the index, isn't the
-index or pack.toml, and isn't the pack's changelog or list of mods) are left uncommitted, and are listed. Commit them
+index or pack.toml, and isn't the pack's changelog, list of mods or .packwizignore) are left uncommitted, and are listed. Commit them
 yourself with git; "packwiz changelog release" won't release while they are there.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
