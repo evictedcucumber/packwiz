@@ -28,6 +28,13 @@ func Execute() {
 	}
 }
 
+// SetDefault sets what running packwiz with no arguments does, and the help that says so (a command package registers it,
+// as the commands are: cmd can't import them). Arguments that aren't a command are still an unknown command, not run.
+func SetDefault(long string, run func()) {
+	rootCmd.Long = long
+	rootCmd.Run = func(_ *cobra.Command, _ []string) { run() }
+}
+
 // Add adds a new command as a subcommand to packwiz
 func Add(newCommand *cobra.Command) {
 	rootCmd.AddCommand(newCommand)
@@ -103,3 +110,6 @@ func applyColor() error {
 	rootCmd.SetErrPrefix(errPrefix())
 	return nil
 }
+
+// Root returns the root command, for tests of what is registered on it from other packages.
+func Root() *cobra.Command { return rootCmd }

@@ -5,24 +5,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
 )
 
-func TestTuiCommandIsRegisteredOnTheRootAndTakesNoArguments(t *testing.T) {
-	if tuiCmd.Parent() == nil {
-		t.Fatal("the tui command isn't a subcommand of anything")
+func TestInterfaceIsWhatPackwizDoesWithNoCommand(t *testing.T) {
+	root := cmd.Root()
+	if root.Run == nil {
+		t.Fatal("packwiz with no command does nothing")
 	}
-	if tuiCmd.Parent().Name() != "packwiz" {
-		t.Errorf("the tui command's parent is %q, want the root command", tuiCmd.Parent().Name())
+	if root.Long != help {
+		t.Error("the root command's help doesn't describe the interface")
 	}
-	if tuiCmd.Short == "" || tuiCmd.Long == "" {
-		t.Error("the tui command has no help")
-	}
-	if err := tuiCmd.Args(tuiCmd, []string{"extra"}); err == nil {
-		t.Error("the tui command accepts an argument")
-	}
-	if err := tuiCmd.Args(tuiCmd, nil); err != nil {
-		t.Errorf("the tui command rejects having none: %v", err)
+	if c, _, err := root.Find([]string{"tui"}); err == nil && c != root {
+		t.Error("there is still a tui command")
 	}
 }
 
@@ -45,7 +41,7 @@ func TestRunNeedsATerminalAndSaysSoBeforeReadingThePack(t *testing.T) {
 func TestTuiHelpListsTheScreensInTheOrderTheyAreGoneToWith(t *testing.T) {
 	screens := newScreens(packBackend{}, configData{})
 	for i, s := range screens {
-		if want := fmt.Sprintf("  %d %s ", i+1, s.title()); !strings.Contains(tuiCmd.Long, want) {
+		if want := fmt.Sprintf("  %d %s ", i+1, s.title()); !strings.Contains(help, want) {
 			t.Errorf("the help doesn't have %q, want every screen listed by its number", want)
 		}
 	}

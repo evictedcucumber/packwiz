@@ -26,7 +26,7 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 - `packwiz list --save` writes the names of a pack's mods, resource packs and shader packs to a markdown file, for a README or a pack page
 - `packwiz validate` checks a pack's mods, dependencies and sides before you export it, and `packwiz fix` fixes what it can, showing the changes and asking first
 - `packwiz config list` shows each mod's config files as a tree, with the files nothing claims shown at the end; `packwiz config relate` records which files a mod owns, or the mod loader (NeoForge's own config) or the pack as a whole (`options.txt`), and `packwiz validate` checks the same
-- `packwiz tui` opens an interface in the terminal for the whole of packwiz: the pack's mods, adding projects from Modrinth (searched by name), updates, checking and fixing the pack, dependencies, config files, exporting, and releasing, each on a screen of its own that asks before it changes anything
+- `packwiz`, run with no command, opens an interface in the terminal for the whole of packwiz: the pack's mods, adding projects from Modrinth (searched by name), updates, checking and fixing the pack, dependencies, config files, exporting, and releasing, each on a screen of its own that asks before it changes anything
 - A mod can be named by a part of its name on the command line (`packwiz mr pin sdm`), searched for fuzzily the way fzf does, and the TUI's searches work the same way
 - Server-only and Client-only mod handling
 - Versioned releases with an automatic changelog, and git commits following conventional commits
@@ -226,7 +226,7 @@ What is searched for is only used if exactly one mod matches, and you are told w
 
 ## Terminal interface
 
-`packwiz tui` opens an interface for the pack in the current directory, in the terminal's alternate screen, so it leaves what was there when you quit. It is everything the commands do, on screens: go between them with `tab` and `shift+tab`, or press the number of one. In a folder that has no pack it opens on a screen that makes one, as `packwiz init` does, and carries on into the pack once it has.
+Running `packwiz` with no command opens an interface for the pack in the current directory, in the terminal's alternate screen, so it leaves what was there when you quit. It is everything the commands do, on screens: go between them with `tab` and `shift+tab`, or press the number of one. In a folder that has no pack it opens on a screen that makes one, as `packwiz init` does, and carries on into the pack once it has.
 
 | | Screen | What it is |
 | --- | --- | --- |

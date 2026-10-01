@@ -1,4 +1,4 @@
-// Package tui is packwiz's interactive terminal interface (packwiz tui), built on Bubble Tea.
+// Package tui is packwiz's interactive terminal interface (packwiz, run with no command), built on Bubble Tea.
 //
 // It is a self-registering command package, like modrinth and changelog: importing it for its side effects adds the
 // command. It works through core, the same as the commands do, so what it writes to a pack is what they write: it has
@@ -16,17 +16,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/internal/ui"
-	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/term"
 )
 
-// tuiCmd represents the tui command
-var tuiCmd = &cobra.Command{
-	Use:   "tui",
-	Short: "Open the interactive terminal interface",
-	Long: `Open an interactive interface for the pack in the current directory: what the commands do, on screens. Go between them
-with tab and shift+tab, or with the number of a screen:
+// help is what "packwiz --help" says: the interface is what packwiz does when it is given no command, so it is described
+// with the root command's own help
+const help = `Run with no command to open an interactive interface for the pack in the current directory: what the commands
+do, on screens. Go between them with tab and shift+tab, or with the number of a screen:
 
   1 Overview   what the pack is and what is in it
   2 Mods       the pack's mods, as "packwiz list" has them: search them, pin one, mark one as a dependency, update one, write
@@ -62,14 +59,14 @@ Relating writes what "packwiz config relate" does, and asks who to give the file
 say), its mod loader (NeoForge's own config files) and then the mods (type / to search them), and whether to claim each file
 or the folder it is in.
 
-It needs a terminal to run in.`,
-	Args: cobra.NoArgs,
-	Run: func(_ *cobra.Command, _ []string) {
-		if err := run(); err != nil {
-			ui.Error.Println(err)
-			os.Exit(1)
-		}
-	},
+It needs a terminal to run in.`
+
+// launch opens the interface, and exits with a message if it can't be
+func launch() {
+	if err := run(); err != nil {
+		ui.Error.Println(err)
+		os.Exit(1)
+	}
 }
 
 // run opens the interface on the pack in the current directory, or if there is none on a screen that makes one. The pack is
@@ -77,7 +74,7 @@ It needs a terminal to run in.`,
 // command, rather than something the interface has to show.
 func run() error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return errors.New("packwiz tui needs a terminal: its input and its output must both be one")
+		return errors.New("packwiz needs a terminal to open its interface when given no command: its input and its output must both be one")
 	}
 
 	backend := packBackend{}
@@ -124,5 +121,5 @@ func newScreens(backend packBackend, data configData) []screen {
 }
 
 func init() {
-	cmd.Add(tuiCmd)
+	cmd.SetDefault(help, launch)
 }
