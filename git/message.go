@@ -8,10 +8,12 @@
 //	config or other file: any change     patch     fix(config): change config/sodium.json
 //	anything else (pins, pack.toml, ...) none      chore(pack): update pack files
 //
-// packwiz git commit makes one commit for each mod or config file that was added, updated, changed or removed, then
-// one for anything else in the pack's own files, such as a mod being pinned. Files it doesn't recognise are left
-// uncommitted. A release is committed as "chore(release): X.Y.Z" and
-// tagged "vX.Y.Z".
+// The scope of a mod's commit is the kind of content, going by the folder its metadata file is in: mods, resourcepacks,
+// shaderpacks or datapacks (so a resource pack is "feat(resourcepacks): add Faithful 1.21 (client)").
+//
+// packwiz git commit makes one commit for each mod, resource pack, shader pack, data pack or config file that was added,
+// updated, changed or removed, then one for anything else in the pack's own files, such as a mod being pinned. Files it
+// doesn't recognise are left uncommitted. A release is committed as "chore(release): X.Y.Z" and tagged "vX.Y.Z".
 package git
 
 import (
@@ -64,6 +66,12 @@ func Message(changes []changelog.Change) string {
 	return strings.Join(paragraphs, "\n\n")
 }
 
+// CategoryMessage is the message for a file in a category (see core.FileCategories), which is a chore as it doesn't change
+// what the pack contains: verb is "add", "change" or "remove".
+func CategoryMessage(category, verb, path string) string {
+	return "chore(" + category + "): " + verb + " " + path
+}
+
 // ReleaseMessage is the message for the commit that records a release.
 func ReleaseMessage(version string) string {
 	return "chore(release): " + version
@@ -74,21 +82,25 @@ func TagName(version string) string {
 	return "v" + version
 }
 
-// scope is "mods" or "config" if all the changes are to one or the other, and "pack" if it is both.
+// scope is the kind of content (see changelog.ContentKind) if all the changes are to that kind, "mods" if they are to
+// several, "config" if they are all to files, and "pack" if they are both.
 func scope(changes []changelog.Change) string {
-	mods, files := false, false
+	kind, files := "", false
 	for _, c := range changes {
-		if c.IsMod() {
-			mods = true
-		} else {
+		switch {
+		case !c.IsMod():
 			files = true
+		case kind == "":
+			kind = changelog.ContentKind(c.Path)
+		case kind != changelog.ContentKind(c.Path):
+			kind = "mods"
 		}
 	}
 	switch {
-	case mods && files:
+	case kind != "" && files:
 		return "pack"
-	case mods:
-		return "mods"
+	case kind != "":
+		return kind
 	default:
 		return "config"
 	}

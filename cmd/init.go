@@ -23,7 +23,12 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialise a packwiz modpack",
-	Args:  cobra.NoArgs,
+	Long: `Creates pack.toml and the index for a new pack in the current directory, asking for what it needs.
+
+It also writes a ` + core.FileCategoriesFile + ` with the categories that "packwiz git commit" sorts files that packwiz
+doesn't track into (flake.nix as a dev file, README.md as docs, and so on), unless there is one already. Change it to
+suit the pack.`,
+	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		_, err := os.Stat(viper.GetString("pack-file"))
 		if err == nil && !viper.GetBool("init.reinit") {
@@ -238,6 +243,14 @@ func createPack(np NewPack, quiet bool, indexCreated func(indexFile string)) (cr
 		}
 	} else if err != nil {
 		return false, fmt.Errorf("Error checking index file: %s", err)
+	}
+
+	// Sorting the files alongside the pack is left to whoever has one already
+	categoriesPath := filepath.Join(filepath.Dir(viper.GetString("pack-file")), core.FileCategoriesFile)
+	if _, err := os.Stat(categoriesPath); os.IsNotExist(err) {
+		if err := os.WriteFile(categoriesPath, []byte(core.DefaultFileCategories), 0o644); err != nil {
+			return false, fmt.Errorf("Error creating %s: %s", core.FileCategoriesFile, err)
+		}
 	}
 
 	// Create the pack

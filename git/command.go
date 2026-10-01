@@ -30,17 +30,29 @@ var gitCmd = &cobra.Command{
 var commitCmd = &cobra.Command{
 	Use:   "commit",
 	Short: "Commit each mod and config file that changed on its own, with conventional commit messages",
-	Long: `Refreshes the index, then commits every change to the files the pack tracks, making one commit for each mod or
-config file that was added, updated, changed or removed, and one for what else changed in pack.toml and the index (a
+	Long: fmt.Sprintf(`Refreshes the index, then commits every change to the files the pack tracks, making one commit for each mod, resource
+pack, shader pack, data pack or config file that was added, updated, changed or removed, and one for what else changed in pack.toml and the index (a
 mod being pinned, say). Each commit has a conventional commit message, whose type follows how far the change raises
 the pack's version: feat! for a change to a mod that runs on the server, feat for adding or removing a client-only
 mod, and fix for a client-only mod update or a config change. Every commit also holds an index and pack.toml that
 describe the pack as it is in that commit, so each one is a valid pack (though files go in alphabetical order, so a
 mod can come before one it depends on).
 
-Files that packwiz doesn't recognise (anything in the pack's directory that isn't tracked by the index, isn't the
-index or pack.toml, and isn't the pack's changelog, list of mods or .packwizignore) are left uncommitted, and are listed. Commit them
-yourself with git; "packwiz changelog release" won't release while they are there.`,
+Files that packwiz doesn't track can be sorted into categories in .packwizfiles.toml next to pack.toml, which gives
+each category the patterns of its files, written like those of .gitignore and relative to the pack's directory:
+
+    [categories]
+    dev = ["flake.nix", "lefthook.yml", ".envrc"]
+    docs = ["README.md", "docs/"]
+
+Each file in a category that changed is committed on its own, as "chore(dev): change flake.nix" (or add, or remove),
+after the mods and config files. They are chores, so they never change the pack's version or its changelog. A file in
+two categories is in the first by name, and a file the index tracks is never in one. These are the only categories:
+
+%s
+Other files packwiz doesn't recognise (anything in the pack's directory that isn't tracked by the index, isn't in a
+category, isn't the index or pack.toml, and isn't the pack's changelog, list of mods, .packwizignore or
+.packwizfiles.toml) are left uncommitted, and are listed. Commit them yourself with git; "packwiz changelog release" won't release while they are there.`, categoryList()),
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runCommit(dryRunFlag); err != nil {
@@ -48,6 +60,15 @@ yourself with git; "packwiz changelog release" won't release while they are ther
 			os.Exit(1)
 		}
 	},
+}
+
+// categoryList is the categories a file can be put in, one to a line with what goes in it, for the help and the manual.
+func categoryList() string {
+	var b strings.Builder
+	for _, c := range core.FileCategoryList {
+		fmt.Fprintf(&b, "    %-7s %s\n", c.Name, c.Description)
+	}
+	return b.String()
 }
 
 // releaseCmd represents the git release command

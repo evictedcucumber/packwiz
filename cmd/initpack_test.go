@@ -52,6 +52,35 @@ func TestCreatePackWritesThePackAndItsIndexWithoutSayingAnything(t *testing.T) {
 	}
 }
 
+func TestCreatePackWritesTheDefaultFileCategoriesAndKeepsOnesThatAreThere(t *testing.T) {
+	cmdtest.Chdir(t)
+	if err := CreatePack(NewPack{Name: "P", Version: "1.0.0", MCVersion: "1.21.1"}); err != nil {
+		t.Fatalf("CreatePack() returned error: %v", err)
+	}
+	data, err := os.ReadFile(core.FileCategoriesFile)
+	if err != nil || string(data) != core.DefaultFileCategories {
+		t.Fatalf("%s = %q, %v, want the default", core.FileCategoriesFile, data, err)
+	}
+	pack, _ := core.LoadPack()
+	index, _ := pack.LoadIndex()
+	if _, tracked := index.Files[core.FileCategoriesFile]; tracked {
+		t.Errorf("the index tracks %s, which would distribute it with the pack", core.FileCategoriesFile)
+	}
+
+	// A pack made where there already is one keeps it
+	_ = os.Remove("pack.toml")
+	mine := "[categories]\ndev = [\"mine.nix\"]\n"
+	if err := os.WriteFile(core.FileCategoriesFile, []byte(mine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreatePack(NewPack{Name: "P", Version: "1.0.0", MCVersion: "1.21.1"}); err != nil {
+		t.Fatalf("CreatePack() returned error: %v", err)
+	}
+	if data, _ := os.ReadFile(core.FileCategoriesFile); string(data) != mine {
+		t.Errorf("%s is now %q, want it left as it was", core.FileCategoriesFile, data)
+	}
+}
+
 func TestCreatePackWithoutAModLoaderHasNoLoaderVersion(t *testing.T) {
 	cmdtest.Chdir(t)
 	for _, loader := range []string{"", "none"} {

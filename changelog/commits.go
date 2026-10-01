@@ -2,6 +2,7 @@ package changelog
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/evictedcucumber/packwiz/core"
@@ -111,11 +112,11 @@ func parseLine(line string) (Change, bool) {
 	return Change{}, false
 }
 
-// scopeFits reports whether a commit's scope is the one packwiz writes a change like this in: mods for a mod, and
-// config for a file.
+// scopeFits reports whether a commit's scope is one packwiz writes a change like this in: the kind of content for a mod
+// (mods, resourcepacks, shaderpacks or datapacks), and config for a file.
 func scopeFits(c Change, scope string) bool {
 	if c.IsMod() {
-		return scope == "mods"
+		return slices.Contains(ContentFolders, scope)
 	}
 	return scope == "config"
 }

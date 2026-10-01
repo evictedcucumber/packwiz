@@ -143,6 +143,21 @@ func (r repo) hasCommits() (bool, error) {
 	return false, err
 }
 
+// filesAt is the set of files in a commit, given relative to the pack root.
+func (r repo) filesAt(rev string) (map[string]bool, error) {
+	out, err := r.run("", "ls-tree", "-r", "--name-only", "-z", rev)
+	if err != nil {
+		return nil, err
+	}
+	files := make(map[string]bool)
+	for _, name := range strings.Split(string(out), "\x00") {
+		if name != "" {
+			files[name] = true
+		}
+	}
+	return files, nil
+}
+
 // dirty reports whether anything under the pack root has uncommitted changes, including new files that aren't
 // ignored by git.
 func (r repo) dirty() (bool, error) {

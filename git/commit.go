@@ -3,7 +3,9 @@ package git
 import (
 	"fmt"
 	"maps"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -19,12 +21,16 @@ type commitStep struct {
 	// change is the change the commit is for: a mod or a config file. The last commit, which takes what changed
 	// without being a change to either, is for none.
 	change *changelog.Change
+	// path is the file the commit is for, if it is a file packwiz doesn't track that is in a category (see
+	// core.FileCategories). Such a commit holds that file alone, with no index or pack.toml, as the pack doesn't change.
+	path string
 }
 
 // planCommits works out the commits for changes to a pack: one for each mod or file that was added, updated, changed
-// or removed, in path order, and then one for what else changed in the pack's own files if there is any. There is
-// something else if rest says so, as it does for changes that aren't in changes, such as pinning a mod.
-func planCommits(changes []changelog.Change, rest bool) []commitStep {
+// or removed, in path order, then the commits for the files in categories (others), and then one for what else changed
+// in the pack's own files if there is any. There is something else if rest says so, as it does for changes that aren't in
+// changes, such as pinning a mod.
+func planCommits(changes []changelog.Change, others []commitStep, rest bool) []commitStep {
 	var steps []commitStep
 	// Mods come first, each group in path order
 	for _, mods := range []bool{true, false} {
@@ -36,6 +42,7 @@ func planCommits(changes []changelog.Change, rest bool) []commitStep {
 			steps = append(steps, commitStep{message: Message([]changelog.Change{c}), change: &c})
 		}
 	}
+	steps = append(steps, others...)
 	if rest {
 		steps = append(steps, commitStep{message: OtherMessage})
 	}
@@ -69,6 +76,9 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 		r: r, w: w, indexPath: indexPath,
 		packPath: packFile(),
 	}
+	if c.categories, err = core.LoadFileCategories(packRoot()); err != nil {
+		return committer{}, nil, err
+	}
 	if c.unclaimed, err = unclaimedConfig(w); err != nil {
 		return committer{}, nil, err
 	}
@@ -79,9 +89,11 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 	}
 	if !hasCommits {
 		// The repository's first commit takes the whole pack: there is nothing before it for the pack to have changed from
-		if _, c.unknown, err = c.dirtyFiles(nil); err != nil {
+		d, err := c.dirty(nil)
+		if err != nil {
 			return committer{}, nil, err
 		}
+		c.unknown, c.initial = d.unknown, true
 		return c, []commitStep{{message: InitialMessage}}, nil
 	}
 
@@ -90,12 +102,16 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 		return committer{}, nil, fmt.Errorf("failed to read the pack as of the last commit: %w", err)
 	}
 	changes := changelog.Diff(c.head.Snapshot, current)
-	rest, unknown, err := c.changedBeyond(changes)
+	rest, d, err := c.changedBeyond(changes)
 	if err != nil {
 		return committer{}, nil, err
 	}
-	c.unknown = unknown
-	return c, planCommits(changes, rest), nil
+	c.unknown = d.unknown
+	others, err := c.categorisedSteps(d.categorised)
+	if err != nil {
+		return committer{}, nil, err
+	}
+	return c, planCommits(changes, others, rest), nil
 }
 
 // runCommit commits every change to the files the pack tracks: one commit for each mod or file that was added, updated,
@@ -205,11 +221,15 @@ type committer struct {
 	head committedPack
 	// unknown are the files under the pack root that have changed but that packwiz doesn't recognise, which are left
 	// alone: they aren't part of the pack, so it isn't for packwiz to say what they are. Paths are relative to the
-	// pack root.
+	// pack root. Files in a category are not among them.
 	unknown []string
 	// unclaimed are the config files that the index tracks but that no mod, the mod loader or the pack claims. They are
 	// committed, as they are part of the pack, but the pack is in a bad state with them, so it can't be released.
 	unclaimed []string
+	// categories sort the files that packwiz doesn't track (see core.FileCategoriesFile)
+	categories core.FileCategories
+	// initial is whether this is the repository's first commit, which takes every file of the pack, in a category or not
+	initial bool
 }
 
 // unclaimedConfig are the tracked config files that nothing claims, as paths relative to the index.
@@ -236,12 +256,13 @@ func (c committer) modPath(indexPath string) string {
 // that packwiz writes about the pack (its changelog and its list of mods).
 func (c committer) known() map[string]bool {
 	known := map[string]bool{
-		c.indexPath:            true,
-		c.packPath:             true,
-		changelog.HistoryFile:  true,
-		changelog.MarkdownFile: true,
-		core.ModListFile:       true,
-		core.IgnoreFile:        true,
+		c.indexPath:             true,
+		c.packPath:              true,
+		changelog.HistoryFile:   true,
+		changelog.MarkdownFile:  true,
+		core.ModListFile:        true,
+		core.IgnoreFile:         true,
+		core.FileCategoriesFile: true,
 	}
 	for p := range c.w.Index.Files {
 		known[c.modPath(p)] = true
@@ -252,27 +273,71 @@ func (c committer) known() map[string]bool {
 	return known
 }
 
-// dirtyFiles are the files under the pack root that differ from the last commit, divided into those packwiz recognises
-// and those it doesn't. The files that versions were looked up for are among the ones recognised, as they are about to
-// differ.
-func (c committer) dirtyFiles(versions map[string]string) (known, unknown []string, err error) {
-	dirty, err := c.r.dirtyPaths()
+// dirtyFiles are the files under the pack root that differ from the last commit, divided by what packwiz makes of them.
+type dirtyFiles struct {
+	// known are the ones packwiz recognises (see known).
+	known []string
+	// categorised are the ones it doesn't track but that the pack's categories put in one.
+	categorised []categorisedFile
+	// unknown are the rest, sorted.
+	unknown []string
+}
+
+// categorisedFile is a file that isn't tracked by packwiz but that is in a category.
+type categorisedFile struct {
+	path, category string
+}
+
+// dirty finds the files under the pack root that differ from the last commit. The files that versions were looked up for
+// are among the ones recognised, as they are about to differ.
+func (c committer) dirty(versions map[string]string) (dirtyFiles, error) {
+	paths, err := c.r.dirtyPaths()
 	if err != nil {
-		return nil, nil, err
+		return dirtyFiles{}, err
 	}
 	for versioned := range versions {
-		dirty = append(dirty, c.modPath(versioned))
+		paths = append(paths, c.modPath(versioned))
 	}
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
+
+	var d dirtyFiles
 	recognised := c.known()
-	for _, p := range dirty {
+	for _, p := range paths {
 		if recognised[p] {
-			known = append(known, p)
+			d.known = append(d.known, p)
+		} else if category, ok := c.categories.Of(p); ok {
+			d.categorised = append(d.categorised, categorisedFile{p, category})
 		} else {
-			unknown = append(unknown, p)
+			d.unknown = append(d.unknown, p)
 		}
 	}
-	slices.Sort(unknown)
-	return slices.Compact(known), slices.Compact(unknown), nil
+	return d, nil
+}
+
+// categorisedSteps are the commits for files in categories: one each, as a chore in the scope of the category. They are
+// for adding, changing or removing the file, whichever it is going by whether the last commit has it and the disk does.
+func (c committer) categorisedSteps(files []categorisedFile) ([]commitStep, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	inHead, err := c.r.filesAt("HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var steps []commitStep
+	for _, f := range files {
+		_, statErr := os.Lstat(filepath.Join(packRoot(), filepath.FromSlash(f.path)))
+		verb := "change"
+		switch {
+		case !inHead[f.path]:
+			verb = "add"
+		case statErr != nil:
+			verb = "remove"
+		}
+		steps = append(steps, commitStep{message: CategoryMessage(f.category, verb, f.path), path: f.path})
+	}
+	return steps, nil
 }
 
 // warnUnknown says which files are being left alone because packwiz doesn't recognise them, and which config files
@@ -338,12 +403,11 @@ func pronoun(n int, one, many string) string {
 // changedBeyond reports whether anything other than the commits for changes would be left to commit among the files
 // packwiz recognises: files that changed but weren't classified as changes, like a mod being pinned, or that are about
 // to, like a version being saved to a mod that hasn't otherwise changed. (The index and pack.toml don't count if there
-// are commits for changes, as they change with each of them.) It also returns the files that changed that packwiz
-// doesn't recognise.
-func (c committer) changedBeyond(changes []changelog.Change) (rest bool, unknown []string, err error) {
-	dirty, unknown, err := c.dirtyFiles(c.w.Versions)
+// are commits for changes, as they change with each of them.) It also returns all the files that changed.
+func (c committer) changedBeyond(changes []changelog.Change) (rest bool, d dirtyFiles, err error) {
+	d, err = c.dirty(c.w.Versions)
 	if err != nil {
-		return false, nil, err
+		return false, dirtyFiles{}, err
 	}
 	// A commit for each of these takes its file along with the index and pack.toml
 	planned := make(map[string]bool)
@@ -351,13 +415,13 @@ func (c committer) changedBeyond(changes []changelog.Change) (rest bool, unknown
 		planned[c.modPath(change.Path)] = true
 	}
 
-	for _, p := range dirty {
+	for _, p := range d.known {
 		if planned[p] || (len(planned) > 0 && (p == c.indexPath || p == c.packPath)) {
 			continue
 		}
-		return true, unknown, nil
+		return true, d, nil
 	}
-	return false, unknown, nil
+	return false, d, nil
 }
 
 // run makes the commits. Each commit is a pack that is consistent by itself, so that any commit can be checked out
@@ -383,6 +447,17 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 
 	made := 0
 	for _, step := range steps {
+		if step.path != "" {
+			// A file in a category: the pack doesn't change, so only the file is committed
+			if err := c.r.commitPaths(step.message, step.path); err != nil {
+				_ = c.writeIndexAndPack(c.w.Index.Files, c.w.Pack)
+				return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again to commit the rest",
+					made, len(steps), plural(len(steps), "commit"), firstLine(step.message), err)
+			}
+			made++
+			report(step.message)
+			continue
+		}
 		if step.change == nil {
 			continue
 		}
@@ -410,9 +485,16 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 	if err := c.writeIndexAndPack(c.w.Index.Files, c.w.Pack); err != nil {
 		return err
 	}
-	left, _, err := c.dirtyFiles(nil)
+	d, err := c.dirty(nil)
 	if err != nil {
 		return err
+	}
+	left := d.known
+	if c.initial {
+		// The first commit takes every file of the pack, whether or not it is in a category
+		for _, f := range d.categorised {
+			left = append(left, f.path)
+		}
 	}
 	if len(left) == 0 {
 		if made == 0 {
@@ -425,7 +507,7 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 	// no step for it if nothing had changed but the committed index was out of date, which isn't known until it has
 	// been rewritten.
 	message := OtherMessage
-	if n := len(steps); n > 0 && steps[n-1].change == nil {
+	if n := len(steps); n > 0 && steps[n-1].change == nil && steps[n-1].path == "" {
 		message = steps[n-1].message
 	}
 	if err := c.r.commitPaths(message, left...); err != nil {

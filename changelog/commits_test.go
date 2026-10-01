@@ -62,6 +62,19 @@ func TestChangesFromCommits(t *testing.T) {
 			[]Change{{Kind: ModUpdated, Name: "Iris", Side: core.ClientSide, From: "iris-1.7.0.jar", To: "iris-1.7.1.jar"}},
 		},
 		{
+			"a resource pack, a shader pack and a data pack",
+			[]Commit{
+				commit("feat(resourcepacks): add Faithful 1.21 (client)"),
+				commit("fix(shaderpacks): update BSL 1 -> 2 (client)"),
+				commit("feat(datapacks)!: add Caves 1 (server)"),
+			},
+			[]Change{
+				{Kind: ModAdded, Name: "Faithful", Side: core.ClientSide, To: "1.21"},
+				{Kind: ModUpdated, Name: "BSL", Side: core.ClientSide, From: "1", To: "2"},
+				{Kind: ModAdded, Name: "Caves", Side: core.ServerSide, To: "1"},
+			},
+		},
+		{
 			"a mod with no version",
 			[]Commit{commit("feat(mods): add Sodium (client)")},
 			[]Change{{Kind: ModAdded, Name: "Sodium", Side: core.ClientSide}},

@@ -2,7 +2,9 @@ package changelog
 
 import (
 	"cmp"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/evictedcucumber/packwiz/core"
 )
@@ -51,6 +53,25 @@ type Change struct {
 // IsMod reports whether this is a change to a mod (as opposed to a config or other file, or a note).
 func (c Change) IsMod() bool {
 	return c.Kind == ModAdded || c.Kind == ModRemoved || c.Kind == ModUpdated
+}
+
+// ContentFolders are the folders packwiz keeps the metadata files of each kind of content in, which are also the scopes
+// of the commits made for them.
+var ContentFolders = []string{"mods", "resourcepacks", "shaderpacks", "datapacks"}
+
+// ContentKind is the kind of content a metadata file, given by its path, is for, as the name of the folder packwiz keeps
+// that kind in: the first folder in the path that is one, so a subfolder, or a pack that keeps everything in a folder of
+// its own, still counts. A file in none of them is a mod.
+func ContentKind(path string) string {
+	dir, _ := filepath.Split(filepath.ToSlash(path))
+	for _, folder := range strings.Split(dir, "/") {
+		for _, kind := range ContentFolders {
+			if strings.EqualFold(folder, kind) {
+				return kind
+			}
+		}
+	}
+	return "mods"
 }
 
 // Bump is how far this change raises the pack's version:

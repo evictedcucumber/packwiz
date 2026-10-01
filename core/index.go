@@ -171,6 +171,8 @@ var ignoreDefaults = []string{
 	// Exclude the pack's own release history (see the changelog package)
 	"CHANGELOG.md",
 	"changelog.toml",
+	// Exclude the file that sorts the pack's other files into categories (see FileCategoriesFile)
+	FileCategoriesFile,
 	// Exclude the list of the pack's mods that packwiz list --save writes
 	ModListFile,
 	".direnv/**",

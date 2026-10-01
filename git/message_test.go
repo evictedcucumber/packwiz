@@ -35,6 +35,29 @@ func TestMessage(t *testing.T) {
 			"fix(mods): update Iris 1.7.0 -> 1.7.1 (client)",
 		},
 		{
+			"resource pack added",
+			[]changelog.Change{{Kind: changelog.ModAdded, Path: "resourcepacks/faithful.pw.toml", Name: "Faithful", Side: core.ClientSide, To: "1.21"}},
+			"feat(resourcepacks): add Faithful 1.21 (client)",
+		},
+		{
+			"shader pack updated in a subfolder of a folder of its own",
+			[]changelog.Change{{Kind: changelog.ModUpdated, Path: "pack/shaderpacks/extra/bsl.pw.toml", Name: "BSL", Side: core.ClientSide, From: "1", To: "2"}},
+			"fix(shaderpacks): update BSL 1 -> 2 (client)",
+		},
+		{
+			"a metadata file in none of the folders is a mod",
+			[]changelog.Change{{Kind: changelog.ModAdded, Path: "extras/x.pw.toml", Name: "X", Side: core.ClientSide, To: "1"}},
+			"feat(mods): add X 1 (client)",
+		},
+		{
+			"several kinds of content together are mods",
+			[]changelog.Change{
+				{Kind: changelog.ModAdded, Path: "mods/a.pw.toml", Name: "A", Side: core.ClientSide, To: "1"},
+				{Kind: changelog.ModAdded, Path: "resourcepacks/b.pw.toml", Name: "B", Side: core.ClientSide, To: "1"},
+			},
+			"feat(mods): add 2 mods\n\n- add A 1 (client)\n- add B 1 (client)",
+		},
+		{
 			"server mod added",
 			[]changelog.Change{{Kind: changelog.ModAdded, Name: "Lithium", Side: core.ServerSide, To: "0.12.0"}},
 			"feat(mods)!: add Lithium 0.12.0 (server)\n\n" + wantBreakingFooter,

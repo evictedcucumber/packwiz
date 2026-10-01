@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
+	"github.com/spf13/cobra/doc"
 )
 
 // git runs a git command in the current directory, failing the test if it fails, and returns what it printed.
@@ -1467,6 +1469,136 @@ func TestReleaseRefusesChangesThatAreNotCommittedAndCommitsNothing(t *testing.T)
 	releaseCommitted(t, "")
 }
 
+func TestEachKindOfContentIsItsOwnCommitWithItsOwnScope(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	before := commitCount(t)
+
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	for _, c := range []struct{ folder, name string }{
+		{"resourcepacks", "Faithful"}, {"shaderpacks", "BSL"}, {"datapacks", "Caves"},
+	} {
+		mod := core.Mod{
+			Name: c.name, FileName: strings.ToLower(c.name) + "-1.zip", Version: "1", Side: core.ClientSide,
+			Download: core.ModDownload{HashFormat: "sha256", Hash: "hash-" + c.name},
+		}
+		mod.SetMetaPath(p.path(c.folder + "/" + strings.ToLower(c.name) + core.MetaExtension))
+		if err := os.MkdirAll(p.path(c.folder), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := mod.Write(); err != nil {
+			t.Fatalf("failed to write %s: %v", c.name, err)
+		}
+	}
+	p.write(t, "config/zoom.json", "{}")
+	commit(t)
+
+	want := []string{
+		"feat(datapacks): add Caves 1 (client)",
+		"feat(resourcepacks): add Faithful 1 (client)",
+		"feat(shaderpacks): add BSL 1 (client)",
+		"feat(mods): add Zoom 2.0 (client)",
+		"fix(config): add config/zoom.json",
+	}
+	got := lastMessages(t, 5)
+	slices.Sort(want)
+	slices.Sort(got)
+	if !reflect.DeepEqual(got, want) || commitCount(t) != before+5 {
+		t.Errorf("commit messages =\n%q\nwant one each:\n%q", got, want)
+	}
+	requireClean(t)
+}
+
+func TestFilesInACategoryAreCommittedOnTheirOwn(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, core.FileCategoriesFile, "[categories]\ndev = [\"flake.nix\", \"lefthook.yml\"]\ndocs = [\"README.md\"]\n")
+	p.write(t, "flake.nix", "{}")
+	release(t, "")
+
+	// The first commit takes the whole pack, and the categories file with it
+	files := git(t, "ls-files")
+	for _, want := range []string{"flake.nix", core.FileCategoriesFile, "mods/sodium.pw.toml"} {
+		if !strings.Contains(files, want) {
+			t.Errorf("committed files =\n%s\nwant %s", files, want)
+		}
+	}
+	if index := git(t, "show", "HEAD:index.toml"); strings.Contains(index, "flake.nix") || strings.Contains(index, core.FileCategoriesFile) {
+		t.Errorf("the index tracks a file that is only in a category, which would distribute it:\n%s", index)
+	}
+
+	p.write(t, "flake.nix", "{ a = 1; }")    // changed
+	p.write(t, "lefthook.yml", "pre-commit") // added
+	p.write(t, "README.md", "hello")         // added, in another category
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	before := commitCount(t)
+	commit(t)
+
+	want := []string{
+		"feat(mods): add Zoom 2.0 (client)",
+		"chore(docs): add README.md",
+		"chore(dev): change flake.nix",
+		"chore(dev): add lefthook.yml",
+	}
+	if got := lastMessages(t, 4); !reflect.DeepEqual(got, want) || commitCount(t) != before+4 {
+		t.Errorf("commit messages =\n%q\nwant\n%q", got, want)
+	}
+	// Each holds its file alone: they aren't part of the pack
+	for i, rev := range lastCommits(t, 4)[1:] {
+		if got := commitFiles(t, rev); len(got) != 1 {
+			t.Errorf("commit %d changed %v, want only its file", i+2, got)
+		}
+	}
+	requireClean(t)
+
+	p.remove(t, "lefthook.yml")
+	commit(t)
+	if got := headMessage(t); got != "chore(dev): remove lefthook.yml" {
+		t.Errorf("commit message = %q, want the removal", got)
+	}
+
+	// They are committed, so they don't hold up a release, and as chores they aren't in it
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	release(t, "")
+	if md := git(t, "show", "HEAD:CHANGELOG.md"); strings.Contains(md, "flake.nix") || strings.Contains(md, "README.md") {
+		t.Errorf("the changelog lists a file that is only in a category:\n%s", md)
+	}
+}
+
+func TestAFileInACategoryNotYetCommittedBlocksARelease(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, core.FileCategoriesFile, "[categories]\ndev = [\"flake.nix\"]\n")
+	release(t, "")
+	p.write(t, "flake.nix", "{}")
+
+	err := runRelease("", "")
+	if err == nil || !strings.Contains(err.Error(), "chore(dev): add flake.nix") || !strings.Contains(err.Error(), "packwiz git commit") {
+		t.Errorf("runRelease() = %v, want an error saying to commit it", err)
+	}
+}
+
+func TestACategoryThatCantBeAScopeIsAnError(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, core.FileCategoriesFile, "[categories]\n\"My Files\" = [\"a.txt\"]\n")
+
+	var err error
+	cmdtest.CaptureStdout(t, func() { err = runCommit(false) })
+
+	if err == nil || !strings.Contains(err.Error(), core.FileCategoriesFile) {
+		t.Errorf("runCommit() = %v, want an error naming the file", err)
+	}
+	if commitCount(t) != 0 {
+		t.Error("something was committed")
+	}
+}
+
 func TestFilesPackwizDoesNotRecogniseAreLeftUncommitted(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
@@ -1953,7 +2085,7 @@ func TestPlanCommits(t *testing.T) {
 	}
 
 	t.Run("one commit for each mod, in the order given", func(t *testing.T) {
-		steps := planCommits([]changelog.Change{add("a"), add("b"), add("c")}, false)
+		steps := planCommits([]changelog.Change{add("a"), add("b"), add("c")}, nil, false)
 		if want := []string{"feat(mods): add a 1 (client)", "feat(mods): add b 1 (client)", "feat(mods): add c 1 (client)"}; !reflect.DeepEqual(messages(steps), want) {
 			t.Errorf("messages = %q, want %q", messages(steps), want)
 		}
@@ -1965,7 +2097,7 @@ func TestPlanCommits(t *testing.T) {
 	})
 	t.Run("files come after mods, each on its own", func(t *testing.T) {
 		other := changelog.Change{Kind: changelog.FileAdded, Path: "config/b.json"}
-		steps := planCommits([]changelog.Change{config, other, add("a")}, false)
+		steps := planCommits([]changelog.Change{config, other, add("a")}, nil, false)
 		if want := []string{"feat(mods): add a 1 (client)", "fix(config): change config/a.json", "fix(config): add config/b.json"}; !reflect.DeepEqual(messages(steps), want) {
 			t.Errorf("messages = %q, want %q", messages(steps), want)
 		}
@@ -1976,7 +2108,7 @@ func TestPlanCommits(t *testing.T) {
 		}
 	})
 	t.Run("what isn't a change comes last", func(t *testing.T) {
-		steps := planCommits([]changelog.Change{config, add("a")}, true)
+		steps := planCommits([]changelog.Change{config, add("a")}, nil, true)
 		if want := []string{"feat(mods): add a 1 (client)", "fix(config): change config/a.json", "chore(pack): update pack files"}; !reflect.DeepEqual(messages(steps), want) {
 			t.Errorf("messages = %q, want %q", messages(steps), want)
 		}
@@ -1985,12 +2117,12 @@ func TestPlanCommits(t *testing.T) {
 		}
 	})
 	t.Run("nothing to commit", func(t *testing.T) {
-		if steps := planCommits(nil, false); len(steps) != 0 {
+		if steps := planCommits(nil, nil, false); len(steps) != 0 {
 			t.Errorf("steps = %+v, want none", steps)
 		}
 	})
 	t.Run("something else changed that isn't a change", func(t *testing.T) {
-		steps := planCommits(nil, true)
+		steps := planCommits(nil, nil, true)
 		if want := []string{"chore(pack): update pack files"}; !reflect.DeepEqual(messages(steps), want) {
 			t.Errorf("messages = %q, want %q", messages(steps), want)
 		}
@@ -2282,7 +2414,7 @@ func TestReadingCommitMessagesBackNeverChangesTheBumpOfAnyCombination(t *testing
 		}
 		// As one commit, and as a commit for each mod and one for the files, which is what is actually made
 		var commits []changelog.Commit
-		for _, step := range planCommits(changes, false) {
+		for _, step := range planCommits(changes, nil, false) {
 			subject, body, _ := strings.Cut(step.message, "\n")
 			commits = append(commits, changelog.Commit{Subject: subject, Body: strings.TrimSpace(body)})
 		}
@@ -2293,5 +2425,22 @@ func TestReadingCommitMessagesBackNeverChangesTheBumpOfAnyCombination(t *testing
 		if len(got) != len(changes) {
 			t.Fatalf("the commits for %+v were read back as %d changes, want %d: %+v", changes, len(got), len(changes), got)
 		}
+	}
+}
+
+// The manual is made from the command's help, and has to say what the categories are, since that is where anyone looks
+// them up.
+func TestTheManualForCommitListsEveryCategory(t *testing.T) {
+	var page bytes.Buffer
+	if err := doc.GenMan(commitCmd, &doc.GenManHeader{Title: "PACKWIZ", Section: "1"}, &page); err != nil {
+		t.Fatalf("GenMan() returned error: %v", err)
+	}
+	for _, c := range core.FileCategoryList {
+		if !strings.Contains(page.String(), c.Name) || !strings.Contains(page.String(), c.Description) {
+			t.Errorf("the manual for packwiz git commit doesn't list the category %q (%s):\n%s", c.Name, c.Description, page.String())
+		}
+	}
+	if !strings.Contains(page.String(), core.FileCategoriesFile) {
+		t.Errorf("the manual doesn't name %s", core.FileCategoriesFile)
 	}
 }
