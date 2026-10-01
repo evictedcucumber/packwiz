@@ -10,10 +10,10 @@ import (
 type fakeRepo struct {
 	// commits are the commits made, oldest first
 	commits []fakeCommit
-	// pending are the commits that CommitPending will make. It makes an initial commit if there is nothing at all.
+	// pending are the commits that "packwiz git commit" would make, which a release refuses to go ahead without
 	pending []Commit
-	// commitErr, if set, is what CommitPending fails with
-	commitErr error
+	// checkErr, if set, is what CheckCommitted fails with
+	checkErr error
 	// touched is the hash of the last commit to change each file
 	touched map[string]string
 	// events records what was asked of it, in order
@@ -79,18 +79,14 @@ func (r *fakeRepo) LastChangedIn(file string) (string, error) {
 	return r.touched[file], nil
 }
 
-func (r *fakeRepo) CommitPending() error {
-	r.events = append(r.events, "CommitPending")
-	if r.commitErr != nil {
-		return r.commitErr
+func (r *fakeRepo) CheckCommitted() error {
+	r.events = append(r.events, "CheckCommitted")
+	if r.checkErr != nil {
+		return r.checkErr
 	}
-	if len(r.commits) == 0 && len(r.pending) == 0 {
-		r.commit("chore(pack): initial commit")
+	if len(r.pending) > 0 {
+		return fmt.Errorf("the pack has changes that aren't committed (%d)", len(r.pending))
 	}
-	for _, c := range r.pending {
-		r.commit(c.Subject, c.Body)
-	}
-	r.pending = nil
 	return nil
 }
 

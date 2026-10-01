@@ -119,6 +119,7 @@ func releasedOnce(t *testing.T) *fakeRepo {
 	t.Helper()
 	setUpPack(t, "1.0.0")
 	repo := newFakeRepo(t)
+	repo.commit("chore(pack): initial commit")
 	writeMod(t, "Sodium", core.ClientSide, "0.5.7")
 	release(t, "")
 	return repo
@@ -154,6 +155,7 @@ func requireUnchanged(t *testing.T, before map[string]string) {
 func TestFirstReleaseDescribesThePackAsItIs(t *testing.T) {
 	setUpPack(t, "1.0.0")
 	repo := newFakeRepo(t)
+	repo.commit("chore(pack): initial commit")
 	writeMod(t, "Sodium", core.ClientSide, "0.5.7")
 	writeMod(t, "Lithium", core.ServerSide, "0.12.0")
 	writeConfig(t, "config/sodium.json", "{}")
@@ -173,9 +175,9 @@ func TestFirstReleaseDescribesThePackAsItIs(t *testing.T) {
 	if first.Version != "1.0.0" || first.Date != "2026-09-18" || first.Bump != BumpNone {
 		t.Errorf("release = {%s %s %v}, want {1.0.0 2026-09-18 none}", first.Version, first.Date, first.Bump)
 	}
-	// It is made at the commit that the pending changes were committed in, so it covers all of them
+	// It is made at the commit the pack is at
 	if len(repo.commits) != 1 || first.Commit != repo.commits[0].hash {
-		t.Errorf("release commit = %q, want the commit made for it (%v)", first.Commit, repo.commits)
+		t.Errorf("release commit = %q, want the commit the pack is at (%v)", first.Commit, repo.commits)
 	}
 	if len(first.Changes) != 3 {
 		t.Errorf("first release has %d changes, want 3 (two mods and a config file): %+v", len(first.Changes), first.Changes)
@@ -193,7 +195,7 @@ func TestFirstReleaseDescribesThePackAsItIs(t *testing.T) {
 
 func TestFirstReleaseWithoutPackVersionStartsAtOne(t *testing.T) {
 	setUpPack(t, "")
-	newFakeRepo(t)
+	newFakeRepo(t).commit("chore(pack): initial commit")
 	writeMod(t, "Sodium", core.ClientSide, "0.5.7")
 
 	release(t, "")
@@ -221,40 +223,39 @@ func TestFirstReleaseIsMadeFromWhatIsInThePackNotFromTheLog(t *testing.T) {
 	}
 }
 
-func TestPendingChangesAreCommittedBeforeAnythingIsRead(t *testing.T) {
+func TestReleaseRefusesWhileChangesAreNotCommittedAndChangesNothing(t *testing.T) {
 	repo := releasedOnce(t)
-	repo.events = nil
 	repo.pending = []Commit{commit("feat(mods)!: add Lithium 0.12.0 (server)", "", serverFooter)}
-
-	release(t, "")
-
-	// Both the log and the current commit are only known once the changes are in them
-	if len(repo.events) == 0 || repo.events[0] != "CommitPending" {
-		t.Errorf("events = %v, want CommitPending first", repo.events)
-	}
-	if got := packVersion(t); got != "2.0.0" {
-		t.Errorf("pack.toml version = %q, want 2.0.0: the commit that was pending is part of the release", got)
-	}
-	latest, _ := loadHistory(t).Latest()
-	if head := repo.commits[len(repo.commits)-1].hash; latest.Commit != head {
-		t.Errorf("release commit = %q, want the commit that was made for the pending changes, %q", latest.Commit, head)
-	}
-	if !strings.Contains(readFile(t, MarkdownFile), "**Lithium** 0.12.0 (server)") {
-		t.Error("CHANGELOG.md doesn't have the change that was pending")
-	}
-}
-
-func TestReleaseStopsIfPendingChangesCantBeCommitted(t *testing.T) {
-	repo := releasedOnce(t)
-	repo.commit("feat(mods): add Iris 1.0 (client)")
-	repo.commitErr = errors.New("a hook said no")
+	repo.events = nil
 	before := releaseFiles(t)
 
 	var err error
 	cmdtest.CaptureStdout(t, func() { _, _, err = RunRelease("", "") })
 
-	if err == nil || !strings.Contains(err.Error(), "a hook said no") {
-		t.Errorf("RunRelease() error = %v, want the reason the commit failed", err)
+	if err == nil || !strings.Contains(err.Error(), "aren't committed") {
+		t.Errorf("RunRelease() error = %v, want one saying the changes aren't committed", err)
+	}
+	// Nothing was committed for it, or read before it was known to be all in the log
+	if len(repo.events) != 1 || repo.events[0] != "CheckCommitted" {
+		t.Errorf("events = %v, want only the check", repo.events)
+	}
+	if len(repo.pending) != 1 {
+		t.Errorf("pending = %v, want the changes left for \"packwiz git commit\"", repo.pending)
+	}
+	requireUnchanged(t, before)
+}
+
+func TestReleaseStopsIfThePackIsInABadState(t *testing.T) {
+	repo := releasedOnce(t)
+	repo.commit("feat(mods): add Iris 1.0 (client)")
+	repo.checkErr = errors.New("can't release: some file isn't recognised")
+	before := releaseFiles(t)
+
+	var err error
+	cmdtest.CaptureStdout(t, func() { _, _, err = RunRelease("", "") })
+
+	if err == nil || !strings.Contains(err.Error(), "some file isn't recognised") {
+		t.Errorf("RunRelease() error = %v, want the reason the pack can't be released", err)
 	}
 	requireUnchanged(t, before)
 }
@@ -425,7 +426,7 @@ func TestPreviewIncludesChangesThatAreNotCommittedYetAndCommitsNothing(t *testin
 			t.Errorf("preview missing %q:\n%s", want, out)
 		}
 	}
-	if repo.asked("CommitPending") || len(repo.pending) != 1 {
+	if repo.asked("CheckCommitted") || len(repo.pending) != 1 {
 		t.Errorf("a preview committed something: events %v, pending %v", repo.events, repo.pending)
 	}
 	requireUnchanged(t, before)
@@ -710,7 +711,7 @@ func writeUnversionedMod(t *testing.T, src *cmdtest.VersionSource, name, side, v
 func TestFirstReleaseShowsLookedUpVersionsAndLeavesSavingThemToTheCommit(t *testing.T) {
 	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "0.5.7", "id-b": "0.12.0"})
 	setUpPack(t, "1.0.0")
-	newFakeRepo(t)
+	newFakeRepo(t).commit("chore(pack): initial commit")
 	writeUnversionedMod(t, src, "Sodium", core.ClientSide, "id-a")
 	writeUnversionedMod(t, src, "Lithium", core.ServerSide, "id-b")
 	modBefore := readFile(t, "mods/sodium.pw.toml")
@@ -791,7 +792,7 @@ func TestPreviewCarriesOnWhenVersionsCannotBeLookedUp(t *testing.T) {
 func TestModsTheSourceDoesNotKnowKeepTheirFileName(t *testing.T) {
 	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-a": "0.5.7"})
 	setUpPack(t, "1.0.0")
-	newFakeRepo(t)
+	newFakeRepo(t).commit("chore(pack): initial commit")
 	writeUnversionedMod(t, src, "Sodium", core.ClientSide, "id-a")
 	writeUnversionedMod(t, src, "Ghost", core.ClientSide, "id-gone") // the source has never heard of this one
 

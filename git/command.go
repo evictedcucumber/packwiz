@@ -54,8 +54,8 @@ yourself with git; "packwiz changelog release" won't release while they are ther
 var releaseCmd = &cobra.Command{
 	Use:   "release",
 	Short: "Record a release with \"packwiz changelog release\", then commit and tag it",
-	Long: `Records a release (see "packwiz changelog release", which first commits any changes to the pack), commits the
-result as "chore(release): X.Y.Z" and tags it "vX.Y.Z".`,
+	Long: `Records a release (see "packwiz changelog release", which needs the pack's changes committed first with
+"packwiz git commit"), commits the result as "chore(release): X.Y.Z" and tags it "vX.Y.Z".`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runRelease(releaseVersionFlag, sinceFlag); err != nil {
@@ -102,7 +102,7 @@ func runRelease(versionOverride, since string) error {
 		return err
 	}
 
-	// This commits any changes to the pack first, so they are in the log the release is made from
+	// This fails if the pack has changes that aren't committed, so the log the release is made from has them all
 	release, released, err := changelog.RunRelease(versionOverride, since)
 	if err != nil {
 		return err
@@ -142,8 +142,6 @@ type Released struct {
 	// Made is whether a release was made: it isn't if there is nothing to release
 	Made    bool
 	Release changelog.Release
-	// Committed are the messages of the commits made first, so that they are in the log the release was made from
-	Committed []string
 	// Tag is the tag the release was committed with
 	Tag string
 	// NoChanges says why nothing was released, if nothing was
@@ -166,7 +164,7 @@ func ReleaseAndTag(versionOverride, since string) (Released, error) {
 	if err != nil {
 		return Released{}, err
 	}
-	result := Released{Made: made.Made, Release: made.Release, Committed: made.Committed, NoChanges: made.NoChanges, Notices: made.Notices}
+	result := Released{Made: made.Made, Release: made.Release, NoChanges: made.NoChanges, Notices: made.Notices}
 	if !made.Made {
 		if dirty, err := r.dirty(); err == nil {
 			result.Dirty = dirty

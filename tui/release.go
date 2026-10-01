@@ -268,13 +268,12 @@ func (s *releaseScreen) askRelease() (screen, tea.Cmd) {
 		s.status = warningStatus("The release hasn't been worked out yet")
 	case !s.data.preview.HasChanges:
 		s.status = infoStatus(s.data.preview.NoChanges)
+	case s.data.preview.InRepository && len(s.data.pending) > 0:
+		s.status = warningStatus(count(len(s.data.pending), "change isn't", "changes aren't") + " committed yet; commit first")
 	default:
 		s.pending = askRelease
 		p := s.data.preview
 		lines := []string{ui.Bold.Sprint(p.Release.Version) + ui.Muted.Sprintf(" (%s)", releaseKind(p))}
-		if n := len(s.data.pending); n > 0 && p.InRepository {
-			lines = append(lines, field("commits", "first, "+count(n, "commit", "commits")+" for what hasn't been committed"))
-		}
 		lines = append(lines, field("records", "the release in "+changelog.HistoryFile+" and "+changelog.MarkdownFile))
 		lines = append(lines, field("pack.toml", "gets the version "+p.Release.Version))
 		if s.tagging() {

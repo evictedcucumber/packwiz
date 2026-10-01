@@ -160,7 +160,15 @@ func commit(t *testing.T) string {
 	return out
 }
 
+// release commits what has changed, as a pack is released from its commits, and then releases it.
 func release(t *testing.T, override string) string {
+	t.Helper()
+	commit(t)
+	return releaseCommitted(t, override)
+}
+
+// releaseCommitted releases the pack as it is, without committing first.
+func releaseCommitted(t *testing.T, override string) string {
 	t.Helper()
 	var err error
 	out := cmdtest.CaptureStdout(t, func() { err = runRelease(override, "") })
@@ -922,6 +930,7 @@ func TestReleaseSinceReadsFromTheCommitGiven(t *testing.T) {
 	p.mod(t, "Iris", core.ClientSide, "1.0")
 	release(t, "")
 	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	commit(t)
 
 	var err error
 	cmdtest.CaptureStdout(t, func() { err = runRelease("", "v1.0.0") })
@@ -1425,6 +1434,37 @@ func TestEachModAndConfigFileIsItsOwnCommitAndThePinGoesLast(t *testing.T) {
 	}
 	requireConsistentPack(t, "", commits[3])
 	requireClean(t)
+}
+
+func TestReleaseRefusesChangesThatAreNotCommittedAndCommitsNothing(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	release(t, "")
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	p.write(t, "config/zoom.json", "{}")
+	before := commitCount(t)
+
+	err := runRelease("", "")
+
+	if err == nil {
+		t.Fatal("runRelease() returned no error with changes that aren't committed")
+	}
+	for _, want := range []string{"aren't committed", "feat(mods): add Zoom 2.0 (client)", "fix(config): add config/zoom.json", `"packwiz git commit"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to say %q", err, want)
+		}
+	}
+	if got := commitCount(t); got != before {
+		t.Errorf("commit count = %d, want %d: a release doesn't commit", got, before)
+	}
+	if status := git(t, "status", "--porcelain"); status == "" {
+		t.Error("the changes were committed, but a release is meant to leave that to \"packwiz git commit\"")
+	}
+
+	// Once they are committed, it goes ahead
+	commit(t)
+	releaseCommitted(t, "")
 }
 
 func TestFilesPackwizDoesNotRecogniseAreLeftUncommitted(t *testing.T) {

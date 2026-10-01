@@ -158,8 +158,8 @@ func TestMakeReleaseReleasesWithoutAskingOrSayingAnythingOnTheTerminal(t *testin
 	if h := loadHistory(t); len(h.Releases) != 2 {
 		t.Errorf("the history has %d releases, want the new one recorded", len(h.Releases))
 	}
-	if !repo.asked("CommitPending") {
-		t.Error("the changes weren't committed first")
+	if !repo.asked("CheckCommitted") {
+		t.Error("the changes weren't checked to be committed first")
 	}
 }
 
@@ -185,37 +185,21 @@ func TestMakeReleaseFailsWithAVersionNotAboveTheLast(t *testing.T) {
 	requireUnchanged(t, before)
 }
 
-// A repository that can say which commits it makes has them told, and is not made to print them
-type reportingRepo struct {
-	*fakeRepo
-	reported []string
-}
+func TestMakeReleaseRefusesChangesThatAreNotCommittedWithoutSayingAnythingOnTheTerminal(t *testing.T) {
+	repo := releasedOnce(t)
+	repo.pending = []Commit{commit("feat(mods): add Lithium 0.12.0 (client)")}
+	before := releaseFiles(t)
 
-func (r *reportingRepo) CommitPendingReporting(report func(string)) error {
-	r.events = append(r.events, "CommitPendingReporting")
-	report("chore(pack): from the repository")
-	// What it says it committed is what the repository has
-	return r.fakeRepo.CommitPending()
-}
+	var err error
+	out := cmdtest.CaptureStdout(t, func() { _, err = MakeRelease("", "") })
 
-func TestMakeReleaseHasTheRepositoryTellWhichCommitsItMade(t *testing.T) {
-	setUpPack(t, "1.0.0")
-	repo := &reportingRepo{fakeRepo: &fakeRepo{touched: map[string]string{}}}
-	old := OpenRepository
-	OpenRepository = func() (Repository, error) { return repo, nil }
-	t.Cleanup(func() { OpenRepository = old })
-	writeMod(t, "Sodium", core.ClientSide, "0.5.7")
-
-	made, err := MakeRelease("", "")
-	if err != nil {
-		t.Fatalf("MakeRelease() returned error: %v", err)
+	if err == nil {
+		t.Fatal("MakeRelease() returned no error for changes that aren't committed")
 	}
-	if len(made.Committed) != 1 || made.Committed[0] != "chore(pack): from the repository" {
-		t.Errorf("the commits are %q, want what the repository reported", made.Committed)
+	if out != "" {
+		t.Errorf("MakeRelease() wrote %q to the terminal", out)
 	}
-	if len(repo.events) == 0 || repo.events[0] != "CommitPendingReporting" {
-		t.Errorf("the repository was asked %v, want it asked to report first, as CommitPending would print what it commits", repo.events)
-	}
+	requireUnchanged(t, before)
 }
 
 func TestSaveMarkdownWritesTheChangelogAndSaysNothing(t *testing.T) {

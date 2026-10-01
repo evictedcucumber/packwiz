@@ -61,18 +61,20 @@ not released yet listed above them as Unreleased.`,
 // releaseCmd represents the changelog release command
 var releaseCmd = &cobra.Command{
 	Use:   "release",
-	Short: "Commit any changes, then record a release: bump the pack version and update CHANGELOG.md",
-	Long: `Commits any changes to the pack that aren't committed yet, as "packwiz git commit" does, so that the git log is up
-to date. Then it reads the commits made since the last release, works out the version they make from their types (a
-breaking change is major, a feature is minor and a fix is patch), updates the version in pack.toml and adds the
-release to CHANGELOG.md.
+	Short: "Record a release: bump the pack version and update CHANGELOG.md",
+	Long: `Reads the commits made since the last release, works out the version they make from their types (a breaking change
+is major, a feature is minor and a fix is patch), updates the version in pack.toml and adds the release to CHANGELOG.md.
+
+It doesn't commit anything itself: it fails if the pack has changes that aren't committed, so run "packwiz git commit"
+first. It also fails if the pack has files that packwiz doesn't recognise, or config files that nothing claims, as it
+can't say whether they belong in the release.
 
 Besides what "packwiz git commit" writes for mods and config files, any conventional commit that is a feature, a fix
 or breaking is listed in the release in its own words, and counts towards the version.
 
 The first release describes the pack as it is, and keeps the version already in pack.toml.
 
-A pack that isn't in a git repository can be released too, without the commits to read: nothing is committed, and the
+A pack that isn't in a git repository can be released too, without the commits to read: nothing is checked, and the
 release lists what has changed in the pack since the last one, which it keeps a record of for the next release.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -264,19 +266,17 @@ type releaseHooks struct {
 	show func(p pending, release Release)
 	// confirm is asked whether to make it, and if it says no nothing is made. Nil is a yes.
 	confirm func(release Release) bool
-	// committed, if it isn't nil, is told of each commit made first, which are otherwise printed
-	committed func(message string)
 	// nothing, if it isn't nil, is told why there is nothing to release, which is otherwise printed
 	nothing func(message string)
 }
 
 // RunRelease records the release that the commits made since the last one make, once the user confirms it. First it
-// commits any changes to the pack that aren't committed yet, so they are in the log. A non-empty versionOverride
+// checks that the pack's changes are all committed, so they are in the log. A non-empty versionOverride
 // replaces the version that would otherwise be worked out from the commits, and a non-empty since is the commit to
 // read the log from, if it isn't where the last release was made. It returns the release and true, or false if no
 // release was made because there was nothing to release or the user declined.
 //
-// A pack that isn't in a repository has no log, so nothing is committed and the release is what has changed in the
+// A pack that isn't in a repository has no log, so nothing is checked and the release is what has changed in the
 // pack since the last one, which the release keeps a record of.
 func RunRelease(versionOverride, since string) (Release, bool, error) {
 	release, released, err := makeRelease(versionOverride, since, releaseHooks{
@@ -300,8 +300,6 @@ type Released struct {
 	// Made is whether a release was made: it isn't if there is nothing to release
 	Made    bool
 	Release Release
-	// Committed are the messages of the commits that were made first, so that they are in the log the release was made from
-	Committed []string
 	// NoChanges says why nothing was released, if nothing was
 	NoChanges string
 	// Notices are what making it said along the way, in plain text
@@ -315,8 +313,7 @@ func MakeRelease(versionOverride, since string) (Released, error) {
 	var err error
 	notices := notice.Collect(func() {
 		result.Release, result.Made, err = makeRelease(versionOverride, since, releaseHooks{
-			committed: func(message string) { result.Committed = append(result.Committed, message) },
-			nothing:   func(message string) { result.NoChanges = message },
+			nothing: func(message string) { result.NoChanges = message },
 		})
 	})
 	if err != nil {
@@ -336,12 +333,7 @@ func makeRelease(versionOverride, since string, hooks releaseHooks) (Release, bo
 		return Release{}, false, err
 	}
 	if repo != nil {
-		if reporter, ok := repo.(CommitReporter); ok && hooks.committed != nil {
-			err = reporter.CommitPendingReporting(hooks.committed)
-		} else {
-			err = repo.CommitPending()
-		}
-		if err != nil {
+		if err := repo.CheckCommitted(); err != nil {
 			return Release{}, false, err
 		}
 	}
@@ -425,7 +417,7 @@ type pending struct {
 	// current is the pack as it is now, which a release made without a repository keeps for the next one to compare with
 	current Snapshot
 	// versions are the versions found for mods that don't record one. A repository has them saved by committing (see
-	// Repository.CommitPending), so without one a release saves them.
+	// "packwiz git commit"), so without one a release saves them.
 	versions map[string]string
 	// inRepo is whether the pack is in a repository, and so whether changes were read from its log
 	inRepo bool

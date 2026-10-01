@@ -40,12 +40,12 @@ A pack manages its own release history, from its git history. `packwiz git commi
 ```
 packwiz changelog          # preview the release the commits since the last one would make, including changes not committed yet
 packwiz changelog --save   # write CHANGELOG.md from the releases already recorded, without releasing
-packwiz changelog release  # commit any changes, then record a release: bump pack.toml's version and update CHANGELOG.md
+packwiz changelog release  # record a release of what is committed: bump pack.toml's version and update CHANGELOG.md
 packwiz git commit         # commit each mod and config file that changed on its own; files packwiz doesn't track are left alone
 packwiz git release        # changelog release, then commit it as "chore(release): X.Y.Z" and tag it "vX.Y.Z"
 ```
 
-So after adding, updating and removing mods, `packwiz changelog release` is all that's needed: it runs `packwiz git commit` first, so the log is up to date, then releases what is in it. The version is bumped by the most significant commit since the last release:
+So after adding, updating and removing mods, run `packwiz git commit` and then `packwiz changelog release`, which releases what is in the log. A release never commits anything itself: if the pack has changes that aren't committed it fails, saying to run `packwiz git commit` first. The version is bumped by the most significant commit since the last release:
 
 | Change | Version | Commit |
 | --- | --- | --- |
@@ -101,13 +101,13 @@ The first release has no log to read, so it describes the pack as it is, and kee
 - **Breaking:** update to Minecraft 1.21.4
 ```
 
-Mods added before `version` was recorded have it looked up from Modrinth and saved to their `.pw.toml` the next time you run `packwiz changelog release` or `packwiz git commit` (`packwiz changelog` shows the versions but saves nothing), so that needs the network once. Releases made before then show file names, which are replaced with the versions too wherever the mod is still on that file.
+Mods added before `version` was recorded have it looked up from Modrinth and saved to their `.pw.toml` the next time you run `packwiz git commit` (or, in a pack that isn't in a repository, `packwiz changelog release`) (`packwiz changelog` shows the versions but saves nothing), so that needs the network once. Releases made before then show file names, which are replaced with the versions too wherever the mod is still on that file.
 
 ### Without git
 
 `packwiz git commit` and `packwiz git release` need the pack to be in a git repository, and refuse, before doing anything else, when it isn't. `packwiz changelog` and `packwiz changelog release` don't: they say that there is no git log to read, and make the changelog from the pack alone. The first release is the same as ever, and each release made this way keeps a snapshot of the pack in `changelog.toml`, so the next one lists what has changed in the pack since: mods added, updated and removed, and config files, with the version bumped by the same rules.
 
-What comes from the log isn't there without one. Nothing is committed, so `packwiz changelog release` doesn't run `packwiz git commit` first (it saves the versions it looks up for mods that don't record one into their `.pw.toml` files itself, as committing would), there are no commits written by hand to list, and `--since` is an error. A pack that is put in a repository later is released from its log from then on. The log begins at its first commit, so anything that changed before that, since the last release, isn't in it. And a pack whose last release was made from the log can't be released without the repository, as nothing else says what the pack was like then.
+What comes from the log isn't there without one. Nothing is committed, so `packwiz changelog release` has no `packwiz git commit` to ask for first (it saves the versions it looks up for mods that don't record one into their `.pw.toml` files itself, as committing would), there are no commits written by hand to list, and `--since` is an error. A pack that is put in a repository later is released from its log from then on. The log begins at its first commit, so anything that changed before that, since the last release, isn't in it. And a pack whose last release was made from the log can't be released without the repository, as nothing else says what the pack was like then.
 
 ## Configured Defaults
 
@@ -238,7 +238,7 @@ Running `packwiz` with no command opens an interface for the pack in the current
 | `6` | Deps | `packwiz modrinth deps`: what each mod needs and whether the pack has it, and `s` to save what had to be looked up |
 | `7` | Config | `packwiz config list` and `packwiz config relate`, below |
 | `8` | Export | `packwiz modrinth export`: where the pack goes and how, and what went into it |
-| `9` | Release | `packwiz changelog`, `changelog release`, `git commit` and `git release`: the release the pack's changes would make, `C` to commit what isn't committed, `r` to release (and commit and tag it, in a repository), `v` to choose the version, `s` to write `CHANGELOG.md` |
+| `9` | Release | `packwiz changelog`, `changelog release`, `git commit` and `git release`: the release the pack's changes would make, `C` to commit what isn't committed, `r` to release (and commit and tag it, in a repository; it won't start while changes aren't committed), `v` to choose the version, `s` to write `CHANGELOG.md` |
 
 Every screen lists its keys at the bottom, and `?` lists them all. `j` and `k` move as the arrow keys do, `g` and `G` go to the top and the bottom, `/` searches (fuzzily, below), and `esc` leaves a search or a box. Keys that are letters are the screen's, so `tab` and the numbers don't change screens while text is being typed; `esc` leaves it first.
 

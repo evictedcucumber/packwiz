@@ -106,6 +106,7 @@ func TestReleaseAndTagReleasesCommitsAndTagsWithoutSayingAnythingOnTheTerminal(t
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
 	p.write(t, "config/sodium.json", "{}")
+	commit(t)
 
 	var released Released
 	var err error
@@ -120,9 +121,6 @@ func TestReleaseAndTagReleasesCommitsAndTagsWithoutSayingAnythingOnTheTerminal(t
 	if !released.Made || released.Release.Version != "1.0.0" || released.Tag != "v1.0.0" {
 		t.Errorf("the release is %+v, want 1.0.0, made, and tagged v1.0.0", released)
 	}
-	if len(released.Committed) != 1 || released.Committed[0] != "chore(pack): initial commit" {
-		t.Errorf("the commits made first are %q, want the initial commit", released.Committed)
-	}
 	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"chore(pack): initial commit", "chore(release): 1.0.0"}) {
 		t.Errorf("the commit messages are %q, want what releasing with the command makes", got)
 	}
@@ -136,10 +134,12 @@ func TestReleaseAndTagWithAVersionOfYourOwn(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
 	if _, err := ReleaseAndTag("", ""); err != nil {
 		t.Fatalf("ReleaseAndTag() returned error: %v", err)
 	}
 	p.mod(t, "Lithium", core.ServerSide, "0.12.0")
+	commit(t)
 
 	released, err := ReleaseAndTag("5.0.0", "")
 	if err != nil || released.Release.Version != "5.0.0" || released.Tag != "v5.0.0" {
@@ -151,6 +151,7 @@ func TestReleaseAndTagSaysWhenThereIsNothingToRelease(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
 	if _, err := ReleaseAndTag("", ""); err != nil {
 		t.Fatalf("ReleaseAndTag() returned error: %v", err)
 	}

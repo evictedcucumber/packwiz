@@ -20,9 +20,8 @@ type releaseOutcome struct {
 	// made is whether a release was made: it isn't if there was nothing to release
 	made    bool
 	version string
-	// committed are the messages of the commits made first, and tag the tag the release was committed with, if it was
-	committed []string
-	tag       string
+	// tag is the tag the release was committed with, if it was
+	tag string
 	// noChanges says why nothing was released, if nothing was
 	noChanges string
 	notices   []string
@@ -36,7 +35,8 @@ type releaseBackend interface {
 	loadRelease(version string) (releaseData, error)
 	// commit commits the pack, as "packwiz git commit" does, and says which commits it made.
 	commit() (committed []string, notices []string, err error)
-	// release records a release, as "packwiz changelog release" does, which commits what isn't committed first. With tag it
+	// release records a release, as "packwiz changelog release" does, which fails if the pack has changes that aren't
+	// committed. With tag it
 	// also commits the release and tags it, as "packwiz git release" does.
 	release(version string, tag bool) (releaseOutcome, error)
 	// saveChangelog writes CHANGELOG.md from the releases recorded so far, with what isn't released yet above them, as
@@ -72,7 +72,7 @@ func (packBackend) release(version string, tag bool) (releaseOutcome, error) {
 			return releaseOutcome{}, err
 		}
 		return releaseOutcome{
-			made: released.Made, version: released.Release.Version, committed: released.Committed, tag: released.Tag,
+			made: released.Made, version: released.Release.Version, tag: released.Tag,
 			noChanges: released.NoChanges, notices: released.Notices,
 		}, nil
 	}
@@ -81,7 +81,7 @@ func (packBackend) release(version string, tag bool) (releaseOutcome, error) {
 		return releaseOutcome{}, err
 	}
 	return releaseOutcome{
-		made: released.Made, version: released.Release.Version, committed: released.Committed,
+		made: released.Made, version: released.Release.Version,
 		noChanges: released.NoChanges, notices: released.Notices,
 	}, nil
 }

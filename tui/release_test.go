@@ -50,7 +50,13 @@ func (f *fakeRelease) saveChangelog() (string, []string, error) {
 	return f.savePath, f.saveNotices, f.saveErr
 }
 
-// newFakeRelease is a pack in a repository with a release to make and two commits to make first.
+// withPending is a fake with two commits to make before it can be released.
+func withPending(f *fakeRelease) *fakeRelease {
+	f.data.pending = []string{"feat(mods): add Lithium 0.12.0 (client)", "fix(config): update 1 config file\n\nconfig/sodium.json"}
+	return f
+}
+
+// newFakeRelease is a pack in a repository with a release to make, and everything committed.
 func newFakeRelease() *fakeRelease {
 	return &fakeRelease{
 		data: releaseData{
@@ -58,7 +64,6 @@ func newFakeRelease() *fakeRelease {
 				InRepository: true, Last: "1.0.0", HasChanges: true,
 				Release: changelog.Release{Version: "1.1.0", Bump: changelog.BumpMinor, Date: "2026-09-18"},
 			},
-			pending: []string{"feat(mods): add Lithium 0.12.0 (client)", "fix(config): update 1 config file\n\nconfig/sodium.json"},
 		},
 		committed: []string{"feat(mods): add Lithium 0.12.0 (client)", "fix(config): update 1 config file"},
 		outcome:   releaseOutcome{made: true, version: "1.1.0", tag: "v1.1.0"},
@@ -76,7 +81,7 @@ func releaseOn(t *testing.T, backend releaseBackend) *releaseScreen {
 }
 
 func TestReleaseShowsTheNextReleaseAndWhatIsNotCommittedTheFirstTimeItIsShown(t *testing.T) {
-	f := newFakeRelease()
+	f := withPending(newFakeRelease())
 	s := releaseOn(t, f)
 
 	out := strings.Join(body(t, s), "\n")
@@ -125,6 +130,23 @@ func TestReleaseSaysWhenThePackIsNotInARepository(t *testing.T) {
 	}
 }
 
+func TestReleaseWontStartWhileChangesAreNotCommitted(t *testing.T) {
+	f := withPending(newFakeRelease())
+	s := releaseOn(t, f)
+
+	press(t, s, "r")
+
+	if got := statusOf(s); got != "2 changes aren't committed yet; commit first" {
+		t.Errorf("the status line is %q, want it to say to commit first", got)
+	}
+	if strings.Contains(s.view(), "Release 1.1.0?") {
+		t.Errorf("the release was offered with changes that aren't committed:\n%s", s.view())
+	}
+	if len(f.releases) != 0 {
+		t.Errorf("a release was made: %v", f.releases)
+	}
+}
+
 func TestReleaseAsksBeforeReleasingAndThenCommitsAndTags(t *testing.T) {
 	f := newFakeRelease()
 	s := releaseOn(t, f)
@@ -132,7 +154,7 @@ func TestReleaseAsksBeforeReleasingAndThenCommitsAndTags(t *testing.T) {
 
 	out := s.view()
 	for _, want := range []string{
-		"Release 1.1.0?", "1.1.0 (minor bump)", "first, 2 commits for what hasn't been committed",
+		"Release 1.1.0?", "1.1.0 (minor bump)",
 		"the release in changelog.toml and CHANGELOG.md", "commits it as chore(release): 1.1.0 and tags it v1.1.0",
 	} {
 		if !strings.Contains(out, want) {
@@ -257,7 +279,7 @@ func TestReleaseGoesBackToTheVersionTheChangesMakeWhenTheOneYouChoseCannotBeUsed
 }
 
 func TestReleaseAsksBeforeCommitting(t *testing.T) {
-	f := newFakeRelease()
+	f := withPending(newFakeRelease())
 	s := releaseOn(t, f)
 	press(t, s, "C")
 	out := s.view()
@@ -287,7 +309,6 @@ func TestReleaseAsksBeforeCommitting(t *testing.T) {
 
 func TestReleaseSaysWhenThereIsNothingToCommit(t *testing.T) {
 	f := newFakeRelease()
-	f.data.pending = nil
 	s := releaseOn(t, f)
 	press(t, s, "C")
 	if got := statusOf(s); got != "Nothing to commit" || s.modal() {
@@ -326,7 +347,10 @@ func TestReleaseSaysWhenSomethingFails(t *testing.T) {
 		"writing the changelog":   {setUp: func(f *fakeRelease) { f.saveErr = errors.New("read only") }, keys: []string{"s"}, want: "read only"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newFakeRelease()
+			f := withPending(newFakeRelease())
+			if name == "releasing" {
+				f.data.pending = nil
+			}
 			if name != "working out the release" {
 				tc.setUp(f)
 			}

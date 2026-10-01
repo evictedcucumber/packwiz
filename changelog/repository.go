@@ -3,7 +3,7 @@ package changelog
 import "errors"
 
 // Repository is the version control a pack is released from. A release is made from the commits since the last one,
-// so it needs to see them, and to make sure the pack's changes are among them first. The git package implements it,
+// so it needs to see them, and to check that the pack's changes are among them. The git package implements it,
 // and registers itself in OpenRepository, which is how this package reaches it without importing it.
 type Repository interface {
 	// Head is the hash of the current commit.
@@ -14,20 +14,13 @@ type Repository interface {
 	// LastChangedIn is the hash of the last commit to change a file, given relative to the pack root, or "" if there
 	// hasn't been one.
 	LastChangedIn(file string) (string, error)
-	// CommitPending commits every change to the pack that hasn't been committed yet, as "packwiz git commit" does. Unlike
-	// the command, it fails without committing anything if the pack is in a state it can't be released from: there are files
-	// in the pack's folder that packwiz doesn't recognise, as it can't say whether they belong in a release, or config
-	// files that no mod, mod loader or the pack claims.
-	CommitPending() error
-	// PendingCommits describes the commits CommitPending would make, in order, without making any.
+	// CheckCommitted fails if the pack can't be released as it is: it has changes that "packwiz git commit" hasn't
+	// committed yet, which the error says to run it for, or it is in a state that can't be released from, such as having
+	// files that packwiz doesn't recognise, which a release can't say belong in it, or config files that no mod, mod loader
+	// or the pack claims. It changes nothing.
+	CheckCommitted() error
+	// PendingCommits describes the commits "packwiz git commit" would make, in order, without making any.
 	PendingCommits() ([]Commit, error)
-}
-
-// CommitReporter is implemented by a Repository that can say which commits it makes rather than printing them, for what has
-// the terminal to itself and can't have anything written over it.
-type CommitReporter interface {
-	// CommitPendingReporting is CommitPending, telling report the message of each commit as it is made.
-	CommitPendingReporting(report func(message string)) error
 }
 
 // ErrNoRepository is what the error from OpenRepository is when the pack isn't in a repository, or there is nothing to

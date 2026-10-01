@@ -288,11 +288,24 @@ func (c committer) warnUnknown() {
 	}
 }
 
-// errBadState is the error for a release when the pack is in a state it can't be released from: there are files that
-// packwiz doesn't recognise, which would be left out of it and which it can't say don't belong in it, or config files
-// that nothing claims, which are part of the pack but belong to nothing. It is nil if there are none.
-func (c committer) errBadState() error {
+// errNotReleasable is the error for a release when the pack can't be released as it is, given the commits that
+// "packwiz git commit" would make: there are changes that aren't committed, which that command commits; there are files
+// that packwiz doesn't recognise, which would be left out of the release and which it can't say don't belong in it; or
+// there are config files that nothing claims, which are part of the pack but belong to nothing. It is nil if there is
+// none of these.
+func (c committer) errNotReleasable(steps []commitStep) error {
 	var problems []string
+	if n := len(steps); n > 0 {
+		lines := make([]string, 0, min(n, 5)+1)
+		for _, step := range steps[:min(n, 5)] {
+			lines = append(lines, "  "+firstLine(step.message))
+		}
+		if n > 5 {
+			lines = append(lines, fmt.Sprintf("  and %d more", n-5))
+		}
+		problems = append(problems, fmt.Sprintf("the pack has changes that aren't committed (%d %s):\n%s\nRun \"packwiz git commit\" to commit them",
+			n, plural(n, "commit"), strings.Join(lines, "\n")))
+	}
 	if n := len(c.unknown); n > 0 {
 		problems = append(problems, fmt.Sprintf("the pack's folder has %d %s that packwiz doesn't recognise: %s\nCommit %s with git, or ignore %s in .gitignore",
 			n, plural(n, "file"), strings.Join(c.unknown, ", "), pronoun(n, "it", "them"), pronoun(n, "it", "them")))
@@ -304,7 +317,7 @@ func (c committer) errBadState() error {
 	if len(problems) == 0 {
 		return nil
 	}
-	return fmt.Errorf("can't release: %s\nThen release again", strings.Join(problems, "\n\n"))
+	return fmt.Errorf("can't release: %s", strings.Join(problems, "\n\n"))
 }
 
 // claimedVerb is "file isn't" or "files aren't", as the start of a sentence about config files that nothing claims.
