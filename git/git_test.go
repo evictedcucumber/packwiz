@@ -1608,8 +1608,8 @@ func TestFilesPackwizDoesNotRecogniseAreLeftUncommitted(t *testing.T) {
 	commit(t)
 	before := commitCount(t)
 
-	// README.md is ignored by packwiz, so the index doesn't list it; the other is in .direnv/, a folder it ignores
-	p.write(t, "README.md", "my pack")
+	// flake.nix is ignored by packwiz, so the index doesn't list it, and is in no category; the other is in .direnv/, a folder it ignores
+	p.write(t, "flake.nix", "{}")
 	p.write(t, ".direnv/cache", "cached")
 	p.write(t, "config/sodium.json", "{}")
 	p.mod(t, "Zoom", core.ClientSide, "2.0")
@@ -1622,14 +1622,14 @@ func TestFilesPackwizDoesNotRecogniseAreLeftUncommitted(t *testing.T) {
 		t.Errorf("commit count = %d, want %d", got, before+2)
 	}
 	status := git(t, "status", "--porcelain", "-uall")
-	if !strings.Contains(status, "README.md") || !strings.Contains(status, ".direnv/cache") || strings.Contains(status, "config") {
+	if !strings.Contains(status, "flake.nix") || !strings.Contains(status, ".direnv/cache") || strings.Contains(status, "config") {
 		t.Errorf("git status =\n%s\nwant only the files packwiz doesn't recognise left", status)
 	}
-	if !strings.Contains(out, ".direnv/cache, README.md") {
+	if !strings.Contains(out, ".direnv/cache, flake.nix") {
 		t.Errorf("output = %q, want the files left uncommitted to be listed", out)
 	}
 	for _, rev := range lastCommits(t, 2) {
-		if got := commitFiles(t, rev); slices.Contains(got, "README.md") || slices.Contains(got, ".direnv/cache") {
+		if got := commitFiles(t, rev); slices.Contains(got, "flake.nix") || slices.Contains(got, ".direnv/cache") {
 			t.Errorf("commit %s changed %v, which has a file packwiz doesn't recognise", rev, got)
 		}
 	}
@@ -1647,7 +1647,7 @@ func TestFilesPackwizDoesNotRecogniseAreLeftUncommitted(t *testing.T) {
 		p.mod(t, "Iris", core.ClientSide, "1.0")
 		before := commitCount(t)
 		err := runRelease("", "")
-		if err == nil || !strings.Contains(err.Error(), "README.md") || !strings.Contains(err.Error(), ".direnv/cache") {
+		if err == nil || !strings.Contains(err.Error(), "flake.nix") || !strings.Contains(err.Error(), ".direnv/cache") {
 			t.Fatalf("runRelease() = %v, want an error naming the files", err)
 		}
 		if got := commitCount(t); got != before {
@@ -1655,7 +1655,7 @@ func TestFilesPackwizDoesNotRecogniseAreLeftUncommitted(t *testing.T) {
 		}
 	})
 	t.Run("a release goes ahead once they are dealt with", func(t *testing.T) {
-		git(t, "add", "README.md", ".direnv/cache")
+		git(t, "add", "flake.nix", ".direnv/cache")
 		git(t, "commit", "-m", "docs: add my files")
 		release(t, "")
 		if tags := git(t, "tag", "--list"); !strings.Contains(tags, "v") {
@@ -1719,11 +1719,11 @@ func TestTheFirstCommitLeavesUnrecognisedFilesToo(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
-	p.write(t, "README.md", "my pack")
+	p.write(t, "flake.nix", "{}")
 	commit(t)
 
-	if got := git(t, "ls-files"); strings.Contains(got, "README.md") || !strings.Contains(got, "mods/sodium.pw.toml") {
-		t.Errorf("committed files =\n%s\nwant the pack but not README.md", got)
+	if got := git(t, "ls-files"); strings.Contains(got, "flake.nix") || !strings.Contains(got, "mods/sodium.pw.toml") {
+		t.Errorf("committed files =\n%s\nwant the pack but not flake.nix", got)
 	}
 }
 
@@ -2461,5 +2461,71 @@ func TestTheManualForCommitListsEveryCategory(t *testing.T) {
 	}
 	if !strings.Contains(page.String(), core.FileCategoriesFile) {
 		t.Errorf("the manual doesn't name %s", core.FileCategoriesFile)
+	}
+}
+
+func TestTheReadmeAndLicenseAreCommittedAsDocsWithoutAnyCategories(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	release(t, "")
+	if _, err := os.Stat(core.FileCategoriesFile); err == nil {
+		t.Fatalf("the pack has a %s, which the test is of doing without", core.FileCategoriesFile)
+	}
+
+	p.write(t, "README.md", "about the pack")
+	p.write(t, "LICENSE", "the terms")
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	before := commitCount(t)
+	commit(t)
+
+	want := []string{
+		"feat(mods): add Zoom 2.0 (client)",
+		"chore(docs): add LICENSE",
+		"chore(docs): add README.md",
+	}
+	if got := lastMessages(t, 3); !reflect.DeepEqual(got, want) || commitCount(t) != before+3 {
+		t.Errorf("commit messages =\n%q\nwant\n%q", got, want)
+	}
+	// Each holds its file alone: they aren't part of the pack
+	for i, rev := range lastCommits(t, 3)[1:] {
+		if got := commitFiles(t, rev); len(got) != 1 {
+			t.Errorf("commit %d changed %v, want only its file", i+2, got)
+		}
+	}
+	if index := git(t, "show", "HEAD:index.toml"); strings.Contains(index, "README.md") || strings.Contains(index, "LICENSE") {
+		t.Errorf("the index tracks a file that only describes the pack, which would distribute it:\n%s", index)
+	}
+	requireClean(t)
+
+	p.write(t, "README.md", "about the pack, more")
+	p.remove(t, "LICENSE")
+	commit(t)
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"chore(docs): remove LICENSE", "chore(docs): change README.md"}) {
+		t.Errorf("commit messages = %q, want the change and the removal", got)
+	}
+
+	// They are committed, so they don't hold up a release, and as chores they aren't in it
+	p.write(t, "README.md", "about the pack, even more")
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	commit(t)
+	release(t, "")
+	if md := git(t, "show", "HEAD:CHANGELOG.md"); strings.Contains(md, "README.md") || strings.Contains(md, "LICENSE") {
+		t.Errorf("the changelog lists a file that only describes the pack:\n%s", md)
+	}
+}
+
+func TestTheReadmeIsCommittedInTheCategoryThePackPutsItIn(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, core.FileCategoriesFile, "[categories]\nmisc = [\"README.md\"]\n")
+	release(t, "")
+
+	p.write(t, "README.md", "about the pack")
+	p.write(t, "LICENSE", "the terms")
+	commit(t)
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"chore(docs): add LICENSE", "chore(misc): add README.md"}) {
+		t.Errorf("commit messages = %q, want the README in the category the pack's file gives it and the licence in docs", got)
 	}
 }

@@ -96,6 +96,36 @@ func AddNonMetafileOverrides(index *core.Index, exp *zip.Writer) {
 	}
 }
 
+// AddDocOverrides saves the pack's README, licence and changelog (core.DocFiles), whichever of them are in the pack's
+// folder, into the overrides folder of the zip. The index doesn't list them, so AddNonMetafileOverrides doesn't. A pack
+// with none of them, or with a folder where one should be, is not an error: they are for the pack's author to write.
+func AddDocOverrides(index *core.Index, exp *zip.Writer) {
+	for _, name := range core.DocFiles {
+		src := index.ResolveIndexPath(name)
+		if info, err := os.Stat(src); err != nil || !info.Mode().IsRegular() {
+			if err != nil && !os.IsNotExist(err) {
+				notice.Errorf("Error reading file %s: %s", name, err.Error())
+			}
+			continue
+		}
+		in, err := os.Open(src)
+		if err != nil {
+			notice.Errorf("Error reading file %s: %s", name, err.Error())
+			continue
+		}
+		file, err := exp.Create(path.Join("overrides", name))
+		if err != nil {
+			_ = in.Close()
+			notice.Errorf("Error creating file %s: %s", name, err.Error())
+			continue
+		}
+		if _, err = io.Copy(file, in); err != nil {
+			notice.Errorf("Error copying file %s: %s", name, err.Error())
+		}
+		_ = in.Close()
+	}
+}
+
 func PrintDisclaimer() {
 	ui.Warning.Println("Disclaimer: you are responsible for ensuring you comply with ALL the licenses, or obtain appropriate permissions, for the files stored in the pack, which are listed below with paths in overrides/, client-overrides/ or server-overrides/")
 	ui.Warning.Println("packwiz is currently unable to match metadata between mod sites - if any of these are available from Modrinth you should change them to use Modrinth metadata (e.g. by re-adding them using the mr commands)")

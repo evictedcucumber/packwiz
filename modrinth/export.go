@@ -18,7 +18,11 @@ import (
 var exportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export the current modpack into a .mrpack for Modrinth",
-	Args:  cobra.NoArgs,
+	Long: `Export the pack as a .mrpack: the mods are listed in its manifest for the launcher to download, and the files the
+index tracks that aren't mods (config files and the like) go in its overrides. So does the pack's README.md, LICENSE and
+CHANGELOG.md, whichever of them are in the pack's directory: packwiz doesn't track them in the index, so they are not
+installed by anything else, and need not be listed anywhere for the export to include them.`,
+	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.Muted.Println("Loading modpack...")
 		pack, err := core.LoadPack()

@@ -19,10 +19,11 @@ import (
 //
 //	[categories]
 //	dev = ["flake.nix", "flake.lock", ".envrc"]
-//	docs = ["README.md", "docs/"]
+//	docs = ["docs/"]
 //
 // A category is one of FileCategoryList, whose name is the scope of its commits, and the patterns of the files in it,
-// written like those of .gitignore and relative to the pack's folder.
+// written like those of .gitignore and relative to the pack's folder. The pack's README.md and LICENSE are in docs without
+// being listed (see builtinDocs).
 const FileCategoriesFile = ".packwizfiles.toml"
 
 // FileCategory is a kind of file that isn't part of a pack but lives alongside it.
@@ -61,10 +62,11 @@ const DefaultFileCategories = `# Sorts the files in this folder that packwiz doe
 # The categories are dev, docs, ci, build, assets and misc (see "man packwiz-git-commit").
 # Patterns are written like those of .gitignore, relative to this folder. Files in no
 # category are left uncommitted, and "packwiz changelog release" won't release while
-# they have changes.
+# they have changes. README.md and LICENSE are always docs, unless you put them in a
+# category here, so they needn't be listed.
 [categories]
 dev = ["flake.nix", "flake.lock", "lefthook.yml", ".envrc", ".editorconfig", ".gitignore", ".gitattributes"]
-docs = ["README.md", "LICENSE", "docs/"]
+docs = ["docs/"]
 ci = [".github/", ".gitlab-ci.yml"]
 build = ["Makefile", "Dockerfile", "scripts/"]
 assets = ["icon.png", "screenshots/"]
@@ -103,14 +105,24 @@ func LoadFileCategories(packRoot string) (FileCategories, error) {
 	return categories, nil
 }
 
+// builtinDocs are the files in the pack's folder that are documentation whether or not the pack's FileCategoriesFile says
+// so (or there is one), so a pack's README and licence are committed as "chore(docs)" without being listed anywhere. They
+// are DocFiles but for the changelog, which packwiz writes itself and so already recognises. A category the pack gives
+// them in its own file wins.
+var builtinDocs = []string{"README.md", "LICENSE"}
+
 // Of is the category of a file, given by its path relative to the pack's folder, or false if it is in none. A file that
-// is in more than one is in the first of them by name.
+// is in more than one is in the first of them by name. The README and licence in the pack's folder are in docs unless the
+// pack's file puts them elsewhere.
 func (c FileCategories) Of(path string) (string, bool) {
 	path = strings.TrimPrefix(filepath.ToSlash(path), "./")
 	for _, name := range c.names {
 		if c.patterns[name].MatchesPath(path) {
 			return name, true
 		}
+	}
+	if slices.Contains(builtinDocs, path) {
+		return "docs", true
 	}
 	return "", false
 }

@@ -102,3 +102,52 @@ func TestTheDefaultCategoriesAreValidAndHaveEveryCategory(t *testing.T) {
 		}
 	}
 }
+
+func TestTheReadmeAndLicenseAreDocsWithoutBeingListedAnywhere(t *testing.T) {
+	// With no file of categories at all, and with one that doesn't mention them
+	for name, dir := range map[string]string{
+		"no file":      t.TempDir(),
+		"another file": writeCategories(t, "[categories]\ndev = [\"flake.nix\"]\n"),
+	} {
+		categories, err := LoadFileCategories(dir)
+		if err != nil {
+			t.Fatalf("%s: LoadFileCategories() returned error: %v", name, err)
+		}
+		for _, path := range []string{"README.md", "LICENSE", "./README.md"} {
+			if got, ok := categories.Of(path); !ok || got != "docs" {
+				t.Errorf("%s: Of(%q) = %q, %v, want docs", name, path, got, ok)
+			}
+		}
+		// Only the pack's own: one in a folder is some other file, as it isn't what is exported
+		for _, path := range []string{"sub/README.md", "docs/LICENSE", "README.txt", "LICENSE.md", "readme.md"} {
+			if got, ok := categories.Of(path); ok {
+				t.Errorf("%s: Of(%q) = %q, want no category", name, path, got)
+			}
+		}
+	}
+}
+
+func TestTheReadmeIsInTheCategoryThePackPutsItIn(t *testing.T) {
+	categories, err := LoadFileCategories(writeCategories(t, "[categories]\nmisc = [\"README.md\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := categories.Of("README.md"); got != "misc" {
+		t.Errorf("Of(README.md) = %q, want misc, as the pack's file says", got)
+	}
+	if got, _ := categories.Of("LICENSE"); got != "docs" {
+		t.Errorf("Of(LICENSE) = %q, want docs, as the pack's file doesn't say", got)
+	}
+}
+
+func TestTheFileOfCategoriesPackwizWritesParses(t *testing.T) {
+	categories, err := LoadFileCategories(writeCategories(t, DefaultFileCategories))
+	if err != nil {
+		t.Fatalf("LoadFileCategories() returned error: %v", err)
+	}
+	for path, want := range map[string]string{"docs/guide.md": "docs", "README.md": "docs", "flake.nix": "dev"} {
+		if got, _ := categories.Of(path); got != want {
+			t.Errorf("Of(%q) = %q, want %q", path, got, want)
+		}
+	}
+}

@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/evictedcucumber/packwiz/core"
+	"github.com/evictedcucumber/packwiz/internal/cmdtest"
 )
 
 // fakeDownloadSession is a minimal core.DownloadSession for testing
@@ -174,4 +176,99 @@ metafile = true
 
 func TestPrintDisclaimerDoesNotPanic(t *testing.T) {
 	PrintDisclaimer()
+}
+
+// zipContents reads back what is in a zip: each entry's name and what it holds.
+func zipContents(t *testing.T, buf *bytes.Buffer) map[string]string {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("failed to read back zip: %v", err)
+	}
+	contents := map[string]string{}
+	for _, f := range reader.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("failed to open %s: %v", f.Name, err)
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", f.Name, err)
+		}
+		contents[f.Name] = string(data)
+	}
+	return contents
+}
+
+func docIndex(t *testing.T, dir string) core.Index {
+	t.Helper()
+	indexPath := filepath.Join(dir, "index.toml")
+	if err := os.WriteFile(indexPath, []byte("hash-format = \"sha256\"\n"), 0644); err != nil {
+		t.Fatalf("failed to write index.toml fixture: %v", err)
+	}
+	idx, err := core.LoadIndex(indexPath)
+	if err != nil {
+		t.Fatalf("LoadIndex() returned error: %v", err)
+	}
+	return idx
+}
+
+func TestAddDocOverridesSavesTheReadmeLicenseAndChangelogTheIndexDoesNotList(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"README.md":    "about the pack",
+		"LICENSE":      "the terms",
+		"CHANGELOG.md": "what changed",
+		// Not among them: the list of mods is made from the pack, and the rest are the pack's own business
+		"MODS.md":   "- Sodium",
+		"notes.txt": "mine",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", name, err)
+		}
+	}
+	idx := docIndex(t, dir)
+
+	var buf bytes.Buffer
+	exp := zip.NewWriter(&buf)
+	AddDocOverrides(&idx, exp)
+	if err := exp.Close(); err != nil {
+		t.Fatalf("failed to close zip writer: %v", err)
+	}
+
+	want := map[string]string{
+		"overrides/README.md":    "about the pack",
+		"overrides/LICENSE":      "the terms",
+		"overrides/CHANGELOG.md": "what changed",
+	}
+	if got := zipContents(t, &buf); !reflect.DeepEqual(got, want) {
+		t.Errorf("zip contents = %v, want %v", got, want)
+	}
+}
+
+func TestAddDocOverridesSavesOnlyWhatThePackHas(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "LICENSE"), []byte("the terms"), 0644); err != nil {
+		t.Fatalf("failed to write LICENSE: %v", err)
+	}
+	// A folder with the name of one isn't it, and isn't an error
+	if err := os.Mkdir(filepath.Join(dir, "README.md"), 0755); err != nil {
+		t.Fatalf("failed to make a folder: %v", err)
+	}
+	idx := docIndex(t, dir)
+
+	var buf bytes.Buffer
+	exp := zip.NewWriter(&buf)
+	out := cmdtest.CaptureStdout(t, func() { AddDocOverrides(&idx, exp) })
+	if err := exp.Close(); err != nil {
+		t.Fatalf("failed to close zip writer: %v", err)
+	}
+
+	if got, want := zipContents(t, &buf), map[string]string{"overrides/LICENSE": "the terms"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("zip contents = %v, want %v", got, want)
+	}
+	if out != "" {
+		t.Errorf("output = %q, want nothing said about the files the pack doesn't have", out)
+	}
 }

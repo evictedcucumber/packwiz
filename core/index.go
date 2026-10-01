@@ -143,6 +143,12 @@ func (in Index) RelIndexPath(p string) (string, error) {
 // the pack, so it isn't distributed with it (see ignoreDefaults).
 const ModListFile = "MODS.md"
 
+// DocFiles are the files in the pack's folder that describe the pack: its README, its licence and its release history.
+// The index leaves them out (see ignoreDefaults), as they aren't something a launcher should install or something that
+// changes the pack's version, but "packwiz modrinth export" puts whichever of them the pack has in the overrides of what
+// it exports, so they travel with it without being asked for.
+var DocFiles = []string{"README.md", "LICENSE", "CHANGELOG.md"}
+
 // IgnoreFile is the file in the pack's folder that lists what the index leaves out, in addition to ignoreDefaults. It is
 // itself left out of the index.
 const IgnoreFile = ".packwizignore"
@@ -165,7 +171,7 @@ var ignoreDefaults = []string{
 	"packwiz.exe",
 	"packwiz", // Note: also excludes packwiz/ as a directory - you can negate this pattern if you want a directory called packwiz
 
-	// Exclude repo metadata that commonly lives alongside a pack
+	// Exclude the files that describe the pack (see DocFiles): they are exported with it, but not through the index
 	"README.md",
 	"LICENSE",
 	// Exclude the pack's own release history (see the changelog package)

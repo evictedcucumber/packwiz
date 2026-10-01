@@ -223,3 +223,86 @@ func TestExportNamesThePackAfterItByDefault(t *testing.T) {
 		t.Errorf("Path = %q, want the pack's name and version", result.Path)
 	}
 }
+
+func TestExportPutsTheReadmeLicenseAndChangelogInTheOverridesWithoutTheIndexTrackingThem(t *testing.T) {
+	exportablePack(t, validMod("alpha"))
+	docs := map[string]string{"README.md": "about the pack", "LICENSE": "the terms", "CHANGELOG.md": "what changed"}
+	for name, content := range docs {
+		if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile() returned error: %v", err)
+		}
+	}
+	// The list of mods is made from the pack, not part of it
+	if err := os.WriteFile("MODS.md", []byte("- alpha"), 0o644); err != nil {
+		t.Fatalf("WriteFile() returned error: %v", err)
+	}
+	output := t.TempDir() + "/pack.mrpack"
+
+	if _, err := Export(ExportOptions{Output: output, RestrictDomains: true}, nil); err != nil {
+		t.Fatalf("Export() returned error: %v", err)
+	}
+
+	names, _ := readMrpack(t, output)
+	for name := range docs {
+		if !slices.Contains(names, "overrides/"+name) {
+			t.Errorf("the pack has %v, want %s in its overrides", names, name)
+		}
+	}
+	if slices.Contains(names, "overrides/MODS.md") {
+		t.Errorf("the pack has %v, want no list of mods", names)
+	}
+	r, err := zip.OpenReader(output)
+	if err != nil {
+		t.Fatalf("failed to open %s: %v", output, err)
+	}
+	defer func() { _ = r.Close() }()
+	for _, f := range r.File {
+		name, ok := strings.CutPrefix(f.Name, "overrides/")
+		if !ok || docs[name] == "" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("failed to open %s: %v", f.Name, err)
+		}
+		data, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		if string(data) != docs[name] {
+			t.Errorf("%s holds %q, want %q", f.Name, data, docs[name])
+		}
+	}
+
+	// They went in as themselves: the index, which a launcher installs from, doesn't list them
+	pack, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	index, err := pack.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex() returned error: %v", err)
+	}
+	for name := range docs {
+		if _, ok := index.Files[name]; ok {
+			t.Errorf("the index lists %s", name)
+		}
+	}
+}
+
+func TestExportOfAPackWithoutAReadmeOrLicenseIsNotAnError(t *testing.T) {
+	exportablePack(t, validMod("alpha"))
+	output := t.TempDir() + "/pack.mrpack"
+
+	result, err := Export(ExportOptions{Output: output, RestrictDomains: true}, nil)
+	if err != nil {
+		t.Fatalf("Export() returned error: %v", err)
+	}
+	if len(result.Notices) != 0 {
+		t.Errorf("the notices are %v, want none for files the pack doesn't have", result.Notices)
+	}
+	names, _ := readMrpack(t, output)
+	for _, name := range core.DocFiles {
+		if slices.Contains(names, "overrides/"+name) {
+			t.Errorf("the pack has %v, want no %s as there wasn't one", names, name)
+		}
+	}
+}

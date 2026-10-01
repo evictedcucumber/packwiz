@@ -45,11 +45,13 @@ each category the patterns of its files, written like those of .gitignore and re
 
     [categories]
     dev = ["flake.nix", "lefthook.yml", ".envrc"]
-    docs = ["README.md", "docs/"]
+    docs = ["docs/"]
 
 Each file in a category that changed is committed on its own, as "chore(dev): change flake.nix" (or add, or remove),
 after the mods and config files. They are chores, so they never change the pack's version or its changelog. A file in
-two categories is in the first by name, and a file the index tracks is never in one. These are the only categories:
+two categories is in the first by name, and a file the index tracks is never in one. The pack's README.md and LICENSE
+are in docs without being listed, unless .packwizfiles.toml puts them in another category. These are the only
+categories:
 
 %s
 Other files packwiz doesn't recognise (anything in the pack's directory that isn't tracked by the index, isn't in a

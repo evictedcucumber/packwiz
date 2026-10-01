@@ -272,6 +272,8 @@ func exportPack(pack core.Pack, index *core.Index, mods []*core.Mod, options Exp
 	}
 
 	cmdshared.AddNonMetafileOverrides(index, exp)
+	// The README, licence and changelog aren't in the index, so they go in on their own
+	cmdshared.AddDocOverrides(index, exp)
 
 	if err = exp.Close(); err != nil {
 		return nil, errors.New("Error writing export file: " + err.Error())

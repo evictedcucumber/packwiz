@@ -867,3 +867,35 @@ func TestIndexSearchModsFailsForAMetadataFileThatCantBeRead(t *testing.T) {
 		t.Errorf("SearchMods() returned %v, want an error that says which file couldn't be read", err)
 	}
 }
+
+func TestTheFilesThatDescribeThePackAreNotInItsIndex(t *testing.T) {
+	// DocFiles are exported without the index, so refreshing mustn't pick them up as well: they would be distributed by
+	// the launcher, claimed as config files and counted as changes to the pack
+	dir := t.TempDir()
+	packFile := filepath.Join(dir, "pack.toml")
+	indexFilePath := filepath.Join(dir, "index.toml")
+	mustWriteFile(t, packFile, "name = \"Test\"\n")
+	mustWriteFile(t, indexFilePath, "")
+	mustWriteFile(t, filepath.Join(dir, "config", "config.txt"), "fake config")
+	for _, name := range DocFiles {
+		mustWriteFile(t, filepath.Join(dir, name), "contents of "+name)
+	}
+
+	oldPackFile := viper.GetString("pack-file")
+	viper.Set("pack-file", packFile)
+	t.Cleanup(func() { viper.Set("pack-file", oldPackFile) })
+
+	idx := Index{HashFormat: "sha256", indexFile: indexFilePath, packRoot: dir, Files: IndexFiles{}}
+	if err := idx.Refresh(); err != nil {
+		t.Fatalf("Refresh() returned error: %v", err)
+	}
+
+	if _, ok := idx.Files["config/config.txt"]; !ok {
+		t.Error("expected config/config.txt to be added to the index")
+	}
+	for _, name := range DocFiles {
+		if _, ok := idx.Files[name]; ok {
+			t.Errorf("expected %s to be left out of the index", name)
+		}
+	}
+}
