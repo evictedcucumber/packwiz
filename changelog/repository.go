@@ -14,7 +14,9 @@ type Repository interface {
 	// LastChangedIn is the hash of the last commit to change a file, given relative to the pack root, or "" if there
 	// hasn't been one.
 	LastChangedIn(file string) (string, error)
-	// CommitPending commits every change to the pack that hasn't been committed yet, as "packwiz git commit" does.
+	// CommitPending commits every change to the pack that hasn't been committed yet, as "packwiz git commit" does. Unlike
+	// the command, it fails without committing anything if there are files in the pack's folder that packwiz doesn't
+	// recognise, as it can't say whether they belong in a release.
 	CommitPending() error
 	// PendingCommits describes the commits CommitPending would make, in order, without making any.
 	PendingCommits() ([]Commit, error)

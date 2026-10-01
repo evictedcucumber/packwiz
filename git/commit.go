@@ -4,40 +4,40 @@ import (
 	"fmt"
 	"maps"
 	"path"
-	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/notice"
 	"github.com/evictedcucumber/packwiz/internal/ui"
-	"github.com/spf13/viper"
 )
 
 // commitStep is one commit that packwiz git commit makes.
 type commitStep struct {
 	message string
-	// change is the mod change the commit is for. The last commit, which takes everything else that changed, is for
-	// none.
+	// change is the change the commit is for: a mod or a config file. The last commit, which takes what changed
+	// without being a change to either, is for none.
 	change *changelog.Change
 }
 
-// planCommits works out the commits for changes to a pack: one for each mod that was added, updated or removed, in
-// path order, and then one for everything else if there is any. There is something else if any other file changed, or
-// if rest says so, as it does for changes that aren't in changes, such as pinning a mod.
+// planCommits works out the commits for changes to a pack: one for each mod or file that was added, updated, changed
+// or removed, in path order, and then one for what else changed in the pack's own files if there is any. There is
+// something else if rest says so, as it does for changes that aren't in changes, such as pinning a mod.
 func planCommits(changes []changelog.Change, rest bool) []commitStep {
 	var steps []commitStep
-	var others []changelog.Change
-	for _, c := range changes {
-		if !c.IsMod() {
-			others = append(others, c)
-			continue
+	// Mods come first, each group in path order
+	for _, mods := range []bool{true, false} {
+		for _, c := range changes {
+			if c.IsMod() != mods {
+				continue
+			}
+			c := c
+			steps = append(steps, commitStep{message: Message([]changelog.Change{c}), change: &c})
 		}
-		c := c
-		steps = append(steps, commitStep{message: Message([]changelog.Change{c}), change: &c})
 	}
-	if len(others) > 0 || rest {
-		steps = append(steps, commitStep{message: Message(others)})
+	if rest {
+		steps = append(steps, commitStep{message: OtherMessage})
 	}
 	return steps
 }
@@ -67,7 +67,7 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 	}
 	c := committer{
 		r: r, w: w, indexPath: indexPath,
-		packPath: filepath.ToSlash(filepath.Base(viper.GetString("pack-file"))),
+		packPath: packFile(),
 	}
 
 	hasCommits, err := r.hasCommits()
@@ -76,6 +76,9 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 	}
 	if !hasCommits {
 		// The repository's first commit takes the whole pack: there is nothing before it for the pack to have changed from
+		if _, c.unknown, err = c.dirtyFiles(nil); err != nil {
+			return committer{}, nil, err
+		}
 		return c, []commitStep{{message: InitialMessage}}, nil
 	}
 
@@ -84,24 +87,28 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 		return committer{}, nil, fmt.Errorf("failed to read the pack as of the last commit: %w", err)
 	}
 	changes := changelog.Diff(c.head.Snapshot, current)
-	rest, err := c.changedBeyond(changes)
+	rest, unknown, err := c.changedBeyond(changes)
 	if err != nil {
 		return committer{}, nil, err
 	}
+	c.unknown = unknown
 	return c, planCommits(changes, rest), nil
 }
 
-// runCommit commits every change under the pack root: one commit for each mod that was added, updated or removed, and
-// then one for everything else. With dryRun, it only prints the commits it would make.
+// runCommit commits every change to the files the pack tracks: one commit for each mod or file that was added, updated,
+// changed or removed, and then one for what else changed in the pack's own files. Files packwiz doesn't recognise are
+// left alone. With dryRun, it only prints the commits it would make.
 func runCommit(dryRun bool) error {
 	c, steps, err := prepareCommit(dryRun)
 	if err != nil {
 		return err
 	}
 	if !dryRun {
+		c.warnUnknown()
 		return c.run(steps, printCommitted)
 	}
 
+	c.warnUnknown()
 	if len(steps) == 0 {
 		ui.Info.Println("Nothing to commit.")
 		return nil
@@ -118,10 +125,12 @@ func runCommit(dryRun bool) error {
 // saying anything on the terminal. There are none if there is nothing to commit. It fails if the pack isn't in a repository.
 func PlanCommit() (messages []string, notices []string, err error) {
 	collected := notice.Collect(func() {
+		var c committer
 		var steps []commitStep
-		if _, steps, err = prepareCommit(true); err != nil {
+		if c, steps, err = prepareCommit(true); err != nil {
 			return
 		}
+		c.warnUnknown()
 		for _, step := range steps {
 			messages = append(messages, step.message)
 		}
@@ -138,6 +147,7 @@ func CommitAll() (committed []string, notices []string, err error) {
 		if c, steps, err = prepareCommit(false); err != nil {
 			return
 		}
+		c.warnUnknown()
 		err = c.run(steps, func(message string) { committed = append(committed, message) })
 	})
 	return committed, plainNotices(collected), err
@@ -190,40 +200,110 @@ type committer struct {
 	indexPath, packPath string
 	// head is the pack as of the last commit, if there is one
 	head committedPack
+	// unknown are the files under the pack root that have changed but that packwiz doesn't recognise, which are left
+	// alone: they aren't part of the pack, so it isn't for packwiz to say what they are. Paths are relative to the
+	// pack root.
+	unknown []string
 }
 
-// modPath is the path of a mod's metadata file relative to the pack root, given the path the index knows it by.
+// modPath is the path of a mod's metadata file or of a config file relative to the pack root, given the path the index
+// knows it by.
 func (c committer) modPath(indexPath string) string {
 	return path.Join(path.Dir(c.indexPath), indexPath)
 }
 
-// changedBeyond reports whether anything other than the mod commits for changes would be left to commit: files that
-// changed but weren't classified as changes, like a mod being pinned, or that are about to, like a version being saved
-// to a mod that hasn't otherwise changed. (The index and pack.toml don't count if there are mod commits, as they
-// change with each of them.)
-func (c committer) changedBeyond(changes []changelog.Change) (bool, error) {
+// known are the paths, relative to the pack root, of the files that packwiz recognises: the ones the index lists (now
+// and as of the last commit, so a file that has been removed is still known), the index and pack.toml, and the files
+// that packwiz writes about the pack (its changelog and its list of mods).
+func (c committer) known() map[string]bool {
+	known := map[string]bool{
+		c.indexPath:            true,
+		c.packPath:             true,
+		changelog.HistoryFile:  true,
+		changelog.MarkdownFile: true,
+		core.ModListFile:       true,
+	}
+	for p := range c.w.Index.Files {
+		known[c.modPath(p)] = true
+	}
+	for p := range c.head.Index.Files {
+		known[c.modPath(p)] = true
+	}
+	return known
+}
+
+// dirtyFiles are the files under the pack root that differ from the last commit, divided into those packwiz recognises
+// and those it doesn't. The files that versions were looked up for are among the ones recognised, as they are about to
+// differ.
+func (c committer) dirtyFiles(versions map[string]string) (known, unknown []string, err error) {
 	dirty, err := c.r.dirtyPaths()
 	if err != nil {
-		return false, err
+		return nil, nil, err
 	}
-	// A commit for each of these takes its mod file along with the index and pack.toml
-	planned := make(map[string]bool)
-	for _, change := range changes {
-		if change.IsMod() {
-			planned[c.modPath(change.Path)] = true
+	for versioned := range versions {
+		dirty = append(dirty, c.modPath(versioned))
+	}
+	recognised := c.known()
+	for _, p := range dirty {
+		if recognised[p] {
+			known = append(known, p)
+		} else {
+			unknown = append(unknown, p)
 		}
 	}
-	for versioned := range c.w.Versions {
-		dirty = append(dirty, c.modPath(versioned))
+	slices.Sort(unknown)
+	return slices.Compact(known), slices.Compact(unknown), nil
+}
+
+// warnUnknown says which files are being left alone because packwiz doesn't recognise them.
+func (c committer) warnUnknown() {
+	if len(c.unknown) > 0 {
+		notice.Warnf("Leaving %d %s that packwiz doesn't recognise uncommitted: %s",
+			len(c.unknown), plural(len(c.unknown), "file"), strings.Join(c.unknown, ", "))
+	}
+}
+
+// errUnknown is the error for a release when there are files that packwiz doesn't recognise, because they would be
+// left out of it. Nothing says what they are, so a release can't be sure they don't belong in it.
+func (c committer) errUnknown() error {
+	if len(c.unknown) == 0 {
+		return nil
+	}
+	return fmt.Errorf("can't release while the pack's folder has %d %s that packwiz doesn't recognise: %s\nCommit %s with git, or ignore %s in .gitignore, then release again",
+		len(c.unknown), plural(len(c.unknown), "file"), strings.Join(c.unknown, ", "),
+		pronoun(len(c.unknown), "it", "them"), pronoun(len(c.unknown), "it", "them"))
+}
+
+func pronoun(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// changedBeyond reports whether anything other than the commits for changes would be left to commit among the files
+// packwiz recognises: files that changed but weren't classified as changes, like a mod being pinned, or that are about
+// to, like a version being saved to a mod that hasn't otherwise changed. (The index and pack.toml don't count if there
+// are commits for changes, as they change with each of them.) It also returns the files that changed that packwiz
+// doesn't recognise.
+func (c committer) changedBeyond(changes []changelog.Change) (rest bool, unknown []string, err error) {
+	dirty, unknown, err := c.dirtyFiles(c.w.Versions)
+	if err != nil {
+		return false, nil, err
+	}
+	// A commit for each of these takes its file along with the index and pack.toml
+	planned := make(map[string]bool)
+	for _, change := range changes {
+		planned[c.modPath(change.Path)] = true
 	}
 
 	for _, p := range dirty {
 		if planned[p] || (len(planned) > 0 && (p == c.indexPath || p == c.packPath)) {
 			continue
 		}
-		return true, nil
+		return true, unknown, nil
 	}
-	return false, nil
+	return false, unknown, nil
 }
 
 // run makes the commits. Each commit is a pack that is consistent by itself, so that any commit can be checked out
@@ -276,24 +356,25 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 	if err := c.writeIndexAndPack(c.w.Index.Files, c.w.Pack); err != nil {
 		return err
 	}
-	dirty, err := c.r.dirty()
+	left, _, err := c.dirtyFiles(nil)
 	if err != nil {
 		return err
 	}
-	if !dirty {
+	if len(left) == 0 {
 		if made == 0 {
 			notice.Infof("Nothing to commit.")
 		}
 		return nil
 	}
 
-	// Everything that's left, which is all of it if there were no mods to commit. There may be no step for it if
-	// nothing had changed but the committed index was out of date, which isn't known until it has been rewritten.
+	// What's left of the files packwiz recognises, which is all of them if there were no changes to commit. There may be
+	// no step for it if nothing had changed but the committed index was out of date, which isn't known until it has
+	// been rewritten.
 	message := OtherMessage
 	if n := len(steps); n > 0 && steps[n-1].change == nil {
 		message = steps[n-1].message
 	}
-	if err := c.r.commitAll(message); err != nil {
+	if err := c.r.commitPaths(message, left...); err != nil {
 		return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again to commit the rest",
 			made, len(steps), plural(len(steps), "commit"), firstLine(message), err)
 	}

@@ -264,7 +264,6 @@ func TestCommitAndReleaseFollowTheConfigDir(t *testing.T) {
 		Update:   src.UpdateData(),
 	})
 	p.write(t, "configureddefaults/config/sodium.json", "{}")
-	p.write(t, "config/sodium.json", "{}")
 	release(t, "")
 
 	if index := git(t, "show", "HEAD:index.toml"); strings.Contains(index, `"config/sodium.json"`) ||
@@ -287,11 +286,6 @@ func TestCommitAndReleaseFollowTheConfigDir(t *testing.T) {
 			func() { p.write(t, "configureddefaults/options.txt", "fov:90") },
 			"fix(config): add configureddefaults/options.txt",
 		},
-		{
-			"a file outside the folder changed, which the pack doesn't have",
-			func() { p.write(t, "config/sodium.json", `{"a": 2}`) },
-			"chore(pack): update pack files",
-		},
 	}
 	for _, step := range steps {
 		t.Run(step.name, func(t *testing.T) {
@@ -306,6 +300,18 @@ func TestCommitAndReleaseFollowTheConfigDir(t *testing.T) {
 		})
 	}
 
+	// A file outside the folder isn't the pack's, so it is left alone, and nothing is released until it is dealt with
+	p.write(t, "config/sodium.json", `{"a": 2}`)
+	before := commitCount(t)
+	commit(t)
+	if got := commitCount(t); got != before {
+		t.Errorf("commit count = %d, want %d: a file outside the folder isn't committed", got, before)
+	}
+	if err := runRelease("", ""); err == nil || !strings.Contains(err.Error(), "config/sodium.json") {
+		t.Fatalf("runRelease() = %v, want an error naming the file outside the folder", err)
+	}
+	git(t, "add", "config/sodium.json")
+	git(t, "commit", "-m", "docs: keep my own config")
 	release(t, "")
 
 	changelogMD := git(t, "show", "HEAD:CHANGELOG.md")
@@ -722,8 +728,8 @@ func TestRepoHasCommitsAndDirty(t *testing.T) {
 		t.Errorf("dirty() = %v, %v, want true with an untracked file", dirty, err)
 	}
 
-	if err := r.commitAll("chore: add a"); err != nil {
-		t.Fatalf("commitAll() returned error: %v", err)
+	if err := r.commitPaths("chore: add a", "a.txt"); err != nil {
+		t.Fatalf("commitPaths() returned error: %v", err)
 	}
 	if has, err := r.hasCommits(); err != nil || !has {
 		t.Errorf("hasCommits() = %v, %v, want true after a commit", has, err)
@@ -1354,7 +1360,7 @@ func TestCommitMakesOneCommitPerMod(t *testing.T) {
 	requireClean(t)
 }
 
-func TestModCommitsComeBeforeTheCommitForEverythingElse(t *testing.T) {
+func TestEachModAndConfigFileIsItsOwnCommitAndThePinGoesLast(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
@@ -1372,27 +1378,110 @@ func TestModCommitsComeBeforeTheCommitForEverythingElse(t *testing.T) {
 	commit(t)
 
 	want := []string{
+		// The mod first, then each file on its own, then what isn't a change to either
 		"feat(mods): add Zoom 2.0 (client)",
-		// The mod first, then everything that isn't a mod change together, however small
-		"fix(config): update 2 config files\n\n- add config/new.json\n- change config/sodium.json",
+		"fix(config): add config/new.json",
+		"fix(config): change config/sodium.json",
+		"chore(pack): update pack files",
 	}
-	if got := commitCount(t); got != before+2 {
-		t.Fatalf("commit count = %d, want %d", got, before+2)
+	if got := commitCount(t); got != before+4 {
+		t.Fatalf("commit count = %d, want %d", got, before+4)
 	}
-	if got := lastMessages(t, 2); !reflect.DeepEqual(got, want) {
+	if got := lastMessages(t, 4); !reflect.DeepEqual(got, want) {
 		t.Errorf("commit messages =\n%q\nwant\n%q", got, want)
 	}
-	mods, rest := lastCommits(t, 2)[0], lastCommits(t, 2)[1]
-	if got := commitFiles(t, mods); !reflect.DeepEqual(got, []string{"index.toml", "mods/zoom.pw.toml", "pack.toml"}) {
-		t.Errorf("the mod's commit changed %v; the config and the pin are not part of it", got)
+	commits := lastCommits(t, 4)
+	for i, files := range [][]string{
+		{"index.toml", "mods/zoom.pw.toml", "pack.toml"},
+		{"config/new.json", "index.toml", "pack.toml"},
+		{"config/sodium.json", "index.toml", "pack.toml"},
+	} {
+		if got := commitFiles(t, commits[i]); !reflect.DeepEqual(got, files) {
+			t.Errorf("commit %d changed %v, want %v", i+1, got, files)
+		}
+		requireConsistentPack(t, "", commits[i])
 	}
 	// The pin, a change to a mod that isn't an add, update or removal, goes in the last commit
-	if got := commitFiles(t, rest); !slices.Contains(got, "mods/sodium.pw.toml") || !slices.Contains(got, "config/new.json") {
-		t.Errorf("the last commit changed %v, want the config files and the pinned mod", got)
+	if got := commitFiles(t, commits[3]); !slices.Contains(got, "mods/sodium.pw.toml") {
+		t.Errorf("the last commit changed %v, want the pinned mod", got)
 	}
-	requireConsistentPack(t, "", mods)
-	requireConsistentPack(t, "", rest)
+	requireConsistentPack(t, "", commits[3])
 	requireClean(t)
+}
+
+func TestFilesPackwizDoesNotRecogniseAreLeftUncommitted(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	commit(t)
+	before := commitCount(t)
+
+	// README.md is ignored by packwiz, so the index doesn't list it; the other is in .direnv/, a folder it ignores
+	p.write(t, "README.md", "my pack")
+	p.write(t, ".direnv/cache", "cached")
+	p.write(t, "config/sodium.json", "{}")
+	p.mod(t, "Zoom", core.ClientSide, "2.0")
+	out := commit(t)
+
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, []string{"feat(mods): add Zoom 2.0 (client)", "fix(config): add config/sodium.json"}) {
+		t.Errorf("commit messages = %q", got)
+	}
+	if got := commitCount(t); got != before+2 {
+		t.Errorf("commit count = %d, want %d", got, before+2)
+	}
+	status := git(t, "status", "--porcelain", "-uall")
+	if !strings.Contains(status, "README.md") || !strings.Contains(status, ".direnv/cache") || strings.Contains(status, "config") {
+		t.Errorf("git status =\n%s\nwant only the files packwiz doesn't recognise left", status)
+	}
+	if !strings.Contains(out, ".direnv/cache, README.md") {
+		t.Errorf("output = %q, want the files left uncommitted to be listed", out)
+	}
+	for _, rev := range lastCommits(t, 2) {
+		if got := commitFiles(t, rev); slices.Contains(got, "README.md") || slices.Contains(got, ".direnv/cache") {
+			t.Errorf("commit %s changed %v, which has a file packwiz doesn't recognise", rev, got)
+		}
+	}
+
+	t.Run("nothing else to commit", func(t *testing.T) {
+		before := commitCount(t)
+		if out := commit(t); !strings.Contains(out, "Nothing to commit.") {
+			t.Errorf("output = %q, want it to say there's nothing to commit", out)
+		}
+		if got := commitCount(t); got != before {
+			t.Errorf("commit count = %d, want %d", got, before)
+		}
+	})
+	t.Run("a release refuses, committing nothing", func(t *testing.T) {
+		p.mod(t, "Iris", core.ClientSide, "1.0")
+		before := commitCount(t)
+		err := runRelease("", "")
+		if err == nil || !strings.Contains(err.Error(), "README.md") || !strings.Contains(err.Error(), ".direnv/cache") {
+			t.Fatalf("runRelease() = %v, want an error naming the files", err)
+		}
+		if got := commitCount(t); got != before {
+			t.Errorf("commit count = %d, want %d: nothing is committed when the release is refused", got, before)
+		}
+	})
+	t.Run("a release goes ahead once they are dealt with", func(t *testing.T) {
+		git(t, "add", "README.md", ".direnv/cache")
+		git(t, "commit", "-m", "docs: add my files")
+		release(t, "")
+		if tags := git(t, "tag", "--list"); !strings.Contains(tags, "v") {
+			t.Errorf("tags = %q, want a release tag", tags)
+		}
+	})
+}
+
+func TestTheFirstCommitLeavesUnrecognisedFilesToo(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, "README.md", "my pack")
+	commit(t)
+
+	if got := git(t, "ls-files"); strings.Contains(got, "README.md") || !strings.Contains(got, "mods/sodium.pw.toml") {
+		t.Errorf("committed files =\n%s\nwant the pack but not README.md", got)
+	}
 }
 
 func TestPinningAModAlongsideAModChangeIsItsOwnChoreCommit(t *testing.T) {
@@ -1765,13 +1854,25 @@ func TestPlanCommits(t *testing.T) {
 			}
 		}
 	})
-	t.Run("other files come last, together", func(t *testing.T) {
-		steps := planCommits([]changelog.Change{config, add("a")}, false)
-		if want := []string{"feat(mods): add a 1 (client)", "fix(config): change config/a.json"}; !reflect.DeepEqual(messages(steps), want) {
+	t.Run("files come after mods, each on its own", func(t *testing.T) {
+		other := changelog.Change{Kind: changelog.FileAdded, Path: "config/b.json"}
+		steps := planCommits([]changelog.Change{config, other, add("a")}, false)
+		if want := []string{"feat(mods): add a 1 (client)", "fix(config): change config/a.json", "fix(config): add config/b.json"}; !reflect.DeepEqual(messages(steps), want) {
 			t.Errorf("messages = %q, want %q", messages(steps), want)
 		}
-		if steps[1].change != nil {
-			t.Error("the last step is for a mod, but it takes everything else")
+		for i, s := range steps {
+			if s.change == nil {
+				t.Errorf("step %d is for no change, but each one has its own", i)
+			}
+		}
+	})
+	t.Run("what isn't a change comes last", func(t *testing.T) {
+		steps := planCommits([]changelog.Change{config, add("a")}, true)
+		if want := []string{"feat(mods): add a 1 (client)", "fix(config): change config/a.json", "chore(pack): update pack files"}; !reflect.DeepEqual(messages(steps), want) {
+			t.Errorf("messages = %q, want %q", messages(steps), want)
+		}
+		if steps[2].change != nil {
+			t.Error("the last step is for a change, but it takes everything else")
 		}
 	})
 	t.Run("nothing to commit", func(t *testing.T) {

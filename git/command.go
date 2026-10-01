@@ -29,13 +29,18 @@ var gitCmd = &cobra.Command{
 // commitCmd represents the git commit command
 var commitCmd = &cobra.Command{
 	Use:   "commit",
-	Short: "Commit each mod that changed on its own, then everything else, with conventional commit messages",
-	Long: `Refreshes the index, then commits every change under the pack's directory (except what git ignores), making one
-commit for each mod that was added, updated or removed, and one for everything else. Each commit has a conventional
-commit message, whose type follows how far the change raises the pack's version: feat! for a change to a mod that
-runs on the server, feat for adding or removing a client-only mod, and fix for a client-only mod update or a config
-change. Every commit also holds an index and pack.toml that describe the pack as it is in that commit, so each one is a
-valid pack (though mods go in alphabetical order, so one can come before a mod it depends on).`,
+	Short: "Commit each mod and config file that changed on its own, with conventional commit messages",
+	Long: `Refreshes the index, then commits every change to the files the pack tracks, making one commit for each mod or
+config file that was added, updated, changed or removed, and one for what else changed in pack.toml and the index (a
+mod being pinned, say). Each commit has a conventional commit message, whose type follows how far the change raises
+the pack's version: feat! for a change to a mod that runs on the server, feat for adding or removing a client-only
+mod, and fix for a client-only mod update or a config change. Every commit also holds an index and pack.toml that
+describe the pack as it is in that commit, so each one is a valid pack (though files go in alphabetical order, so a
+mod can come before one it depends on).
+
+Files that packwiz doesn't recognise (anything in the pack's directory that isn't tracked by the index, isn't the
+index or pack.toml, and isn't the pack's changelog or list of mods) are left uncommitted, and are listed. Commit them
+yourself with git; "packwiz changelog release" won't release while they are there.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runCommit(dryRunFlag); err != nil {
@@ -69,6 +74,11 @@ func init() {
 	releaseCmd.Flags().StringVar(&sinceFlag, "since", "", "Read the commits made after this one (a hash, tag or branch), rather than after the last release")
 
 	cmd.Add(gitCmd)
+}
+
+// packFile is the path of pack.toml relative to the pack root, always with forward slashes as git uses them
+func packFile() string {
+	return filepath.ToSlash(filepath.Base(viper.GetString("pack-file")))
 }
 
 func packRoot() string {
@@ -117,7 +127,8 @@ func runRelease(versionOverride, since string) error {
 // so failing to commit or tag it has to say how to finish the job by hand.
 func commitRelease(r repo, release changelog.Release) (tag string, err error) {
 	tag = TagName(release.Version)
-	if err := r.commitAll(ReleaseMessage(release.Version)); err != nil {
+	// Only what a release writes: anything else in the pack's directory isn't part of it
+	if err := r.commitPaths(ReleaseMessage(release.Version), changelog.HistoryFile, changelog.MarkdownFile, packFile()); err != nil {
 		return "", fmt.Errorf("released %s, but couldn't commit it: %w\nCommit the changed files yourself, then tag the commit %s", release.Version, err, tag)
 	}
 	if err := r.tag(tag, "Release "+release.Version); err != nil {

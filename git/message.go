@@ -8,8 +8,9 @@
 //	config or other file: any change     patch     fix(config): change config/sodium.json
 //	anything else (pins, pack.toml, ...) none      chore(pack): update pack files
 //
-// packwiz git commit makes one commit for each mod that was added, updated or removed, then one for everything else,
-// which takes the type of the most significant change in it. A release is committed as "chore(release): X.Y.Z" and
+// packwiz git commit makes one commit for each mod or config file that was added, updated, changed or removed, then
+// one for anything else in the pack's own files, such as a mod being pinned. Files it doesn't recognise are left
+// uncommitted. A release is committed as "chore(release): X.Y.Z" and
 // tagged "vX.Y.Z".
 package git
 

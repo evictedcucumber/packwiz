@@ -154,29 +154,42 @@ func (r repo) dirty() (bool, error) {
 }
 
 // dirtyPaths lists the files under the pack root that differ from HEAD, or are new and not ignored by git, relative to
-// the pack root. It needs a commit to compare with.
+// the pack root. Without a commit to compare with, it is every file that isn't ignored.
 func (r repo) dirtyPaths() ([]string, error) {
-	changed, err := r.run("", "diff", "--name-only", "--relative", "-z", "HEAD", "--", ".")
+	hasCommits, err := r.hasCommits()
 	if err != nil {
 		return nil, err
+	}
+	var listings [][]byte
+	if hasCommits {
+		// Without renames, a file that moved is the old path gone and the new one added, and both are listed
+		changed, err := r.run("", "diff", "--name-only", "--no-renames", "--relative", "-z", "HEAD", "--", ".")
+		if err != nil {
+			return nil, err
+		}
+		listings = append(listings, changed)
+	} else {
+		staged, err := r.run("", "ls-files", "--cached", "-z", "--", ".")
+		if err != nil {
+			return nil, err
+		}
+		listings = append(listings, staged)
 	}
 	untracked, err := r.run("", "ls-files", "--others", "--exclude-standard", "-z", "--", ".")
 	if err != nil {
 		return nil, err
 	}
+	listings = append(listings, untracked)
 
 	var paths []string
-	for _, name := range strings.Split(string(changed)+string(untracked), "\x00") {
-		if name != "" {
-			paths = append(paths, name)
+	for _, listing := range listings {
+		for _, name := range strings.Split(string(listing), "\x00") {
+			if name != "" {
+				paths = append(paths, name)
+			}
 		}
 	}
 	return paths, nil
-}
-
-// commitAll commits every change under the pack root, and nothing outside it, even if something else was staged.
-func (r repo) commitAll(message string) error {
-	return r.commit(message, ".")
 }
 
 // commitPaths commits the given files, given relative to the pack root, as they are on disk, and nothing else, even
