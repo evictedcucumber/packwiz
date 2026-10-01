@@ -261,7 +261,7 @@ func (v *validation) checkMod(e entry) {
 	}
 
 	if mod.Version == "" {
-		v.warnf(e, "doesn't record its version; 'packwiz fix' and 'packwiz git commit' save it")
+		v.warnf(e, "doesn't record its version; 'packwiz fix' and 'packwiz commit' save it")
 	}
 }
 

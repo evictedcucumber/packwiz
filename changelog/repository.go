@@ -14,12 +14,12 @@ type Repository interface {
 	// LastChangedIn is the hash of the last commit to change a file, given relative to the pack root, or "" if there
 	// hasn't been one.
 	LastChangedIn(file string) (string, error)
-	// CheckCommitted fails if the pack can't be released as it is: it has changes that "packwiz git commit" hasn't
+	// CheckCommitted fails if the pack can't be released as it is: it has changes that "packwiz commit" hasn't
 	// committed yet, which the error says to run it for, or it is in a state that can't be released from, such as having
 	// files that packwiz doesn't recognise, which a release can't say belong in it, or config files that no mod, mod loader
 	// or the pack claims. It changes nothing.
 	CheckCommitted() error
-	// PendingCommits describes the commits "packwiz git commit" would make, in order, without making any.
+	// PendingCommits describes the commits "packwiz commit" would make, in order, without making any.
 	PendingCommits() ([]Commit, error)
 }
 

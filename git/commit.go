@@ -15,7 +15,7 @@ import (
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
-// commitStep is one commit that packwiz git commit makes.
+// commitStep is one commit that packwiz commit makes.
 type commitStep struct {
 	message string
 	// change is the change the commit is for: a mod or a config file. The last commit, which takes what changed
@@ -52,9 +52,9 @@ func planCommits(changes []changelog.Change, others []commitStep, rest bool) []c
 	return steps
 }
 
-// prepareCommit works out the commits that packwiz git commit would make. With dryRun, failing to look up the versions
+// prepareCommit works out the commits that packwiz commit would make. With preview, failing to look up the versions
 // of mods that don't record one isn't an error, as they are only needed to describe commits that won't be made.
-func prepareCommit(dryRun bool) (committer, []commitStep, error) {
+func prepareCommit(preview bool) (committer, []commitStep, error) {
 	// Before anything else, as there is no point loading the pack, which can need the network, to say there's nowhere
 	// to commit it
 	r, err := openRepo(packRoot())
@@ -63,7 +63,7 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 	}
 	// Committing saves the versions looked up for mods that don't record one, so a failure to look them up mustn't
 	// be papered over
-	w, err := changelog.LoadWorking(!dryRun)
+	w, err := changelog.LoadWorking(!preview)
 	if err != nil {
 		return committer{}, nil, err
 	}
@@ -119,13 +119,13 @@ func prepareCommit(dryRun bool) (committer, []commitStep, error) {
 
 // runCommit commits every change to the files the pack tracks: one commit for each mod or file that was added, updated,
 // changed or removed, and then one for what else changed in the pack's own files. Files packwiz doesn't recognise are
-// left alone. With dryRun, it only prints the commits it would make.
-func runCommit(dryRun bool) error {
-	c, steps, err := prepareCommit(dryRun)
+// left alone. With preview, it only prints the commits it would make.
+func runCommit(preview bool) error {
+	c, steps, err := prepareCommit(preview)
 	if err != nil {
 		return err
 	}
-	if !dryRun {
+	if !preview {
 		c.warnUnknown()
 		return c.run(steps, printCommitted)
 	}
@@ -143,7 +143,7 @@ func runCommit(dryRun bool) error {
 	return nil
 }
 
-// PlanCommit works out the commits that "packwiz git commit" would make, as their messages, without making any and without
+// PlanCommit works out the commits that "packwiz commit" would make, as their messages, without making any and without
 // saying anything on the terminal. There are none if there is nothing to commit. It fails if the pack isn't in a repository.
 func PlanCommit() (messages []string, notices []string, err error) {
 	collected := notice.Collect(func() {
@@ -160,7 +160,7 @@ func PlanCommit() (messages []string, notices []string, err error) {
 	return messages, plainNotices(collected), err
 }
 
-// CommitAll commits the pack as "packwiz git commit" does, without saying anything on the terminal, and returns the messages
+// CommitAll commits the pack as "packwiz commit" does, without saying anything on the terminal, and returns the messages
 // of the commits that were made.
 func CommitAll() (committed []string, notices []string, err error) {
 	collected := notice.Collect(func() {
@@ -360,7 +360,7 @@ func (c committer) warnUnknown() {
 }
 
 // errNotReleasable is the error for a release when the pack can't be released as it is, given the commits that
-// "packwiz git commit" would make: there are changes that aren't committed, which that command commits; there are files
+// "packwiz commit" would make: there are changes that aren't committed, which that command commits; there are files
 // that packwiz doesn't recognise, which would be left out of the release and which it can't say don't belong in it; or
 // there are config files that nothing claims, which are part of the pack but belong to nothing. It is nil if there is
 // none of these.
@@ -374,7 +374,7 @@ func (c committer) errNotReleasable(steps []commitStep) error {
 		if n > 5 {
 			lines = append(lines, fmt.Sprintf("  and %d more", n-5))
 		}
-		problems = append(problems, fmt.Sprintf("the pack has changes that aren't committed (%d %s):\n%s\nRun \"packwiz git commit\" to commit them",
+		problems = append(problems, fmt.Sprintf("the pack has changes that aren't committed (%d %s):\n%s\nRun \"packwiz commit\" to commit them",
 			n, plural(n, "commit"), strings.Join(lines, "\n")))
 	}
 	if n := len(c.unknown); n > 0 {
@@ -461,7 +461,7 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 			}
 			if err != nil {
 				_ = c.writeIndexAndPack(c.w.Index.Files, c.w.Pack)
-				return fmt.Errorf("couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again", firstLine(step.message), err)
+				return fmt.Errorf("couldn't commit %q: %w\nFix that and run \"packwiz commit\" again", firstLine(step.message), err)
 			}
 			made++
 			report(step.message)
@@ -471,7 +471,7 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 			// A file in a category: the pack doesn't change, so only the file is committed
 			if err := c.r.commitPaths(step.message, step.path); err != nil {
 				_ = c.writeIndexAndPack(c.w.Index.Files, c.w.Pack)
-				return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again to commit the rest",
+				return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz commit\" again to commit the rest",
 					made, len(steps), plural(len(steps), "commit"), firstLine(step.message), err)
 			}
 			made++
@@ -495,7 +495,7 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 		if err != nil {
 			// Leave the index and pack.toml as they should end up, not as they were for this commit
 			_ = c.writeIndexAndPack(c.w.Index.Files, c.w.Pack)
-			return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again to commit the rest",
+			return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz commit\" again to commit the rest",
 				made, len(steps), plural(len(steps), "commit"), firstLine(step.message), err)
 		}
 		made++
@@ -522,7 +522,7 @@ func (c committer) run(steps []commitStep, report func(message string)) error {
 	// been rewritten.
 	message := OtherMessage
 	if err := c.r.commitPaths(message, left...); err != nil {
-		return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz git commit\" again to commit the rest",
+		return fmt.Errorf("committed %d of %d %s, but couldn't commit %q: %w\nFix that and run \"packwiz commit\" again to commit the rest",
 			made, len(steps), plural(len(steps), "commit"), firstLine(message), err)
 	}
 	report(message)

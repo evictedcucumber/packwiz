@@ -240,7 +240,7 @@ func TestReleaseRefusesWhileChangesAreNotCommittedAndChangesNothing(t *testing.T
 		t.Errorf("events = %v, want only the check", repo.events)
 	}
 	if len(repo.pending) != 1 {
-		t.Errorf("pending = %v, want the changes left for \"packwiz git commit\"", repo.pending)
+		t.Errorf("pending = %v, want the changes left for \"packwiz commit\"", repo.pending)
 	}
 	requireUnchanged(t, before)
 }

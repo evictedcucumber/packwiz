@@ -35,7 +35,7 @@ do, on screens. Go between them with tab and shift+tab, or with the number of a 
   6 Deps       what each mod needs and whether the pack has it, as "packwiz modrinth deps" does, and saving what was looked up
   7 Config     the pack's config files, as "packwiz config list" has them, and who owns each, as "packwiz config relate" says
   8 Export     export the pack as a .mrpack for Modrinth, as "packwiz modrinth export" does
-  9 Release    the release that the pack's changes would make ("packwiz changelog"), committing what hasn't been ("packwiz git
+  9 Release    the release that the pack's changes would make ("packwiz changelog"), committing what hasn't been ("packwiz
                commit"), releasing ("packwiz changelog release", "packwiz git release") and writing CHANGELOG.md
 
 In a folder that has no pack it opens on a screen that makes one, as "packwiz init" does.

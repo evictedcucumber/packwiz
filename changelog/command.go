@@ -34,7 +34,7 @@ var (
 var changelogCmd = &cobra.Command{
 	Use:   "changelog",
 	Short: "Show the changes since the last release and the version they would produce",
-	Long: `Reads the commits made since the last release, which are conventional commits (see "packwiz git commit"), and shows
+	Long: `Reads the commits made since the last release, which are conventional commits (see "packwiz commit"), and shows
 the release they would make and the version it would have. Nothing is committed or saved.
 
 A pack that isn't in a git repository has no commits to read, so its changes are found by comparing it with the pack as
@@ -65,11 +65,11 @@ var releaseCmd = &cobra.Command{
 	Long: `Reads the commits made since the last release, works out the version they make from their types (a breaking change
 is major, a feature is minor and a fix is patch), updates the version in pack.toml and adds the release to CHANGELOG.md.
 
-It doesn't commit anything itself: it fails if the pack has changes that aren't committed, so run "packwiz git commit"
+It doesn't commit anything itself: it fails if the pack has changes that aren't committed, so run "packwiz commit"
 first. It also fails if the pack has files that packwiz doesn't recognise, or config files that nothing claims, as it
 can't say whether they belong in the release.
 
-Besides what "packwiz git commit" writes for mods and config files, any conventional commit that is a feature, a fix
+Besides what "packwiz commit" writes for mods and config files, any conventional commit that is a feature, a fix
 or breaking is listed in the release in its own words, and counts towards the version.
 
 The first release describes the pack as it is, and keeps the version already in pack.toml.
@@ -417,7 +417,7 @@ type pending struct {
 	// current is the pack as it is now, which a release made without a repository keeps for the next one to compare with
 	current Snapshot
 	// versions are the versions found for mods that don't record one. A repository has them saved by committing (see
-	// "packwiz git commit"), so without one a release saves them.
+	// "packwiz commit"), so without one a release saves them.
 	versions map[string]string
 	// inRepo is whether the pack is in a repository, and so whether changes were read from its log
 	inRepo bool
@@ -430,7 +430,7 @@ type pending struct {
 // loadPending reads the pack, and what has changed in it since its last release: the commits made since, or if repo is
 // nil, because the pack isn't in a repository, how it differs from the pack as of that release. strict is whether
 // failing to look up the versions of mods that don't record one is an error (see LoadWorking). withPending is whether
-// to include the commits that "packwiz git commit" would make as well as those that have been made, for a preview.
+// to include the commits that "packwiz commit" would make as well as those that have been made, for a preview.
 func loadPending(repo Repository, strict bool, since string, withPending bool) (pending, error) {
 	history, err := LoadHistory(historyPath())
 	if err != nil {

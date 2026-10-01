@@ -30,10 +30,10 @@ type releaseOutcome struct {
 // releaseBackend is what the release screen needs of the pack and of its repository. Each reads the pack when it is called,
 // as the other backends do.
 type releaseBackend interface {
-	// loadRelease works out the next release, as "packwiz changelog" does, and what "packwiz git commit" would commit if the
+	// loadRelease works out the next release, as "packwiz changelog" does, and what "packwiz commit" would commit if the
 	// pack is in a repository. version, if it isn't empty, is used for the release instead of the one that is worked out.
 	loadRelease(version string) (releaseData, error)
-	// commit commits the pack, as "packwiz git commit" does, and says which commits it made.
+	// commit commits the pack, as "packwiz commit" does, and says which commits it made.
 	commit() (committed []string, notices []string, err error)
 	// release records a release, as "packwiz changelog release" does, which fails if the pack has changes that aren't
 	// committed. With tag it

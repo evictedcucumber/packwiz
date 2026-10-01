@@ -35,17 +35,18 @@ Join the upstream packwiz Discord server if you need help [here](https://discord
 
 ## Changelog and releases
 
-A pack manages its own release history, from its git history. `packwiz git commit` turns changes to the pack into conventional commits, and a release is made from the commits since the last one: the changelog is what they say, and the version is what they add up to. (A pack that isn't in a git repository can still have a changelog, just [without the commits to read](#without-git).)
+A pack manages its own release history, from its git history. `packwiz commit` turns changes to the pack into conventional commits, and a release is made from the commits since the last one: the changelog is what they say, and the version is what they add up to. (A pack that isn't in a git repository can still have a changelog, just [without the commits to read](#without-git).)
 
 ```
 packwiz changelog          # preview the release the commits since the last one would make, including changes not committed yet
 packwiz changelog --save   # write CHANGELOG.md from the releases already recorded, without releasing
 packwiz changelog release  # record a release of what is committed: bump pack.toml's version and update CHANGELOG.md
-packwiz git commit         # commit each mod and config file that changed on its own; files packwiz doesn't track are left alone
+packwiz commit             # commit each mod and config file that changed on its own; files packwiz doesn't track are left alone
+packwiz commit --preview   # print the commits that would be made, without making any
 packwiz git release        # changelog release, then commit it as "chore(release): X.Y.Z" and tag it "vX.Y.Z"
 ```
 
-So after adding, updating and removing mods, run `packwiz git commit` and then `packwiz changelog release`, which releases what is in the log. A release never commits anything itself: if the pack has changes that aren't committed it fails, saying to run `packwiz git commit` first. The version is bumped by the most significant commit since the last release:
+So after adding, updating and removing mods, run `packwiz commit` and then `packwiz changelog release`, which releases what is in the log. A release never commits anything itself: if the pack has changes that aren't committed it fails, saying to run `packwiz commit` first. The version is bumped by the most significant commit since the last release:
 
 | Change | Version | Commit |
 | --- | --- | --- |
@@ -55,7 +56,7 @@ So after adding, updating and removing mods, run `packwiz git commit` and then `
 | a config or other file changed | patch | `fix(config): change config/sodium.json` |
 | anything else (pinning a mod, `pack.toml` edits, ...) | none | `chore(pack): update pack files` |
 
-`packwiz git commit` makes a commit for each mod that changed, so after adding, updating and removing mods you only need to run it once:
+`packwiz commit` makes a commit for each mod that changed, so after adding, updating and removing mods you only need to run it once:
 
 ```
 feat(mods)!: add Lithium 0.12.0 (server)
@@ -82,11 +83,11 @@ A category is one of a fixed set, which becomes the scope of its commits (any ot
 | `build` | building and packaging: scripts, `Makefile`, `Dockerfile` |
 | `assets` | images and media: `icon.png`, `screenshots/` |
 | `misc` | anything else kept with the pack |
- `packwiz git commit` then commits each file in one on its own, after the mods and config files and before the final `chore(pack)` commit, as `chore(dev): add flake.nix`, `chore(dev): change flake.nix` or `chore(docs): remove README.md`. They are chores, so they never affect the version or the changelog. A file that is in two categories goes in the first by name, and a file the index tracks is never one of these (it is a pack file). `packwiz init` writes one with every category and the files that usually go in each (an existing one is left alone), for you to change. Like `.packwizignore`, `.packwizfiles.toml` isn't tracked by the index, so it isn't distributed with the pack; it is committed in the `chore(pack)` commit.
+ `packwiz commit` then commits each file in one on its own, after the mods and config files and before the final `chore(pack)` commit, as `chore(dev): add flake.nix`, `chore(dev): change flake.nix` or `chore(docs): remove README.md`. They are chores, so they never affect the version or the changelog. A file that is in two categories goes in the first by name, and a file the index tracks is never one of these (it is a pack file). `packwiz init` writes one with every category and the files that usually go in each (an existing one is left alone), for you to change. Like `.packwizignore`, `.packwizfiles.toml` isn't tracked by the index, so it isn't distributed with the pack; it is committed in the `chore(pack)` commit.
 
-Files that are in no category, and aren't packwiz's own, are different: (anything in the pack's folder that is neither tracked by the index, nor in a category, nor `index.toml`, `pack.toml`, `changelog.toml`, `CHANGELOG.md`, `MODS.md`, `.packwizignore` or `.packwizfiles.toml`, such as `README.md` or a file `.packwizignore` leaves out) are never committed: the command lists them and leaves them for you to commit with git, and `packwiz changelog release` refuses to release while there are any, since it can't say whether they belong in it. It refuses for a tracked config file that nothing claims too (the same thing `validate` fails on): those are committed, with a warning, but the pack is in a bad state until you claim them with `packwiz config relate` or delete them. Commit them yourself, or add them to `.gitignore`, and release again. Every commit holds an `index.toml` and `pack.toml` that describe the pack as it is in that commit, not just as it ends up, so each one is a valid pack whose files match its index, and `git bisect` can be used to find the mod that broke something. Because mods go in alphabetical order, a mod can be committed before one it depends on. If a commit fails (a hook refused it, say), the ones before it stay made, and running the command again carries on with the rest. The first commit in a new repository is a `chore(pack): initial commit` of just `pack.toml` and an index with nothing in it; every mod and file is then committed after it on its own, like any other, so a new pack's history reads the same as the rest. `--dry-run` prints the commits it would make.
+Files that are in no category, and aren't packwiz's own, are different: (anything in the pack's folder that is neither tracked by the index, nor in a category, nor `index.toml`, `pack.toml`, `changelog.toml`, `CHANGELOG.md`, `MODS.md`, `.packwizignore` or `.packwizfiles.toml`, such as `README.md` or a file `.packwizignore` leaves out) are never committed: the command lists them and leaves them for you to commit with git, and `packwiz changelog release` refuses to release while there are any, since it can't say whether they belong in it. It refuses for a tracked config file that nothing claims too (the same thing `validate` fails on): those are committed, with a warning, but the pack is in a bad state until you claim them with `packwiz config relate` or delete them. Commit them yourself, or add them to `.gitignore`, and release again. Every commit holds an `index.toml` and `pack.toml` that describe the pack as it is in that commit, not just as it ends up, so each one is a valid pack whose files match its index, and `git bisect` can be used to find the mod that broke something. Because mods go in alphabetical order, a mod can be committed before one it depends on. If a commit fails (a hook refused it, say), the ones before it stay made, and running the command again carries on with the rest. The first commit in a new repository is a `chore(pack): initial commit` of just `pack.toml` and an index with nothing in it; every mod and file is then committed after it on its own, like any other, so a new pack's history reads the same as the rest. `--preview` prints the commits it would make, in the order it would make them, without committing anything or changing the pack.
 
-**How a release reads the log.** A release covers the commits made after the one the last release was made at, which `changelog.toml` records (`--since <commit, tag or branch>` reads from somewhere else instead). What `packwiz git commit` writes is read back as the change it describes. Several commits to the same mod are reduced to what they add up to, so a mod that was added and then updated is just added, and one added and then removed isn't mentioned, and doesn't make the release major. Other conventional commits count too, written by hand with plain git and shown in their own words: a `feat` is minor, a `fix` or `perf` is patch, and anything marked breaking (`feat!:` or a `BREAKING CHANGE:` footer) is major. Chores, documentation and commits that aren't conventional are left out.
+**How a release reads the log.** A release covers the commits made after the one the last release was made at, which `changelog.toml` records (`--since <commit, tag or branch>` reads from somewhere else instead). What `packwiz commit` writes is read back as the change it describes. Several commits to the same mod are reduced to what they add up to, so a mod that was added and then updated is just added, and one added and then removed isn't mentioned, and doesn't make the release major. Other conventional commits count too, written by hand with plain git and shown in their own words: a `feat` is minor, a `fix` or `perf` is patch, and anything marked breaking (`feat!:` or a `BREAKING CHANGE:` footer) is major. Chores, documentation and commits that aren't conventional are left out.
 
 ```
 fix(config): lower the particle count
@@ -121,19 +122,19 @@ The first release has no log to read, so it describes the pack as it is, and kee
 - **Breaking:** update to Minecraft 1.21.4
 ```
 
-Mods added before `version` was recorded have it looked up from Modrinth and saved to their `.pw.toml` the next time you run `packwiz git commit` (or, in a pack that isn't in a repository, `packwiz changelog release`) (`packwiz changelog` shows the versions but saves nothing), so that needs the network once. Releases made before then show file names, which are replaced with the versions too wherever the mod is still on that file.
+Mods added before `version` was recorded have it looked up from Modrinth and saved to their `.pw.toml` the next time you run `packwiz commit` (or, in a pack that isn't in a repository, `packwiz changelog release`) (`packwiz changelog` shows the versions but saves nothing), so that needs the network once. Releases made before then show file names, which are replaced with the versions too wherever the mod is still on that file.
 
 ### Without git
 
-`packwiz git commit` and `packwiz git release` need the pack to be in a git repository, and refuse, before doing anything else, when it isn't. `packwiz changelog` and `packwiz changelog release` don't: they say that there is no git log to read, and make the changelog from the pack alone. The first release is the same as ever, and each release made this way keeps a snapshot of the pack in `changelog.toml`, so the next one lists what has changed in the pack since: mods added, updated and removed, and config files, with the version bumped by the same rules.
+`packwiz commit` and `packwiz git release` need the pack to be in a git repository, and refuse, before doing anything else, when it isn't. `packwiz changelog` and `packwiz changelog release` don't: they say that there is no git log to read, and make the changelog from the pack alone. The first release is the same as ever, and each release made this way keeps a snapshot of the pack in `changelog.toml`, so the next one lists what has changed in the pack since: mods added, updated and removed, and config files, with the version bumped by the same rules.
 
-What comes from the log isn't there without one. Nothing is committed, so `packwiz changelog release` has no `packwiz git commit` to ask for first (it saves the versions it looks up for mods that don't record one into their `.pw.toml` files itself, as committing would), there are no commits written by hand to list, and `--since` is an error. A pack that is put in a repository later is released from its log from then on. The log begins at its first commit, so anything that changed before that, since the last release, isn't in it. And a pack whose last release was made from the log can't be released without the repository, as nothing else says what the pack was like then.
+What comes from the log isn't there without one. Nothing is committed, so `packwiz changelog release` has no `packwiz commit` to ask for first (it saves the versions it looks up for mods that don't record one into their `.pw.toml` files itself, as committing would), there are no commits written by hand to list, and `--since` is an error. A pack that is put in a repository later is released from its log from then on. The log begins at its first commit, so anything that changed before that, since the last release, isn't in it. And a pack whose last release was made from the log can't be released without the repository, as nothing else says what the pack was like then.
 
 ## Configured Defaults
 
 [Configured Defaults](https://modrinth.com/mod/configured-defaults) copies the files in a `configureddefaults` folder into the game directory when they are missing there, so a pack update doesn't overwrite what players changed. The folder can hold any file or folder of the game directory, not just `config/`.
 
-A pack that has the mod added keeps all of its files there. `packwiz refresh` tracks only the mods' metadata files and what is in `configureddefaults/`, so the folder's files are what the index lists, what `packwiz mr export` puts in the pack, and what `packwiz git commit` and the changelog describe as config:
+A pack that has the mod added keeps all of its files there. `packwiz refresh` tracks only the mods' metadata files and what is in `configureddefaults/`, so the folder's files are what the index lists, what `packwiz mr export` puts in the pack, and what `packwiz commit` and the changelog describe as config:
 
 ```
 fix(config): change configureddefaults/config/sodium.json
@@ -258,7 +259,7 @@ Running `packwiz` with no command opens an interface for the pack in the current
 | `6` | Deps | `packwiz modrinth deps`: what each mod needs and whether the pack has it, and `s` to save what had to be looked up |
 | `7` | Config | `packwiz config list` and `packwiz config relate`, below |
 | `8` | Export | `packwiz modrinth export`: where the pack goes and how, and what went into it |
-| `9` | Release | `packwiz changelog`, `changelog release`, `git commit` and `git release`: the release the pack's changes would make, `C` to commit what isn't committed, `r` to release (and commit and tag it, in a repository; it won't start while changes aren't committed), `v` to choose the version, `s` to write `CHANGELOG.md` |
+| `9` | Release | `packwiz changelog`, `changelog release`, `commit` and `git release`: the release the pack's changes would make, `C` to commit what isn't committed, `r` to release (and commit and tag it, in a repository; it won't start while changes aren't committed), `v` to choose the version, `s` to write `CHANGELOG.md` |
 
 Every screen lists its keys at the bottom, and `?` lists them all. `j` and `k` move as the arrow keys do, `g` and `G` go to the top and the bottom, `/` searches (fuzzily, below), and `esc` leaves a search or a box. Keys that are letters are the screen's, so `tab` and the numbers don't change screens while text is being typed; `esc` leaves it first.
 

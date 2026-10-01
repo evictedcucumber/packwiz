@@ -11,7 +11,7 @@
 // The scope of a mod's commit is the kind of content, going by the folder its metadata file is in: mods, resourcepacks,
 // shaderpacks or datapacks (so a resource pack is "feat(resourcepacks): add Faithful 1.21 (client)").
 //
-// packwiz git commit makes one commit for each mod, resource pack, shader pack, data pack or config file that was added,
+// packwiz commit makes one commit for each mod, resource pack, shader pack, data pack or config file that was added,
 // updated, changed or removed, then one for anything else in the pack's own files, such as a mod being pinned. Files it
 // doesn't recognise are left uncommitted. A release is committed as "chore(release): X.Y.Z" and tagged "vX.Y.Z".
 package git

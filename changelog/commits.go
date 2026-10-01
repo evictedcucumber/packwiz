@@ -18,7 +18,7 @@ type Commit struct {
 
 // ChangesFromCommits reads what a list of commits, oldest first, changed in the pack, as conventional commits.
 //
-// What "packwiz git commit" writes is read exactly: a commit for a mod that was added, updated or removed, and one for
+// What "packwiz commit" writes is read exactly: a commit for a mod that was added, updated or removed, and one for
 // config files. Any other commit that is a feature, a fix or breaking is a note, which says what the commit did in its
 // own words. Everything else, such as chores and documentation and commits that aren't conventional, has no part in a
 // release.
@@ -45,7 +45,7 @@ func changesFromCommit(c Commit) []Change {
 	commitType, scope, breaking, description := strings.ToLower(m[1]), m[2], m[3] == "!", m[4]
 
 	// What packwiz writes says exactly what changed. Commits that list several changes give them as bullets in the
-	// body, as packwiz git commit once did for all of a pack's changes at once.
+	// body, as packwiz commit once did for all of a pack's changes at once.
 	var changes []Change
 	for _, line := range bulletLines(c.Body) {
 		if change, ok := parseLine(line); ok {
@@ -92,7 +92,7 @@ func hasBreakingFooter(body string) bool {
 }
 
 var (
-	// modLineRegex is a change to a mod as packwiz git commit writes it, e.g. "update Iris 1.7.0 -> 1.7.1 (client)"
+	// modLineRegex is a change to a mod as packwiz commit writes it, e.g. "update Iris 1.7.0 -> 1.7.1 (client)"
 	modLineRegex = regexp.MustCompile(`^(add|remove|update) (.+) \((client|server|both)\)$`)
 	// fileLineRegex is a change to a file, e.g. "change config/sodium.json". A path has a directory or an extension,
 	// which keeps a note like "change render-distance" from being taken for a file.

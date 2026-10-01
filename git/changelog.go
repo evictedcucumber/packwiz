@@ -31,7 +31,7 @@ func (g gitRepository) LastChangedIn(file string) (string, error) {
 	return g.r.lastChangedIn(file)
 }
 
-// CheckCommitted fails if the pack has changes that "packwiz git commit" would commit, or is in a bad state.
+// CheckCommitted fails if the pack has changes that "packwiz commit" would commit, or is in a bad state.
 func (g gitRepository) CheckCommitted() error {
 	c, steps, err := prepareCommit(true)
 	if err != nil {

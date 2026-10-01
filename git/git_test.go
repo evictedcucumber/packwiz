@@ -373,7 +373,7 @@ func TestCommitIncludesTheRefreshedIndex(t *testing.T) {
 	requireClean(t)
 }
 
-func TestCommitDryRunChangesNothing(t *testing.T) {
+func TestCommitPreviewChangesNothing(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
@@ -388,20 +388,20 @@ func TestCommitDryRunChangesNothing(t *testing.T) {
 	var runErr error
 	out := cmdtest.CaptureStdout(t, func() { runErr = runCommit(true) })
 	if runErr != nil {
-		t.Fatalf("runCommit(dryRun) returned error: %v", runErr)
+		t.Fatalf("runCommit(preview) returned error: %v", runErr)
 	}
 
 	if want := "feat(mods)!: add Lithium 0.12.0 (server)"; !strings.Contains(out, want) {
-		t.Errorf("dry run output = %q, want it to contain %q", out, want)
+		t.Errorf("preview output = %q, want it to contain %q", out, want)
 	}
 	if got := commitCount(t); got != before {
-		t.Errorf("commit count = %d, want %d; a dry run must not commit", got, before)
+		t.Errorf("commit count = %d, want %d; a preview mustn't commit", got, before)
 	}
 	if git(t, "status", "--porcelain") == "" {
-		t.Error("working tree is clean after a dry run; the change should still be pending")
+		t.Error("working tree is clean after a preview; the change should still be pending")
 	}
 	if indexAfter, _ := os.ReadFile("index.toml"); string(indexAfter) != string(indexBefore) {
-		t.Errorf("a dry run rewrote index.toml:\n%s", indexAfter)
+		t.Errorf("a preview rewrote index.toml:\n%s", indexAfter)
 	}
 }
 
@@ -414,7 +414,7 @@ func TestCommitWithNothingToCommit(t *testing.T) {
 
 	for name, run := range map[string]func() error{
 		"commit":  func() error { return runCommit(false) },
-		"dry run": func() error { return runCommit(true) },
+		"preview": func() error { return runCommit(true) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			var err error
@@ -666,7 +666,7 @@ func TestGitCommandsRefuseToRunOutsideARepositoryBeforeLoadingAnything(t *testin
 
 	commands := map[string]func() error{
 		"commit":           func() error { return runCommit(false) },
-		"commit --dry-run": func() error { return runCommit(true) },
+		"commit --preview": func() error { return runCommit(true) },
 		"release":          func() error { return runRelease("", "") },
 	}
 	for name, run := range commands {
@@ -1059,7 +1059,7 @@ func TestCommitDoesNotTakeRecordingAVersionForAnUpdate(t *testing.T) {
 	}
 }
 
-func TestCommitDryRunLooksUpVersionsButSavesNothing(t *testing.T) {
+func TestCommitPreviewLooksUpVersionsButSavesNothing(t *testing.T) {
 	setUpRepo(t)
 	src := cmdtest.RegisterVersionSource(t, "testsource", map[string]string{"id-b": "0.12.0"})
 	p := setUpPack(t, "", "1.0.0")
@@ -1071,14 +1071,14 @@ func TestCommitDryRunLooksUpVersionsButSavesNothing(t *testing.T) {
 	var err error
 	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
 	if err != nil {
-		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+		t.Fatalf("runCommit(preview) returned error: %v", err)
 	}
 
 	if want := "feat(mods)!: add Lithium 0.12.0 (server)"; !strings.Contains(out, want) {
-		t.Errorf("dry run output = %q, want the looked-up version in %q", out, want)
+		t.Errorf("preview output = %q, want the looked-up version in %q", out, want)
 	}
 	if readFile(t, "mods/lithium.pw.toml") != modBefore || readFile(t, "index.toml") != indexBefore {
-		t.Error("a dry run modified the pack; it must only look versions up")
+		t.Error("a preview modified the pack; it must only look versions up")
 	}
 }
 
@@ -1108,15 +1108,15 @@ func TestCommitFailsWhenVersionsCannotBeLookedUp(t *testing.T) {
 		}
 	})
 
-	t.Run("dry run carries on", func(t *testing.T) {
+	t.Run("preview carries on", func(t *testing.T) {
 		var err error
 		out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
 		if err != nil {
-			t.Fatalf("runCommit(dryRun) returned error: %v", err)
+			t.Fatalf("runCommit(preview) returned error: %v", err)
 		}
 		for _, want := range []string{"Warning: couldn't look up the versions", "add Lithium lithium-id-b.jar (server)"} {
 			if !strings.Contains(out, want) {
-				t.Errorf("dry run output missing %q:\n%s", want, out)
+				t.Errorf("preview output missing %q:\n%s", want, out)
 			}
 		}
 	})
@@ -1146,7 +1146,7 @@ func TestReleaseCommitsTheVersionsItSavesBeforeReleasing(t *testing.T) {
 	requireClean(t)
 }
 
-func TestCommitDryRunSaysWhenOnlyVersionsWouldBeCommitted(t *testing.T) {
+func TestCommitPreviewSaysWhenOnlyVersionsWouldBeCommitted(t *testing.T) {
 	setUpRepo(t)
 	src := cmdtest.RegisterVersionSource(t, "testsource", nil)
 	p := setUpPack(t, "", "1.0.0")
@@ -1158,21 +1158,21 @@ func TestCommitDryRunSaysWhenOnlyVersionsWouldBeCommitted(t *testing.T) {
 	var err error
 	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
 	if err != nil {
-		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+		t.Fatalf("runCommit(preview) returned error: %v", err)
 	}
 
-	// The tree is clean and nothing has changed, but a real commit would save the version, so a dry run mustn't
+	// The tree is clean and nothing has changed, but a real commit would save the version, so a preview mustn't
 	// claim there is nothing to do
 	if strings.Contains(out, "Nothing to commit") || !strings.Contains(out, "chore(pack): update pack files") {
-		t.Errorf("dry run output = %q, want the message the real commit would use", out)
+		t.Errorf("preview output = %q, want the message the real commit would use", out)
 	}
 	if got := commitCount(t); got != before {
-		t.Errorf("commit count = %d, want %d; a dry run mustn't commit", got, before)
+		t.Errorf("commit count = %d, want %d; a preview mustn't commit", got, before)
 	}
 
 	commit(t)
 	if got := commitCount(t); got != before+1 {
-		t.Errorf("the real commit made %d new commits, want the 1 the dry run described", got-before)
+		t.Errorf("the real commit made %d new commits, want the 1 the preview described", got-before)
 	}
 }
 
@@ -1192,7 +1192,7 @@ func TestReleaseWithNothingNewToldToCommitWhatItFixed(t *testing.T) {
 	if !strings.Contains(out, "No changes since the last release (1.0.0).") || !strings.Contains(out, "Updated 1 line in the changelog.") {
 		t.Errorf("output = %q, want it to say nothing was released and what was fixed", out)
 	}
-	if !strings.Contains(out, `packwiz git commit`) {
+	if !strings.Contains(out, `packwiz commit`) {
 		t.Errorf("output = %q, want it to say how to commit what changed", out)
 	}
 	if got := commitCount(t); got != before+1 {
@@ -1215,7 +1215,7 @@ func TestReleaseWithNothingToDoDoesNotMentionCommitting(t *testing.T) {
 
 	out := release(t, "")
 
-	if strings.Contains(out, "packwiz git commit") {
+	if strings.Contains(out, "packwiz commit") {
 		t.Errorf("output = %q; there was nothing to commit, so it shouldn't say to", out)
 	}
 }
@@ -1454,7 +1454,7 @@ func TestReleaseRefusesChangesThatAreNotCommittedAndCommitsNothing(t *testing.T)
 	if err == nil {
 		t.Fatal("runRelease() returned no error with changes that aren't committed")
 	}
-	for _, want := range []string{"aren't committed", "feat(mods): add Zoom 2.0 (client)", "fix(config): add config/zoom.json", `"packwiz git commit"`} {
+	for _, want := range []string{"aren't committed", "feat(mods): add Zoom 2.0 (client)", "fix(config): add config/zoom.json", `"packwiz commit"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to say %q", err, want)
 		}
@@ -1463,7 +1463,7 @@ func TestReleaseRefusesChangesThatAreNotCommittedAndCommitsNothing(t *testing.T)
 		t.Errorf("commit count = %d, want %d: a release doesn't commit", got, before)
 	}
 	if status := git(t, "status", "--porcelain"); status == "" {
-		t.Error("the changes were committed, but a release is meant to leave that to \"packwiz git commit\"")
+		t.Error("the changes were committed, but a release is meant to leave that to \"packwiz commit\"")
 	}
 
 	// Once they are committed, it goes ahead
@@ -1579,7 +1579,7 @@ func TestAFileInACategoryNotYetCommittedBlocksARelease(t *testing.T) {
 	p.write(t, "flake.nix", "{}")
 
 	err := runRelease("", "")
-	if err == nil || !strings.Contains(err.Error(), "chore(dev): add flake.nix") || !strings.Contains(err.Error(), "packwiz git commit") {
+	if err == nil || !strings.Contains(err.Error(), "chore(dev): add flake.nix") || !strings.Contains(err.Error(), "packwiz commit") {
 		t.Errorf("runRelease() = %v, want an error saying to commit it", err)
 	}
 }
@@ -1937,7 +1937,7 @@ func TestAModsLookedUpVersionIsInItsOwnCommit(t *testing.T) {
 	}
 }
 
-func TestCommitDryRunListsEveryCommit(t *testing.T) {
+func TestCommitPreviewListsEveryCommit(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
@@ -1951,21 +1951,21 @@ func TestCommitDryRunListsEveryCommit(t *testing.T) {
 	var err error
 	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
 	if err != nil {
-		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+		t.Fatalf("runCommit(preview) returned error: %v", err)
 	}
 
 	want := "feat(mods)!: add Lithium 0.12.0 (server)\n\n" + wantBreakingFooter + "\n---\n" +
 		"feat(mods): add Zoom 2.0 (client)\n---\n" +
 		"fix(config): add config/new.json\n"
 	if out = withoutProgress(out); out != want {
-		t.Errorf("dry run output =\n%q\nwant\n%q", out, want)
+		t.Errorf("preview output =\n%q\nwant\n%q", out, want)
 	}
 	if got := commitCount(t); got != before {
-		t.Errorf("commit count = %d, want %d; a dry run must not commit", got, before)
+		t.Errorf("commit count = %d, want %d; a preview mustn't commit", got, before)
 	}
 }
 
-func TestCommitDryRunForASingleCommitPrintsJustItsMessage(t *testing.T) {
+func TestCommitPreviewForASingleCommitPrintsJustItsMessage(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
@@ -1975,14 +1975,14 @@ func TestCommitDryRunForASingleCommitPrintsJustItsMessage(t *testing.T) {
 	var err error
 	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
 	if err != nil {
-		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+		t.Fatalf("runCommit(preview) returned error: %v", err)
 	}
 	if out = withoutProgress(out); out != "feat(mods): add Zoom 2.0 (client)\n" {
-		t.Errorf("dry run output = %q, want only the message", out)
+		t.Errorf("preview output = %q, want only the message", out)
 	}
 }
 
-func TestCommitDryRunPredictsTheCommitForAPin(t *testing.T) {
+func TestCommitPreviewPredictsTheCommitForAPin(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
@@ -1996,11 +1996,11 @@ func TestCommitDryRunPredictsTheCommitForAPin(t *testing.T) {
 	var err error
 	out := cmdtest.CaptureStdout(t, func() { err = runCommit(true) })
 	if err != nil {
-		t.Fatalf("runCommit(dryRun) returned error: %v", err)
+		t.Fatalf("runCommit(preview) returned error: %v", err)
 	}
 
 	if want := "feat(mods): add Iris 1.0 (client)\n---\nchore(pack): update pack files\n"; withoutProgress(out) != want {
-		t.Errorf("dry run output = %q, want %q", withoutProgress(out), want)
+		t.Errorf("preview output = %q, want %q", withoutProgress(out), want)
 	}
 }
 
@@ -2022,7 +2022,7 @@ func TestCommitCanBeRunAgainAfterOneOfTheCommitsFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("runCommit() succeeded although a commit was refused")
 	}
-	for _, want := range []string{"committed 1 of 3 commits", "Lithium", "rejected by test hook", `run "packwiz git commit" again`} {
+	for _, want := range []string{"committed 1 of 3 commits", "Lithium", "rejected by test hook", `run "packwiz commit" again`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to contain %q", err, want)
 		}
@@ -2360,7 +2360,7 @@ func TestChangelogRepositoryIsRegisteredAndSaysWhenThereIsNoGitRepository(t *tes
 	}
 }
 
-// Everything packwiz git commit writes must be read back by a changelog as the change it described, and as the same
+// Everything packwiz commit writes must be read back by a changelog as the change it described, and as the same
 // size of change, or the version a release comes to would depend on how it was worked out
 func TestCommitMessagesAreReadBackAsTheChangesTheyDescribe(t *testing.T) {
 	mods := []changelog.Change{
@@ -2456,7 +2456,7 @@ func TestTheManualForCommitListsEveryCategory(t *testing.T) {
 	}
 	for _, c := range core.FileCategoryList {
 		if !strings.Contains(page.String(), c.Name) || !strings.Contains(page.String(), c.Description) {
-			t.Errorf("the manual for packwiz git commit doesn't list the category %q (%s):\n%s", c.Name, c.Description, page.String())
+			t.Errorf("the manual for packwiz commit doesn't list the category %q (%s):\n%s", c.Name, c.Description, page.String())
 		}
 	}
 	if !strings.Contains(page.String(), core.FileCategoriesFile) {

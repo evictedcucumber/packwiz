@@ -34,7 +34,7 @@ func TestStyleMessagePicksOutTheSubject(t *testing.T) {
 	}
 }
 
-func TestCommitDryRunColourOnlyAdds(t *testing.T) {
+func TestCommitPreviewColourOnlyAdds(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")
 	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
@@ -44,7 +44,7 @@ func TestCommitDryRunColourOnlyAdds(t *testing.T) {
 
 	_, coloured := cmdtest.AssertColourOnlyAdds(t, func() {
 		if err := runCommit(true); err != nil {
-			t.Fatalf("runCommit(dryRun) returned error: %v", err)
+			t.Fatalf("runCommit(preview) returned error: %v", err)
 		}
 	})
 
@@ -55,7 +55,7 @@ func TestCommitDryRunColourOnlyAdds(t *testing.T) {
 		"the rest of the message is left as it is": ui.Bold.Sprint("feat(mods)!: add Lithium 0.12.0 (server)") + "\n\n" + breakingFooter + "\n",
 	} {
 		if !strings.Contains(coloured, want) {
-			t.Errorf("%s: dry run missing %q:\n%q", name, want, coloured)
+			t.Errorf("%s: preview missing %q:\n%q", name, want, coloured)
 		}
 	}
 }

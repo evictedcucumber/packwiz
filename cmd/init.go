@@ -25,7 +25,7 @@ var initCmd = &cobra.Command{
 	Short: "Initialise a packwiz modpack",
 	Long: `Creates pack.toml and the index for a new pack in the current directory, asking for what it needs.
 
-It also writes a ` + core.FileCategoriesFile + ` with the categories that "packwiz git commit" sorts files that packwiz
+It also writes a ` + core.FileCategoriesFile + ` with the categories that "packwiz commit" sorts files that packwiz
 doesn't track into (flake.nix as a dev file, README.md as docs, and so on), unless there is one already. Change it to
 suit the pack.`,
 	Args: cobra.NoArgs,

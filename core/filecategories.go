@@ -13,7 +13,7 @@ import (
 )
 
 // FileCategoriesFile is the file in the pack's folder that sorts the files packwiz doesn't track, such as flake.nix, into
-// categories. A file in a category is committed on its own by packwiz git commit, as a
+// categories. A file in a category is committed on its own by packwiz commit, as a
 // chore in the scope of its category, instead of being left alone as one packwiz doesn't recognise. Like .packwizignore,
 // it isn't tracked by the index, so it isn't distributed with the pack.
 //
@@ -35,7 +35,7 @@ type FileCategory struct {
 
 // FileCategoryList are the categories a file can be put in, which are the only ones: a commit's scope says what kind of
 // change it is, so it comes from a fixed set that the changelog and anyone reading the log can rely on. The manual for
-// "packwiz git commit" lists them, from this.
+// "packwiz commit" lists them, from this.
 var FileCategoryList = []FileCategory{
 	{"dev", "development tooling: flake.nix, lefthook.yml, .envrc"},
 	{"docs", "documentation: README.md, LICENSE, docs/"},
@@ -57,7 +57,7 @@ func FileCategoryNames() []string {
 // DefaultFileCategories is the FileCategoriesFile that "packwiz init" writes: every category, with the files that usually
 // belong in it, for the pack's author to change.
 const DefaultFileCategories = `# Sorts the files in this folder that packwiz doesn't track into categories, so that
-# "packwiz git commit" commits each one on its own, as "chore(dev): change flake.nix".
+# "packwiz commit" commits each one on its own, as "chore(dev): change flake.nix".
 # The categories are dev, docs, ci, build, assets and misc (see "man packwiz-git-commit").
 # Patterns are written like those of .gitignore, relative to this folder. Files in no
 # category are left uncommitted, and "packwiz changelog release" won't release while

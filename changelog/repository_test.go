@@ -10,7 +10,7 @@ import (
 type fakeRepo struct {
 	// commits are the commits made, oldest first
 	commits []fakeCommit
-	// pending are the commits that "packwiz git commit" would make, which a release refuses to go ahead without
+	// pending are the commits that "packwiz commit" would make, which a release refuses to go ahead without
 	pending []Commit
 	// checkErr, if set, is what CheckCommitted fails with
 	checkErr error

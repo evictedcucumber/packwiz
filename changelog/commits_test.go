@@ -95,7 +95,7 @@ func TestChangesFromCommits(t *testing.T) {
 			[]Change{{Kind: FileAdded, Path: "config/a.json"}, {Kind: FileRemoved, Path: "config/b.json"}},
 		},
 		{
-			// What packwiz git commit wrote before it made a commit for each mod
+			// What packwiz commit wrote before it made a commit for each mod
 			"a commit with mods and config together, listed in its body",
 			[]Commit{commit("feat(pack)!: add 1 mod, update 1 config file", "",
 				"- change config/iris.json", "- add Lithium 0.12.0 (server)", "", breaking)},

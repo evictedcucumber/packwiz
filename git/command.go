@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	dryRunFlag         bool
+	previewFlag        bool
 	releaseVersionFlag string
 	sinceFlag          string
 )
@@ -23,14 +23,16 @@ var (
 // gitCmd represents the base command when called without any subcommands
 var gitCmd = &cobra.Command{
 	Use:   "git",
-	Short: "Commit and release the pack following packwiz's conventional commit standard",
+	Short: "Release the pack, committing and tagging the result",
 }
 
-// commitCmd represents the git commit command
+// commitCmd represents the commit command, which is registered on the root command: committing is the everyday command
+// for a pack, where releasing is occasional
 var commitCmd = &cobra.Command{
 	Use:   "commit",
 	Short: "Commit each mod and config file that changed on its own, with conventional commit messages",
-	Long: fmt.Sprintf(`Refreshes the index, then commits every change to the files the pack tracks, making one commit for each mod, resource
+	Long: fmt.Sprintf(`With --preview, prints the commits it would make, in order, and makes none: nothing is committed or saved, so it is
+safe to run first. Without it, refreshes the index, then commits every change to the files the pack tracks, making one commit for each mod, resource
 pack, shader pack, data pack or config file that was added, updated, changed or removed, and one for what else changed in pack.toml and the index (a
 mod being pinned, say). Each commit has a conventional commit message, whose type follows how far the change raises
 the pack's version: feat! for a change to a mod that runs on the server, feat for adding or removing a client-only
@@ -55,7 +57,7 @@ category, isn't the index or pack.toml, and isn't the pack's changelog, list of 
 .packwizfiles.toml) are left uncommitted, and are listed. Commit them yourself with git; "packwiz changelog release" won't release while they are there.`, categoryList()),
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := runCommit(dryRunFlag); err != nil {
+		if err := runCommit(previewFlag); err != nil {
 			ui.Error.Println(err)
 			os.Exit(1)
 		}
@@ -76,7 +78,7 @@ var releaseCmd = &cobra.Command{
 	Use:   "release",
 	Short: "Record a release with \"packwiz changelog release\", then commit and tag it",
 	Long: `Records a release (see "packwiz changelog release", which needs the pack's changes committed first with
-"packwiz git commit"), commits the result as "chore(release): X.Y.Z" and tags it "vX.Y.Z".`,
+"packwiz commit"), commits the result as "chore(release): X.Y.Z" and tags it "vX.Y.Z".`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runRelease(releaseVersionFlag, sinceFlag); err != nil {
@@ -87,13 +89,13 @@ var releaseCmd = &cobra.Command{
 }
 
 func init() {
-	gitCmd.AddCommand(commitCmd)
 	gitCmd.AddCommand(releaseCmd)
 
-	commitCmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Print the commit messages without committing")
+	commitCmd.Flags().BoolVar(&previewFlag, "preview", false, "Print the commits that would be made, without making them")
 	releaseCmd.Flags().StringVar(&releaseVersionFlag, "version", "", "Release this version instead of the one worked out from the commits; it must be greater than the last release")
 	releaseCmd.Flags().StringVar(&sinceFlag, "since", "", "Read the commits made after this one (a hash, tag or branch), rather than after the last release")
 
+	cmd.Add(commitCmd)
 	cmd.Add(gitCmd)
 }
 
@@ -131,7 +133,7 @@ func runRelease(versionOverride, since string) error {
 	if !released {
 		// Nothing was released, but that can still change the changelog, and this command isn't going to commit it
 		if dirty, err := r.dirty(); err == nil && dirty {
-			ui.Info.Println(`The pack changed; commit it with "packwiz git commit".`)
+			ui.Info.Println(`The pack changed; commit it with "packwiz commit".`)
 		}
 		return nil
 	}

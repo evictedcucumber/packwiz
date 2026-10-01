@@ -205,9 +205,9 @@ func TestValidateChecksWhatAMetadataFileNeeds(t *testing.T) {
 			[]string{"warning: isn't from Modrinth, so it can't be updated and its dependencies can't be checked"}},
 		{"no Modrinth project ID", func(m *modFile) { m.project = "" }, []string{"error: has no Modrinth project ID (mod-id)"}},
 		{"no Modrinth version ID", func(m *modFile) { m.versionID = "" }, []string{"error: has no Modrinth version ID (version)"}},
-		{"no version", func(m *modFile) { m.version = "" }, []string{"warning: doesn't record its version; 'packwiz fix' and 'packwiz git commit' save it"}},
+		{"no version", func(m *modFile) { m.version = "" }, []string{"warning: doesn't record its version; 'packwiz fix' and 'packwiz commit' save it"}},
 		{"several problems, in the order they are found", func(m *modFile) { m.fileName, m.hash, m.version = "", "", "" },
-			[]string{"error: has no file name", "error: has no hash", "warning: doesn't record its version; 'packwiz fix' and 'packwiz git commit' save it"}},
+			[]string{"error: has no file name", "error: has no hash", "warning: doesn't record its version; 'packwiz fix' and 'packwiz commit' save it"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -620,7 +620,7 @@ func TestValidateOutputSaysWhatIsWrongWithWhat(t *testing.T) {
 
 broken (mods/broken.pw.toml):
   error: has no hash
-  warning: doesn't record its version; 'packwiz fix' and 'packwiz git commit' save it
+  warning: doesn't record its version; 'packwiz fix' and 'packwiz commit' save it
 
 noside (mods/noside.pw.toml):
   warning: has no side, so it is on both

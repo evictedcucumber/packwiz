@@ -10,7 +10,7 @@ import (
 	"github.com/evictedcucumber/packwiz/internal/ui"
 )
 
-// The release screen is "packwiz changelog", "packwiz changelog release", "packwiz git commit" and "packwiz git release":
+// The release screen is "packwiz changelog", "packwiz changelog release", "packwiz commit" and "packwiz git release":
 // the release that the pack's changes would make, what hasn't been committed yet, and keys to commit, to release, and to
 // write the changelog.
 
