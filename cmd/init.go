@@ -32,8 +32,10 @@ suit the pack.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		_, err := os.Stat(viper.GetString("pack-file"))
 		if err == nil && !viper.GetBool("init.reinit") {
-			ui.Error.Println("Modpack metadata file already exists, use -r to override!")
-			os.Exit(1)
+			if !reportExistingPack() {
+				os.Exit(1)
+			}
+			return
 		} else if err != nil && !os.IsNotExist(err) {
 			ui.Error.Printf("Error checking pack file: %s\n", err)
 			os.Exit(1)
@@ -304,7 +306,7 @@ func init() {
 	_ = viper.BindPFlag("init.latest", initCmd.Flags().Lookup("latest"))
 	initCmd.Flags().BoolP("snapshot", "s", false, "Use the latest snapshot version with --latest")
 	_ = viper.BindPFlag("init.snapshot", initCmd.Flags().Lookup("snapshot"))
-	initCmd.Flags().BoolP("reinit", "r", false, "Recreate the pack file if it already exists, rather than exiting")
+	initCmd.Flags().BoolP("reinit", "r", false, "Recreate the pack file if it already exists, rather than only checking it and creating what is missing")
 	_ = viper.BindPFlag("init.reinit", initCmd.Flags().Lookup("reinit"))
 	initCmd.Flags().String("modloader", "", "The mod loader to use (omit to define interactively)")
 	_ = viper.BindPFlag("init.modloader", initCmd.Flags().Lookup("modloader"))
