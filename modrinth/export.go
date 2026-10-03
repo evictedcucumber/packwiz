@@ -30,7 +30,9 @@ into it, and it has the files the index tracks that aren't mods, and the pack's 
 Last come the files in the pack's ` + core.ServerConfigDir + `/ folder, such as server.properties, at the top of the zip: each
 replaces whatever else would be at its path, so a config file can differ on the server. The folder isn't in the index,
 so it is never installed on a client. The server pack's MODS.md is ` + core.ServerModListFile + `, the list of the server's
-mods that "packwiz list --save --side server" writes, and exporting says if it is missing or out of date.`,
+mods that "packwiz list --save --side server" writes, and its CHANGELOG.md is serverconfig/CHANGELOG.md, the
+changelog of the server that "packwiz changelog --save" and every release write; exporting says if either is missing or
+out of date.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.Muted.Println("Loading modpack...")

@@ -2,12 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/internal/ui"
+	"github.com/spf13/viper"
 )
 
 // The release screen is "packwiz changelog", "packwiz changelog release", "packwiz commit" and "packwiz git release":
@@ -274,7 +276,11 @@ func (s *releaseScreen) askRelease() (screen, tea.Cmd) {
 		s.pending = askRelease
 		p := s.data.preview
 		lines := []string{ui.Bold.Sprint(p.Release.Version) + ui.Muted.Sprintf(" (%s)", releaseKind(p))}
-		lines = append(lines, field("records", "the release in "+changelog.HistoryFile+" and "+changelog.MarkdownFile))
+		records := "the release in " + changelog.HistoryFile + " and " + changelog.MarkdownFile
+		if changelog.HasServerPack(filepath.Dir(viper.GetString("pack-file"))) {
+			records = "the release in " + changelog.HistoryFile + ", " + changelog.MarkdownFile + " and " + changelog.ServerMarkdownFile
+		}
+		lines = append(lines, field("records", records))
 		lines = append(lines, field("pack.toml", "gets the version "+p.Release.Version))
 		if s.tagging() {
 			lines = append(lines, field("then", "commits it as chore(release): "+p.Release.Version+" and tags it v"+p.Release.Version))

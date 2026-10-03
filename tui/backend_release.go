@@ -3,6 +3,7 @@ package tui
 import (
 	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/git"
+	"strings"
 )
 
 // releaseData is what the release screen shows: the release that the pack's changes would make, and what hasn't been
@@ -39,8 +40,9 @@ type releaseBackend interface {
 	// committed. With tag it
 	// also commits the release and tags it, as "packwiz git release" does.
 	release(version string, tag bool) (releaseOutcome, error)
-	// saveChangelog writes CHANGELOG.md from the releases recorded so far, with what isn't released yet above them, as
-	// "packwiz changelog --save" does, and says where and what it had to say along the way.
+	// saveChangelog writes CHANGELOG.md from the releases recorded so far, with what isn't released yet above them, and the
+	// server's changelog if the pack has a server pack, as "packwiz changelog --save" does, and says where and what it had
+	// to say along the way.
 	saveChangelog() (path string, notices []string, err error)
 }
 
@@ -87,5 +89,6 @@ func (packBackend) release(version string, tag bool) (releaseOutcome, error) {
 }
 
 func (packBackend) saveChangelog() (string, []string, error) {
-	return changelog.SaveMarkdown()
+	paths, notices, err := changelog.SaveMarkdown()
+	return strings.Join(paths, " and "), notices, err
 }

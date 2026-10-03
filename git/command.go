@@ -154,7 +154,11 @@ func runRelease(versionOverride, since string) error {
 func commitRelease(r repo, release changelog.Release) (tag string, err error) {
 	tag = TagName(release.Version)
 	// Only what a release writes: anything else in the pack's directory isn't part of it
-	if err := r.commitPaths(ReleaseMessage(release.Version), changelog.HistoryFile, changelog.MarkdownFile, packFile()); err != nil {
+	paths := []string{changelog.HistoryFile, changelog.MarkdownFile, packFile()}
+	if changelog.HasServerPack(packRoot()) {
+		paths = append(paths, changelog.ServerMarkdownFile)
+	}
+	if err := r.commitPaths(ReleaseMessage(release.Version), paths...); err != nil {
 		return "", fmt.Errorf("released %s, but couldn't commit it: %w\nCommit the changed files yourself, then tag the commit %s", release.Version, err, tag)
 	}
 	if err := r.tag(tag, "Release "+release.Version); err != nil {

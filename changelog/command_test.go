@@ -129,7 +129,7 @@ func releasedOnce(t *testing.T) *fakeRepo {
 func releaseFiles(t *testing.T) map[string]string {
 	t.Helper()
 	files := map[string]string{"pack.toml": readFile(t, "pack.toml")}
-	for _, name := range []string{HistoryFile, MarkdownFile} {
+	for _, name := range []string{HistoryFile, MarkdownFile, ServerMarkdownFile} {
 		if data, err := os.ReadFile(name); err == nil {
 			files[name] = string(data)
 		}

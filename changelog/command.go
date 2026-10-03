@@ -41,7 +41,12 @@ A pack that isn't in a git repository has no commits to read, so its changes are
 it was at the last release instead.
 
 With --save, nothing is previewed: CHANGELOG.md is written from the releases recorded in changelog.toml, with the changes
-not released yet listed above them as Unreleased.`,
+not released yet listed above them as Unreleased.
+
+A pack with a server pack (a serverconfig/ folder, see "packwiz modrinth export --server") also gets a changelog of the
+server's own, serverconfig/CHANGELOG.md, written with CHANGELOG.md here and by every release: the same releases, without
+the mods that are only on the client, and saying of a release that changes nothing on the server that it doesn't. It is
+the server pack's CHANGELOG.md, in place of the pack's.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		if saveFlag {
@@ -63,7 +68,8 @@ var releaseCmd = &cobra.Command{
 	Use:   "release",
 	Short: "Record a release: bump the pack version and update CHANGELOG.md",
 	Long: `Reads the commits made since the last release, works out the version they make from their types (a breaking change
-is major, a feature is minor and a fix is patch), updates the version in pack.toml and adds the release to CHANGELOG.md.
+is major, a feature is minor and a fix is patch), updates the version in pack.toml and adds the release to CHANGELOG.md,
+and to serverconfig/CHANGELOG.md if the pack has a server pack (see "packwiz changelog").
 
 It doesn't commit anything itself: it fails if the pack has changes that aren't committed, so run "packwiz commit"
 first. It also fails if the pack has files that packwiz doesn't recognise, or config files that nothing claims, as it
@@ -107,43 +113,55 @@ func unreleasedChanges(history History) ([]Change, error) {
 }
 
 // saveMarkdown writes CHANGELOG.md from the releases recorded in the history, with the changes that aren't released yet
-// listed above them, without releasing anything. What it says goes through notice.
-func saveMarkdown() error {
+// listed above them, without releasing anything, and the server's changelog (ServerMarkdownFile) too if the pack has a
+// server pack. It returns the paths it wrote. What it says goes through notice.
+func saveMarkdown() ([]string, error) {
 	history, err := LoadHistory(historyPath())
 	if err != nil {
-		return fmt.Errorf("failed to read %s: %w", HistoryFile, err)
+		return nil, fmt.Errorf("failed to read %s: %w", HistoryFile, err)
 	}
 	unreleased, err := unreleasedChanges(history)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := writeFileAtomic(markdownPath(), []byte(RenderMarkdownWithUnreleased(history.Releases, unreleased))); err != nil {
-		return fmt.Errorf("failed to write %s: %w", MarkdownFile, err)
+		return nil, fmt.Errorf("failed to write %s: %w", MarkdownFile, err)
 	}
-	return nil
+	paths := []string{markdownPath()}
+	if wrote, err := writeServerMarkdown(history.Releases, unreleased); err != nil {
+		return nil, err
+	} else if wrote {
+		paths = append(paths, serverMarkdownPath())
+	}
+	return paths, nil
 }
 
-// SaveMarkdown writes CHANGELOG.md as "packwiz changelog --save" does, and returns where it wrote it and what it said along
-// the way, in plain text. It says nothing on the terminal.
-func SaveMarkdown() (path string, notices []string, err error) {
-	collected := notice.Collect(func() { err = saveMarkdown() })
+// SaveMarkdown writes CHANGELOG.md, and the server's changelog if the pack has a server pack, as "packwiz changelog
+// --save" does, and returns where it wrote them and what it said along the way, in plain text. It says nothing on the
+// terminal.
+func SaveMarkdown() (paths []string, notices []string, err error) {
+	collected := notice.Collect(func() { paths, err = saveMarkdown() })
 	if err != nil {
-		return "", nil, err
+		return nil, nil, err
 	}
 	for _, n := range collected {
 		if n.Level != notice.Muted {
 			notices = append(notices, n.Text)
 		}
 	}
-	return markdownPath(), notices, nil
+	return paths, notices, nil
 }
 
 // runSave writes CHANGELOG.md from the releases recorded in the history, without releasing anything
 func runSave() error {
-	if err := saveMarkdown(); err != nil {
+	paths, err := saveMarkdown()
+	if err != nil {
 		return err
 	}
 	ui.Success.Printf("Wrote %s.\n", ui.Bold.Sprint(MarkdownFile))
+	if len(paths) > 1 {
+		ui.Success.Printf("Wrote %s.\n", ui.Bold.Sprint(ServerMarkdownFile))
+	}
 	return nil
 }
 
@@ -656,6 +674,9 @@ func (p pending) save(history History) error {
 		return err
 	}
 	if err := writeFileAtomic(markdownPath(), []byte(RenderMarkdown(history.Releases))); err != nil {
+		return err
+	}
+	if _, err := writeServerMarkdown(history.Releases, nil); err != nil {
 		return err
 	}
 	return history.Write(historyPath())

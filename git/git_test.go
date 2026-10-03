@@ -1601,6 +1601,28 @@ func TestTheServerPacksFilesAreCommittedAsServerWithoutBeingListed(t *testing.T)
 	}
 }
 
+func TestAReleaseCommitsTheServersChangelogWithThePacks(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	p.write(t, core.ServerConfigDir+"/server.properties", "motd=hi")
+	release(t, "")
+	requireClean(t)
+
+	p.mod(t, "Lithium", core.ServerSide, "0.12.0")
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	release(t, "")
+	requireClean(t)
+
+	if got := commitFiles(t, "HEAD"); !slices.Contains(got, changelog.ServerMarkdownFile) {
+		t.Errorf("the release commit changed %v, want %s among them", got, changelog.ServerMarkdownFile)
+	}
+	text := git(t, "show", "HEAD:"+changelog.ServerMarkdownFile)
+	if !strings.Contains(text, "Lithium") || strings.Contains(text, "Iris") || strings.Contains(text, "Sodium") {
+		t.Errorf("the server's changelog doesn't have only the server's mods:\n%s", text)
+	}
+}
+
 func TestAFileInACategoryNotYetCommittedBlocksARelease(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")

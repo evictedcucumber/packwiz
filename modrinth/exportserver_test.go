@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/cmdtest"
@@ -243,5 +244,62 @@ func TestServerExportTakesAFileNamedServerconfigForAnyOtherFile(t *testing.T) {
 		if name != "mods/alpha.jar" && name != core.ServerConfigDir {
 			t.Errorf("the server pack has %s", name)
 		}
+	}
+}
+
+func TestServerExportHasTheServersChangelogAndSaysWhenItIsMissingOrOutOfDate(t *testing.T) {
+	exportablePack(t, validMod("alpha"))
+	history := changelog.History{Releases: []changelog.Release{
+		{Version: "1.0.0", Date: "2026-01-01", Changes: []changelog.Change{{Kind: changelog.ModAdded, Name: "alpha", Side: core.UniversalSide, To: "1.0.0"}}},
+	}}
+	if err := history.Write(changelog.HistoryFile); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	writeTestFile(t, changelog.MarkdownFile, changelog.RenderMarkdown(history.Releases))
+	serverModList(t)
+	output := t.TempDir() + "/server.zip"
+	export := func() (*ExportResult, map[string]string) {
+		t.Helper()
+		result, err := Export(ExportOptions{Output: output, Server: true}, nil)
+		if err != nil {
+			t.Fatalf("Export() returned error: %v", err)
+		}
+		return result, readZip(t, output)
+	}
+
+	// Without it, the server pack has the pack's own, and says how to write the server's
+	result, files := export()
+	if notices := strings.Join(result.Notices, "\n"); !strings.Contains(notices, "there is no serverconfig/CHANGELOG.md") || !strings.Contains(notices, "packwiz changelog --save") {
+		t.Errorf("the notices are %v, want one that the server's changelog is missing and how to write it", result.Notices)
+	}
+	if files[changelog.MarkdownFile] != changelog.RenderMarkdown(history.Releases) {
+		t.Errorf("CHANGELOG.md is %q, want the pack's own", files[changelog.MarkdownFile])
+	}
+
+	server := changelog.RenderServerMarkdown(history.Releases, nil)
+	writeTestFile(t, changelog.ServerMarkdownFile, server)
+	if result, files = export(); len(result.Notices) != 0 || files[changelog.MarkdownFile] != server {
+		t.Errorf("the notices are %v and CHANGELOG.md is %q, want none and the server's", result.Notices, files[changelog.MarkdownFile])
+	}
+
+	// A release since makes it out of date
+	history.Releases = append(history.Releases, changelog.Release{Version: "1.1.0", Date: "2026-02-01", Bump: changelog.BumpMinor})
+	if err := history.Write(changelog.HistoryFile); err != nil {
+		t.Fatalf("Write() returned error: %v", err)
+	}
+	if result, _ = export(); !strings.Contains(strings.Join(result.Notices, "\n"), "doesn't have the pack's releases as they are now") {
+		t.Errorf("the notices are %v, want one that the server's changelog is out of date", result.Notices)
+	}
+}
+
+func TestServerExportSaysNothingOfAChangelogForAPackWithNoReleases(t *testing.T) {
+	exportablePack(t, validMod("alpha"))
+	serverModList(t)
+	result, err := Export(ExportOptions{Output: t.TempDir() + "/server.zip", Server: true}, nil)
+	if err != nil {
+		t.Fatalf("Export() returned error: %v", err)
+	}
+	if len(result.Notices) != 0 {
+		t.Errorf("the notices are %v, want none", result.Notices)
 	}
 }

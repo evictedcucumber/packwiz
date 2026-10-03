@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/evictedcucumber/packwiz/changelog"
 	"github.com/evictedcucumber/packwiz/cmd"
 	"github.com/evictedcucumber/packwiz/cmdshared"
 	"github.com/evictedcucumber/packwiz/core"
@@ -78,6 +79,28 @@ func checkServerModList(pack core.Pack, index *core.Index, mods []*core.Mod, ser
 	}
 	if have, err := os.ReadFile(src); err == nil && !bytes.Equal(have, []byte(want)) {
 		notice.Warnf("Warning: %s doesn't list the server's mods as they are now: %s", core.ServerModListFile, write)
+	}
+}
+
+// checkServerChangelog says if the server's changelog (changelog.ServerMarkdownFile) is missing although the pack has
+// releases and a server pack, so the server pack has the pack's own changelog, or if it doesn't have the releases as they
+// are now
+func checkServerChangelog(index *core.Index, serverFiles map[string]string) {
+	if !changelog.HasServerPack(index.ResolveIndexPath(".")) {
+		return
+	}
+	history, err := changelog.LoadHistory(index.ResolveIndexPath(changelog.HistoryFile))
+	if err != nil || len(history.Releases) == 0 {
+		return
+	}
+	const write = "run 'packwiz changelog --save' to write it"
+	src, ok := serverFiles[changelog.MarkdownFile]
+	if !ok {
+		notice.Warnf("Warning: the server pack has the pack's own %s, as there is no %s: %s", changelog.MarkdownFile, changelog.ServerMarkdownFile, write)
+		return
+	}
+	if have, err := os.ReadFile(src); err == nil && !changelog.ServerMarkdownIsCurrent(string(have), history.Releases) {
+		notice.Warnf("Warning: %s doesn't have the pack's releases as they are now: %s", changelog.ServerMarkdownFile, write)
 	}
 }
 
@@ -159,6 +182,7 @@ func exportServerPack(pack core.Pack, index *core.Index, mods []*core.Mod, optio
 	cmdshared.AddNonMetafiles(index, exp, "", replaced)
 	cmdshared.AddDocs(index, exp, "", replaced)
 	checkServerModList(pack, index, mods, serverFiles)
+	checkServerChangelog(index, serverFiles)
 	for _, p := range slices.Sorted(maps.Keys(serverFiles)) {
 		if err := cmdshared.AddFileToZip(exp, serverFiles[p], p); err != nil {
 			notice.Errorf("%s", err.Error())

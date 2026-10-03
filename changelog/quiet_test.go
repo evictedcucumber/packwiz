@@ -2,6 +2,7 @@ package changelog
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -207,9 +208,9 @@ func TestSaveMarkdownWritesTheChangelogAndSaysNothing(t *testing.T) {
 	repo.commit("feat(mods): add Lithium 0.12.0 (client)")
 	writeMod(t, "Lithium", core.ClientSide, "0.12.0")
 
-	var path string
+	var paths []string
 	var err error
-	out := cmdtest.CaptureStdout(t, func() { path, _, err = SaveMarkdown() })
+	out := cmdtest.CaptureStdout(t, func() { paths, _, err = SaveMarkdown() })
 	if err != nil {
 		t.Fatalf("SaveMarkdown() returned error: %v", err)
 	}
@@ -217,8 +218,8 @@ func TestSaveMarkdownWritesTheChangelogAndSaysNothing(t *testing.T) {
 		t.Errorf("SaveMarkdown() wrote %q to the terminal", out)
 	}
 	text := readFile(t, MarkdownFile)
-	if path != MarkdownFile || !strings.Contains(text, "## 1.0.0") {
-		t.Errorf("SaveMarkdown() = %q, want %s written from the history", path, MarkdownFile)
+	if !slices.Equal(paths, []string{MarkdownFile}) || !strings.Contains(text, "## 1.0.0") {
+		t.Errorf("SaveMarkdown() = %q, want %s written from the history, and nothing for a server the pack has none of", paths, MarkdownFile)
 	}
 	// What hasn't been released is listed above what has
 	if !strings.Contains(text, "Unreleased") || !strings.Contains(text, "Lithium") {
