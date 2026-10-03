@@ -18,7 +18,9 @@ var listCmd = &cobra.Command{
 	Short: "List all the mods in the modpack",
 	Long: `List the mods in the modpack, and anything else with a metadata file, such as resource packs and shader packs.
 
-With --save, or --output, the list is written to a markdown file instead of printed: the pack's name and description, then what is in it, in alphabetical order under a heading for each kind, each as a link to its Modrinth page followed by its version. It doesn't say what was added as a dependency. --side and --only choose what is listed, as they do for the plain list (--only main leaves the dependencies out).`,
+With --save, or --output, the list is written to a markdown file instead of printed: the pack's name and description, then what is in it, in alphabetical order under a heading for each kind, each as a link to its Modrinth page followed by its version. It doesn't say what was added as a dependency. --side and --only choose what is listed, as they do for the plain list (--only main leaves the dependencies out).
+
+With --side server the list is the server's, and is written to ` + core.ServerModListFile + ` unless --output says where: that is the MODS.md of the server pack ("packwiz modrinth export --server"), in place of the pack's own.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 
@@ -143,7 +145,7 @@ func init() {
 	_ = viper.BindPFlag("list.only", listCmd.Flags().Lookup("only"))
 	listCmd.Flags().Bool("show-kind", false, "Show whether each mod is a main mod or a dependency")
 	_ = viper.BindPFlag("list.show-kind", listCmd.Flags().Lookup("show-kind"))
-	listCmd.Flags().Bool("save", false, "Write the list to a markdown file ("+core.ModListFile+" in the pack folder, unless --output says where) instead of printing it")
+	listCmd.Flags().Bool("save", false, "Write the list to a markdown file ("+core.ModListFile+" in the pack folder, or "+core.ServerModListFile+" with --side server, unless --output says where) instead of printing it")
 	_ = viper.BindPFlag("list.save", listCmd.Flags().Lookup("save"))
 	listCmd.Flags().StringP("output", "o", "", "Write the list as markdown to this file, or print it if \"-\" (implies --save)")
 	_ = viper.BindPFlag("list.output", listCmd.Flags().Lookup("output"))

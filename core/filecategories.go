@@ -43,6 +43,7 @@ var FileCategoryList = []FileCategory{
 	{"ci", "continuous integration: .github/workflows/, .gitlab-ci.yml"},
 	{"build", "building and packaging: scripts, Makefile, Dockerfile"},
 	{"assets", "images and media: icon.png, screenshots/"},
+	{"server", "the server pack's own files: serverconfig/"},
 	{"misc", "anything else kept with the pack"},
 }
 
@@ -59,17 +60,19 @@ func FileCategoryNames() []string {
 // belong in it, for the pack's author to change.
 const DefaultFileCategories = `# Sorts the files in this folder that packwiz doesn't track into categories, so that
 # "packwiz commit" commits each one on its own, as "chore(dev): change flake.nix".
-# The categories are dev, docs, ci, build, assets and misc (see "man packwiz-git-commit").
+# The categories are dev, docs, ci, build, assets, server and misc (see "man packwiz-git-commit").
 # Patterns are written like those of .gitignore, relative to this folder. Files in no
 # category are left uncommitted, and "packwiz changelog release" won't release while
 # they have changes. README.md and LICENSE are always docs, unless you put them in a
-# category here, so they needn't be listed. Likewise .gitignore and .gitattributes are dev.
+# category here, so they needn't be listed. Likewise .gitignore and .gitattributes are dev,
+# and everything in serverconfig/ (the server pack's own files) is server.
 [categories]
 dev = ["flake.nix", "flake.lock", "lefthook.yml", ".envrc", ".editorconfig", ".gitignore", ".gitattributes"]
 docs = ["docs/"]
 ci = [".github/", ".gitlab-ci.yml"]
 build = ["Makefile", "Dockerfile", "scripts/"]
 assets = ["icon.png", "screenshots/"]
+server = []
 misc = []
 `
 
@@ -115,9 +118,14 @@ var builtinDocs = []string{"README.md", "LICENSE"}
 // says so, as for builtinDocs: git's own configuration for the pack's repository, which every pack that has one has.
 var builtinDev = []string{".gitignore", ".gitattributes"}
 
+// builtinServer is the folder whose files are in server whether or not the pack's FileCategoriesFile says so, as for
+// builtinDocs: the server pack's own files (see ServerConfigDir), which the index doesn't track.
+const builtinServer = ServerConfigDir + "/"
+
 // Of is the category of a file, given by its path relative to the pack's folder, or false if it is in none. A file that
-// is in more than one is in the first of them by name. The README and licence in the pack's folder are in docs, and .gitignore and .gitattributes in dev, unless the
-// pack's file puts them elsewhere.
+// is in more than one is in the first of them by name. The README and licence in the pack's folder are in docs,
+// .gitignore and .gitattributes in dev, and what is in serverconfig/ in server, unless the pack's file puts them
+// elsewhere.
 func (c FileCategories) Of(path string) (string, bool) {
 	path = strings.TrimPrefix(filepath.ToSlash(path), "./")
 	for _, name := range c.names {
@@ -130,6 +138,9 @@ func (c FileCategories) Of(path string) (string, bool) {
 	}
 	if slices.Contains(builtinDev, path) {
 		return "dev", true
+	}
+	if strings.HasPrefix(path, builtinServer) {
+		return "server", true
 	}
 	return "", false
 }

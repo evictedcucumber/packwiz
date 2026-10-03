@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -449,4 +450,80 @@ func TestWriteMarkdownListFailsWhenTheFileCannotBeWritten(t *testing.T) {
 	if out != "" {
 		t.Errorf("output = %q, want nothing said of a file that wasn't written", out)
 	}
+}
+
+// The server's list is the server pack's MODS.md, so it goes in its folder, which is made for it
+func TestListMarkdownOfTheServerGoesInTheServersFolder(t *testing.T) {
+	setUpMarkdownFixture(t)
+	setListFlag(t, "save", "true")
+	setListFlag(t, "side", core.ServerSide)
+
+	out := cmdtest.CaptureStdout(t, func() {
+		listCmd.Run(listCmd, nil)
+	})
+
+	server := filepath.FromSlash(core.ServerModListFile)
+	if want := "Wrote " + server + "\n"; out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+	if _, err := os.Stat(core.ModListFile); err == nil {
+		t.Errorf("%s was written as well as the server's list", core.ModListFile)
+	}
+	pack, index, mods := loadMarkdownFixture(t)
+	want, err := RenderModList(pack, index, ServerModList(mods))
+	if err != nil {
+		t.Fatalf("RenderModList() returned error: %v", err)
+	}
+	if got := readMarkdownFile(t, server); got != want {
+		t.Errorf("%s =\n%s\nwant\n%s", server, got, want)
+	}
+
+	// What SaveServerModList writes, for the TUI, is the same
+	if err := os.RemoveAll(core.ServerConfigDir); err != nil {
+		t.Fatalf("RemoveAll() returned error: %v", err)
+	}
+	path, err := SaveServerModList(pack, index, mods)
+	if err != nil || path != server {
+		t.Fatalf("SaveServerModList() = %q, %v, want %q", path, err, server)
+	}
+	if got := readMarkdownFile(t, server); got != want {
+		t.Errorf("SaveServerModList() wrote\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestServerModListIsTheModsOnTheServerAndLeavesTheModsAlone(t *testing.T) {
+	mods := []*core.Mod{
+		{Name: "Zeta", Side: core.UniversalSide},
+		{Name: "Client", Side: core.ClientSide},
+		{Name: "alpha", Side: core.ServerSide},
+		{Name: "Nothing", Side: core.EmptySide},
+	}
+	var names []string
+	for _, m := range ServerModList(mods) {
+		names = append(names, m.Name)
+	}
+	if want := []string{"alpha", "Nothing", "Zeta"}; !slices.Equal(names, want) {
+		t.Errorf("ServerModList() = %v, want %v", names, want)
+	}
+	if mods[0].Name != "Zeta" || mods[1].Name != "Client" {
+		t.Errorf("ServerModList() changed the slice it was given: %v", mods)
+	}
+}
+
+// loadMarkdownFixture reads the pack that setUpMarkdownFixture wrote
+func loadMarkdownFixture(t *testing.T) (core.Pack, core.Index, []*core.Mod) {
+	t.Helper()
+	pack, err := core.LoadPack()
+	if err != nil {
+		t.Fatalf("LoadPack() returned error: %v", err)
+	}
+	index, err := pack.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex() returned error: %v", err)
+	}
+	mods, err := index.LoadAllMods()
+	if err != nil {
+		t.Fatalf("LoadAllMods() returned error: %v", err)
+	}
+	return pack, index, mods
 }

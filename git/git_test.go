@@ -1570,6 +1570,37 @@ func TestFilesInACategoryAreCommittedOnTheirOwn(t *testing.T) {
 	}
 }
 
+func TestTheServerPacksFilesAreCommittedAsServerWithoutBeingListed(t *testing.T) {
+	setUpRepo(t)
+	p := setUpPack(t, "", "1.0.0")
+	p.mod(t, "Sodium", core.ClientSide, "0.5.7")
+	release(t, "")
+
+	p.write(t, core.ServerConfigDir+"/server.properties", "motd=hi")
+	p.write(t, core.ServerModListFile, "# Test Pack\n")
+	before := commitCount(t)
+	commit(t)
+
+	want := []string{
+		"chore(server): add serverconfig/MODS.md",
+		"chore(server): add serverconfig/server.properties",
+	}
+	if got := lastMessages(t, 2); !reflect.DeepEqual(got, want) || commitCount(t) != before+2 {
+		t.Errorf("commit messages =\n%q\nwant\n%q", got, want)
+	}
+	requireClean(t)
+	if index := git(t, "show", "HEAD:index.toml"); strings.Contains(index, core.ServerConfigDir) {
+		t.Errorf("the index tracks the server pack's files, which would install them on clients:\n%s", index)
+	}
+
+	// Committed, they don't hold up a release, and as chores they aren't in it
+	p.mod(t, "Iris", core.ClientSide, "1.0")
+	release(t, "")
+	if md := git(t, "show", "HEAD:CHANGELOG.md"); strings.Contains(md, "server.properties") {
+		t.Errorf("the changelog lists a file of the server pack:\n%s", md)
+	}
+}
+
 func TestAFileInACategoryNotYetCommittedBlocksARelease(t *testing.T) {
 	setUpRepo(t)
 	p := setUpPack(t, "", "1.0.0")

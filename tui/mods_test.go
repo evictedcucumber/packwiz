@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -227,6 +228,29 @@ type = "optional"
 	if s.modal() {
 		t.Error("esc didn't close the details")
 	}
+}
+
+func TestModsWritesTheServersMarkdownList(t *testing.T) {
+	s := newMods(t)
+	press(t, s, "W")
+
+	if got := statusOf(s); !strings.HasPrefix(got, "Wrote ") || !strings.HasSuffix(got, filepath.FromSlash(core.ServerModListFile)) {
+		t.Errorf("the status line is %q, want it to say where the list was written", got)
+	}
+	text, err := readFileQuiet(core.ServerModListFile)
+	if err != nil {
+		t.Fatalf("the list wasn't written: %v", err)
+	}
+	for _, want := range []string{"Alpha Mod", "Beta Mod"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the list doesn't have %q, which is on both sides:\n%s", want, text)
+		}
+	}
+	if _, err := readFileQuiet(core.ModListFile); err == nil {
+		t.Errorf("%s was written as well", core.ModListFile)
+	}
+	// The server's files aren't in the index, so writing it leaves the index as it was
+	assertIndexIsConsistent(t)
 }
 
 func TestModsWritesTheMarkdownList(t *testing.T) {
@@ -473,11 +497,11 @@ func (f fakeMods) setDependency(path string, dependency bool) error {
 	return f.packBackend.setDependency(path, dependency)
 }
 
-func (f fakeMods) saveList() (string, error) {
+func (f fakeMods) saveList(server bool) (string, error) {
 	if f.saveErr != nil {
 		return "", f.saveErr
 	}
-	return f.packBackend.saveList()
+	return f.packBackend.saveList(server)
 }
 
 func (f fakeMods) refresh() ([]string, error) {

@@ -7,25 +7,27 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/evictedcucumber/packwiz/core"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	"github.com/evictedcucumber/packwiz/modrinth"
 )
 
-// The export screen is "packwiz modrinth export": it says where the pack is exported to and how, exports it, and shows what
-// went into it.
+// The export screen is "packwiz modrinth export": it says where the pack is exported to and how, exports it (or its server
+// pack), and shows what went into it.
 
 var (
 	keyExport       = key.NewBinding(key.WithKeys("enter", "e"), key.WithHelp("enter", "export"))
 	keyExportFile   = key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "choose the file"))
 	keyExportDomain = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "allowed domains only"))
+	keyExportServer = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "server pack"))
 )
 
-var exportKeys = []key.Binding{keyExport, keyExportFile, keyExportDomain, keyUp, keyTop}
+var exportKeys = []key.Binding{keyExport, keyExportFile, keyExportServer, keyExportDomain, keyUp, keyTop}
 
-// exportInfoMsg is what the pack would be exported to.
+// exportInfoMsg is what the pack, and its server pack, would be exported to.
 type exportInfoMsg struct {
-	name string
-	err  error
+	name, serverName string
+	err              error
 }
 
 // exportedMsg is the pack having been exported, or having failed to be.
@@ -39,11 +41,14 @@ type exportScreen struct {
 	page
 	backend exportBackend
 
-	// defaultName is the file the pack goes to unless told another, and output is the file that was asked for, if one was
-	defaultName string
-	output      string
+	// defaultName is the file the pack goes to unless told another, serverName the file its server pack goes to, and
+	// output is the file that was asked for, if one was
+	defaultName, serverName string
+	output                  string
 	// restrict is whether files that aren't on the domains Modrinth allows are stored in the pack itself, as it is by default
 	restrict bool
+	// server is whether it is the server pack that is exported, rather than the .mrpack
+	server bool
 
 	result *modrinth.ExportResult
 	doc    report
@@ -59,13 +64,15 @@ func newExportScreen(backend exportBackend) *exportScreen {
 
 func (s *exportScreen) title() string { return "Export" }
 
-func (s *exportScreen) about() string { return "export the pack as a .mrpack for Modrinth" }
+func (s *exportScreen) about() string {
+	return "export the pack as a .mrpack for Modrinth, or a server pack"
+}
 
 func (s *exportScreen) activate() tea.Cmd {
 	backend := s.backend
 	return exclusive(func() tea.Msg {
-		name, err := backend.defaultExportName()
-		return exportInfoMsg{name, err}
+		name, serverName, err := backend.defaultExportName()
+		return exportInfoMsg{name, serverName, err}
 	})
 }
 
@@ -80,6 +87,14 @@ func (s *exportScreen) keys() []key.Binding {
 func (s *exportScreen) file() string {
 	if s.output != "" {
 		return s.output
+	}
+	return s.defaultFile()
+}
+
+// defaultFile is where the pack is exported to unless told another: the .mrpack or the server pack, whichever it is.
+func (s *exportScreen) defaultFile() string {
+	if s.server {
+		return s.serverName
 	}
 	return s.defaultName
 }
@@ -97,7 +112,7 @@ func (s *exportScreen) update(msg tea.Msg) (screen, tea.Cmd) {
 			s.status = errorStatus(msg.err)
 			return s, nil
 		}
-		s.defaultName = msg.name
+		s.defaultName, s.serverName = msg.name, msg.serverName
 	case exportedMsg:
 		s.exported(msg)
 	case tea.KeyPressMsg:
@@ -120,11 +135,22 @@ func (s *exportScreen) updateKey(msg tea.KeyPressMsg) (screen, tea.Cmd) {
 	}
 	switch {
 	case key.Matches(msg, keyExportDomain):
+		if s.server {
+			s.status = infoStatus("Every file is in the server pack, wherever it comes from")
+			return s, nil
+		}
 		s.restrict = !s.restrict
+	case key.Matches(msg, keyExportServer):
+		s.server = !s.server
+		if s.server {
+			s.status = infoStatus("Exporting the server pack")
+		} else {
+			s.status = infoStatus("Exporting the .mrpack")
+		}
 	case key.Matches(msg, keyExportFile):
 		s.choosing = true
 		s.open(newPromptBox("Export to which file?", s.output, nil,
-			ui.Muted.Sprint("Leave it empty for "+s.defaultName)))
+			ui.Muted.Sprint("Leave it empty for "+s.defaultFile())))
 	case key.Matches(msg, keyExport):
 		return s.askOrExport()
 	}
@@ -140,7 +166,7 @@ func (s *exportScreen) askOrExport() (screen, tea.Cmd) {
 		s.status = warningStatus("The name of the file isn't known yet")
 		return s, nil
 	}
-	options := modrinth.ExportOptions{Output: s.output, RestrictDomains: s.restrict}
+	options := modrinth.ExportOptions{Output: s.output, RestrictDomains: s.restrict, Server: s.server}
 	if _, err := os.Stat(s.file()); err == nil {
 		s.pending = &options
 		s.open(newConfirmBox("Overwrite "+s.file()+"?", ui.Muted.Sprint("It is there already, and exporting replaces it.")))
@@ -218,18 +244,22 @@ func exportReport(r *modrinth.ExportResult) func(width int) []string {
 }
 
 // settingsHeight is how many lines the settings take above what was exported.
-func (s *exportScreen) settingsHeight() int { return 4 }
+func (s *exportScreen) settingsHeight() int { return 5 }
 
 func (s *exportScreen) view() string {
-	domains := "[x] "
-	detail := "only files on the domains Modrinth allows are left for the launcher to download; the rest are stored in the pack"
+	kind := "( ) server pack  (•) .mrpack  " + ui.Muted.Sprint("for a launcher to install from Modrinth")
+	domains := "[x] " + ui.Muted.Sprint("only files on the domains Modrinth allows are left for the launcher to download; the rest are stored in the pack")
 	if !s.restrict {
-		domains = "[ ] "
-		detail = "every file is left for the launcher to download, wherever it comes from"
+		domains = "[ ] " + ui.Muted.Sprint("every file is left for the launcher to download, wherever it comes from")
+	}
+	if s.server {
+		kind = "(•) server pack  ( ) .mrpack  " + ui.Muted.Sprint("a zip of the server's mods and files, with "+core.ServerConfigDir+"/")
+		domains = ui.Muted.Sprint("every file is in the server pack")
 	}
 	lines := []string{
 		field("File", s.file()),
-		field("Domains", domains+ui.Muted.Sprint(detail)),
+		field("Kind", kind),
+		field("Domains", domains),
 		"",
 	}
 	room := s.bodyHeight() - len(lines) - 1
@@ -240,5 +270,9 @@ func (s *exportScreen) view() string {
 	default:
 		lines = append(lines, messageBody("Press enter to export the pack.")...)
 	}
-	return s.render(ui.Bold.Sprint("Export")+ui.Muted.Sprint(" · a pack for Modrinth"), lines, "")
+	summary := " · a pack for Modrinth"
+	if s.server {
+		summary = " · a pack for a server"
+	}
+	return s.render(ui.Bold.Sprint("Export")+ui.Muted.Sprint(summary), lines, "")
 }

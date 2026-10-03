@@ -18,6 +18,9 @@ import (
 type ExportOptions struct {
 	// Output is the file to write, or "" for one named after the pack, in the current directory
 	Output string
+	// Server is whether to export the server pack (see exportServerPack), a zip of what a server needs with the mods in
+	// it, rather than a .mrpack. RestrictDomains means nothing for it, as every file is in it.
+	Server bool
 	// RestrictDomains is whether only files that are on the domains Modrinth allows are left for the launcher to download:
 	// any other is stored in the pack itself, which is bigger and is yours to have the right to distribute
 	RestrictDomains bool
@@ -45,6 +48,8 @@ type ExportPromotion struct {
 type ExportResult struct {
 	// Path is the file that was written
 	Path string
+	// Server is whether it is the server pack, whose files are all in it, at their paths, rather than a .mrpack
+	Server bool
 	// Files are what went into it, in the order of their paths
 	Files []ExportFile
 	// Promotions are the mods that are only for the server, that a mod on the client needs: 'packwiz validate' says more
@@ -73,7 +78,7 @@ type exportHooks struct {
 	progress func(done, total int)
 }
 
-// Export exports the pack as a .mrpack, as "packwiz modrinth export" does, without saying anything on the terminal. The
+// Export exports the pack as a .mrpack, or its server pack if options say so, as "packwiz modrinth export" does, without saying anything on the terminal. The
 // index is refreshed first, so that the files it lists are the ones that are there. progress, if it isn't nil, is told how
 // many of the files are done, as downloading them is what takes the time.
 func Export(options ExportOptions, progress func(done, total int)) (*ExportResult, error) {
@@ -100,7 +105,7 @@ func Export(options ExportOptions, progress func(done, total int)) (*ExportResul
 			err = fmt.Errorf("Error reading file: %v", err)
 			return
 		}
-		result, err = exportPack(pack, &index, mods, options, exportHooks{progress: progress})
+		result, err = exportWith(pack, &index, mods, options, exportHooks{progress: progress})
 	})
 	if err != nil {
 		return nil, err
@@ -111,6 +116,14 @@ func Export(options ExportOptions, progress func(done, total int)) (*ExportResul
 		}
 	}
 	return result, nil
+}
+
+// exportWith writes the server pack of a pack if options say so, and its .mrpack if not.
+func exportWith(pack core.Pack, index *core.Index, mods []*core.Mod, options ExportOptions, hooks exportHooks) (*ExportResult, error) {
+	if options.Server {
+		return exportServerPack(pack, index, mods, options, hooks)
+	}
+	return exportPack(pack, index, mods, options, hooks)
 }
 
 // exportPack writes the .mrpack of a pack, given its index and mods. What it would print it says through notice, and what

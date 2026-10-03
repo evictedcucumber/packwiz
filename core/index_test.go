@@ -899,3 +899,34 @@ func TestTheFilesThatDescribeThePackAreNotInItsIndex(t *testing.T) {
 		}
 	}
 }
+
+func TestTheServerPacksFilesAreNotInTheIndex(t *testing.T) {
+	// They are only for the server pack, so a launcher mustn't install them on a client, and an exported server pack
+	// mustn't be put in the next one
+	dir := t.TempDir()
+	packFile := filepath.Join(dir, "pack.toml")
+	indexFilePath := filepath.Join(dir, "index.toml")
+	mustWriteFile(t, packFile, "name = \"Test\"\n")
+	mustWriteFile(t, indexFilePath, "")
+	mustWriteFile(t, filepath.Join(dir, "config", "config.txt"), "fake config")
+	mustWriteFile(t, filepath.Join(dir, ServerConfigDir, "server.properties"), "motd=hi")
+	mustWriteFile(t, filepath.Join(dir, ServerConfigDir, "config", "config.txt"), "server config")
+	mustWriteFile(t, filepath.Join(dir, "Test-1.0.0"+ServerPackSuffix), "a zip")
+
+	oldPackFile := viper.GetString("pack-file")
+	viper.Set("pack-file", packFile)
+	t.Cleanup(func() { viper.Set("pack-file", oldPackFile) })
+
+	idx := Index{HashFormat: "sha256", indexFile: indexFilePath, packRoot: dir, Files: IndexFiles{}}
+	if err := idx.Refresh(); err != nil {
+		t.Fatalf("Refresh() returned error: %v", err)
+	}
+	if _, ok := idx.Files["config/config.txt"]; !ok {
+		t.Error("expected config/config.txt to be added to the index")
+	}
+	for p := range idx.Files {
+		if p != "config/config.txt" {
+			t.Errorf("expected %s to be left out of the index", p)
+		}
+	}
+}

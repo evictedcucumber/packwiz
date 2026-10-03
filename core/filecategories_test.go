@@ -156,3 +156,33 @@ func TestTheFileOfCategoriesPackwizWritesParses(t *testing.T) {
 		}
 	}
 }
+
+func TestTheServerPacksFilesAreInServerWithoutBeingListed(t *testing.T) {
+	for name, dir := range map[string]string{
+		"no file":      t.TempDir(),
+		"another file": writeCategories(t, "[categories]\ndev = [\"flake.nix\"]\n"),
+	} {
+		categories, err := LoadFileCategories(dir)
+		if err != nil {
+			t.Fatalf("%s: LoadFileCategories() returned error: %v", name, err)
+		}
+		for _, path := range []string{"serverconfig/server.properties", "serverconfig/config/a.toml", "./serverconfig/MODS.md"} {
+			if got, ok := categories.Of(path); !ok || got != "server" {
+				t.Errorf("%s: Of(%q) = %q, %v, want server", name, path, got, ok)
+			}
+		}
+		for _, path := range []string{"serverconfig", "config/serverconfig/a.toml", "serverconfig.toml"} {
+			if got, ok := categories.Of(path); ok {
+				t.Errorf("%s: Of(%q) = %q, want no category", name, path, got)
+			}
+		}
+	}
+	// The pack's own file has the last word, as it does for the README
+	categories, err := LoadFileCategories(writeCategories(t, "[categories]\nmisc = [\"serverconfig/\"]\n"))
+	if err != nil {
+		t.Fatalf("LoadFileCategories() returned error: %v", err)
+	}
+	if got, _ := categories.Of("serverconfig/server.properties"); got != "misc" {
+		t.Errorf("Of() = %q, want misc, where the pack's file puts it", got)
+	}
+}

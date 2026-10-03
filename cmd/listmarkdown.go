@@ -178,12 +178,21 @@ func escapeInline(text string) string {
 	return markdownReference.ReplaceAllString(text, `\&$1`)
 }
 
-// markdownListPath is where the markdown list is written: where --output says, or else in the pack's folder
+// markdownListPath is where the markdown list is written: where --output says, or else in the pack's folder, as the
+// server's list (core.ServerModListFile) for --side server
 func markdownListPath() string {
 	if out := viper.GetString("list.output"); out != "" {
 		return out
 	}
+	if viper.GetString("list.side") == core.ServerSide {
+		return serverModListPath()
+	}
 	return filepath.Join(filepath.Dir(viper.GetString("pack-file")), core.ModListFile)
+}
+
+// serverModListPath is where the server's list of mods is written, in the pack's folder
+func serverModListPath() string {
+	return filepath.Join(filepath.Dir(viper.GetString("pack-file")), filepath.FromSlash(core.ServerModListFile))
 }
 
 // RenderModList makes the markdown list of the mods, as "packwiz list --save" writes it.
@@ -210,6 +219,28 @@ func SaveModList(pack core.Pack, index core.Index, mods []*core.Mod) (string, er
 	return dest, os.WriteFile(dest, []byte(text), 0o644)
 }
 
+// ServerModList is the mods of the pack that run on the server, as "packwiz list --side server" lists them, in a new slice.
+func ServerModList(mods []*core.Mod) []*core.Mod {
+	mods = FilterBySide(slices.Clone(mods), core.ServerSide)
+	SortMods(mods)
+	return mods
+}
+
+// SaveServerModList writes the markdown list of the mods that run on the server (of all the pack's mods) to the file that
+// "packwiz list --save --side server" writes to when it isn't told where (core.ServerModListFile), making its folder if
+// it has to, and returns where that is. It says nothing, as SaveModList doesn't.
+func SaveServerModList(pack core.Pack, index core.Index, mods []*core.Mod) (string, error) {
+	text, err := RenderModList(pack, index, ServerModList(mods))
+	if err != nil {
+		return "", err
+	}
+	dest := serverModListPath()
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", err
+	}
+	return dest, os.WriteFile(dest, []byte(text), 0o644)
+}
+
 // writeMarkdownList makes the markdown list of the mods and writes it to dest, or to stdout if that is "-"
 func writeMarkdownList(dest string, pack core.Pack, index core.Index, mods []*core.Mod) error {
 	text, err := RenderModList(pack, index, mods)
@@ -220,6 +251,12 @@ func writeMarkdownList(dest string, pack core.Pack, index core.Index, mods []*co
 	if dest == "-" {
 		fmt.Print(text)
 		return nil
+	}
+	// The server's folder is made for its list, which is often the first thing in it; a folder --output names is not
+	if dest == serverModListPath() {
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return err
+		}
 	}
 	if err := os.WriteFile(dest, []byte(text), 0o644); err != nil {
 		return err

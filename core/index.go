@@ -149,6 +149,21 @@ const ModListFile = "MODS.md"
 // it exports, so they travel with it without being asked for.
 var DocFiles = []string{"README.md", "LICENSE", "CHANGELOG.md"}
 
+// ServerConfigDir is the folder in the pack's folder of the files that only the server pack has, such as
+// server.properties: "packwiz modrinth export --server" puts what is in it at the top of the server pack, where it replaces
+// any file of the same path that the pack would otherwise put there. The index leaves it out (see ignoreDefaults), so
+// nothing installs it on a client.
+const ServerConfigDir = "serverconfig"
+
+// ServerModListFile is the markdown file that "packwiz list --save --side server" writes, unless told where to put it:
+// the list of the server's mods, which the server pack has in place of ModListFile, as it is in ServerConfigDir. It is
+// a path relative to the pack's folder, with forward slashes.
+const ServerModListFile = ServerConfigDir + "/" + ModListFile
+
+// ServerPackSuffix ends the name of the zip that "packwiz modrinth export --server" writes unless told another, after the
+// pack's name. The index leaves such files out (see ignoreDefaults), as it does .mrpack files.
+const ServerPackSuffix = "-server.zip"
+
 // IgnoreFile is the file in the pack's folder that lists what the index leaves out, in addition to ignoreDefaults. It is
 // itself left out of the index.
 const IgnoreFile = ".packwizignore"
@@ -164,8 +179,12 @@ var ignoreDefaults = []string{
 	// Exclude macOS metadata
 	".DS_Store",
 
-	// Exclude exported Modrinth packs
+	// Exclude exported Modrinth packs, and server packs
 	"*.mrpack",
+	"*" + ServerPackSuffix,
+
+	// Exclude the files that are only for the server pack (see ServerConfigDir)
+	ServerConfigDir + "/",
 
 	// Exclude packwiz binaries, if the user puts them in their pack folder
 	"packwiz.exe",

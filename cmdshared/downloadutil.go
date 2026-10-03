@@ -7,9 +7,11 @@ import (
 	"github.com/evictedcucumber/packwiz/internal/notice"
 	"github.com/evictedcucumber/packwiz/internal/ui"
 	"io"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 )
 
 func ListManualDownloads(session core.DownloadSession) {
@@ -67,40 +69,55 @@ func AddToZip(dl core.CompletedDownload, exp *zip.Writer, dir string, index *cor
 
 // AddNonMetafileOverrides saves all non-metadata files into an overrides folder in the zip
 func AddNonMetafileOverrides(index *core.Index, exp *zip.Writer) {
-	for p, v := range index.Files {
-		if !v.IsMetaFile() {
-			file, err := exp.Create(path.Join("overrides", p))
-			if err != nil {
-				notice.Errorf("Error creating file: %s", err.Error())
-				// TODO: exit(1)?
-				continue
-			}
-			// Attempt to read the file from disk, without checking hashes (assumed to have no errors)
-			src, err := os.Open(index.ResolveIndexPath(p))
-			if err != nil {
-				_ = src.Close()
-				notice.Errorf("Error reading file: %s", err.Error())
-				// TODO: exit(1)?
-				continue
-			}
-			_, err = io.Copy(file, src)
-			if err != nil {
-				_ = src.Close()
-				notice.Errorf("Error copying file: %s", err.Error())
-				// TODO: exit(1)?
-				continue
-			}
+	AddNonMetafiles(index, exp, "overrides", nil)
+}
 
-			_ = src.Close()
+// AddNonMetafiles saves the files the index lists that aren't metadata files (config files and the like) into dir in the
+// zip ("" for its top), in the order of their paths, but for those that skip, if it isn't nil, says to leave out.
+func AddNonMetafiles(index *core.Index, exp *zip.Writer, dir string, skip func(p string) bool) {
+	for _, p := range slices.Sorted(maps.Keys(index.Files)) {
+		if index.Files[p].IsMetaFile() || (skip != nil && skip(p)) {
+			continue
+		}
+		// Read from disk, without checking hashes (assumed to have no errors)
+		if err := AddFileToZip(exp, index.ResolveIndexPath(p), path.Join(dir, p)); err != nil {
+			notice.Errorf("%s", err.Error())
+			// TODO: exit(1)?
 		}
 	}
+}
+
+// AddFileToZip copies the file at src on disk into the zip as name.
+func AddFileToZip(exp *zip.Writer, src, name string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("Error reading file %s: %w", name, err)
+	}
+	defer func() { _ = in.Close() }()
+	file, err := exp.Create(name)
+	if err != nil {
+		return fmt.Errorf("Error creating file %s: %w", name, err)
+	}
+	if _, err = io.Copy(file, in); err != nil {
+		return fmt.Errorf("Error copying file %s: %w", name, err)
+	}
+	return nil
 }
 
 // AddDocOverrides saves the pack's README, licence and changelog (core.DocFiles), whichever of them are in the pack's
 // folder, into the overrides folder of the zip. The index doesn't list them, so AddNonMetafileOverrides doesn't. A pack
 // with none of them, or with a folder where one should be, is not an error: they are for the pack's author to write.
 func AddDocOverrides(index *core.Index, exp *zip.Writer) {
+	AddDocs(index, exp, "overrides", nil)
+}
+
+// AddDocs is AddDocOverrides into dir in the zip ("" for its top), but for those that skip, if it isn't nil, says to
+// leave out.
+func AddDocs(index *core.Index, exp *zip.Writer, dir string, skip func(name string) bool) {
 	for _, name := range core.DocFiles {
+		if skip != nil && skip(name) {
+			continue
+		}
 		src := index.ResolveIndexPath(name)
 		if info, err := os.Stat(src); err != nil || !info.Mode().IsRegular() {
 			if err != nil && !os.IsNotExist(err) {
@@ -108,21 +125,9 @@ func AddDocOverrides(index *core.Index, exp *zip.Writer) {
 			}
 			continue
 		}
-		in, err := os.Open(src)
-		if err != nil {
-			notice.Errorf("Error reading file %s: %s", name, err.Error())
-			continue
+		if err := AddFileToZip(exp, src, path.Join(dir, name)); err != nil {
+			notice.Errorf("%s", err.Error())
 		}
-		file, err := exp.Create(path.Join("overrides", name))
-		if err != nil {
-			_ = in.Close()
-			notice.Errorf("Error creating file %s: %s", name, err.Error())
-			continue
-		}
-		if _, err = io.Copy(file, in); err != nil {
-			notice.Errorf("Error copying file %s: %s", name, err.Error())
-		}
-		_ = in.Close()
 	}
 }
 

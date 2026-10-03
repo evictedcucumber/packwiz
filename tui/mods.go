@@ -18,17 +18,18 @@ import (
 // and see all that the pack knows of it.
 
 var (
-	keyModPin    = key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pin/unpin"))
-	keyModDep    = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "mark as dependency/main"))
-	keyModUpdate = key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update"))
-	keyModInfo   = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "details"))
-	keyModSide   = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "filter by side"))
-	keyModKind   = key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "filter main/dependencies"))
-	keyModList   = key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "write "+core.ModListFile))
+	keyModPin     = key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pin/unpin"))
+	keyModDep     = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "mark as dependency/main"))
+	keyModUpdate  = key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update"))
+	keyModInfo    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "details"))
+	keyModSide    = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "filter by side"))
+	keyModKind    = key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "filter main/dependencies"))
+	keyModList    = key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "write "+core.ModListFile))
+	keyServerList = key.NewBinding(key.WithKeys("W"), key.WithHelp("W", "write "+core.ServerModListFile))
 )
 
 // modsKeys are the bindings of the mods screen, in the order they are shown in help.
-var modsKeys = []key.Binding{keyModPin, keyModUpdate, keyModInfo, keySearch, keyModSide, keyModKind, keyModList, keyRefresh, keyUp, keyTop}
+var modsKeys = []key.Binding{keyModPin, keyModUpdate, keyModInfo, keySearch, keyModSide, keyModKind, keyModList, keyServerList, keyRefresh, keyUp, keyTop}
 
 // sideFilter is which mods the mods screen shows, by where they run, as "packwiz list --side" does: those on the side and
 // those on both.
@@ -342,7 +343,9 @@ func (s *modsScreen) updateKey(msg tea.KeyPressMsg) (screen, tea.Cmd) {
 	case key.Matches(msg, keyModUpdate):
 		return s.startCheck()
 	case key.Matches(msg, keyModList):
-		return s.startSaveList()
+		return s.startSaveList(false)
+	case key.Matches(msg, keyServerList):
+		return s.startSaveList(true)
 	case key.Matches(msg, keyRefresh):
 		return s.startRefresh()
 	}
@@ -409,10 +412,11 @@ func (s *modsScreen) toggleDependency() (screen, tea.Cmd) {
 	})
 }
 
-func (s *modsScreen) startSaveList() (screen, tea.Cmd) {
+// startSaveList writes the list of the mods, or of the server's mods if server is true.
+func (s *modsScreen) startSaveList(server bool) (screen, tea.Cmd) {
 	backend := s.backend
 	return s.change("Writing the list…", func() modsChangedMsg {
-		path, err := backend.saveList()
+		path, err := backend.saveList(server)
 		return modsChangedMsg{text: "Wrote " + path, err: err}
 	})
 }

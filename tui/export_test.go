@@ -25,7 +25,9 @@ type fakeExport struct {
 	exported []modrinth.ExportOptions
 }
 
-func (f *fakeExport) defaultExportName() (string, error) { return f.name, f.nameErr }
+func (f *fakeExport) defaultExportName() (string, string, error) {
+	return f.name, strings.TrimSuffix(f.name, ".mrpack") + "-server.zip", f.nameErr
+}
 
 func (f *fakeExport) exportPack(options modrinth.ExportOptions, progress func(done, total int)) (*modrinth.ExportResult, error) {
 	f.exported = append(f.exported, options)
@@ -108,6 +110,29 @@ func TestExportPassesWhatWasChosen(t *testing.T) {
 
 	if len(f.exported) != 1 || f.exported[0] != (modrinth.ExportOptions{Output: "my.mrpack", RestrictDomains: false}) {
 		t.Errorf("the pack was exported with %+v, want the file and the domains that were chosen", f.exported)
+	}
+}
+
+func TestExportExportsTheServerPackWhenItIsChosen(t *testing.T) {
+	f := newFakeExport()
+	s := exportOn(t, f)
+	press(t, s, "s")
+	out := strings.Join(body(t, s), "\n")
+	for _, want := range []string{"Test Pack-1.2.0-server.zip", "(•) server pack", "every file is in the server pack"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the screen doesn't say %q:\n%s", want, out)
+		}
+	}
+	// The domains are nothing to a server pack, so they are left as they were
+	press(t, s, "d", "enter")
+
+	if len(f.exported) != 1 || f.exported[0] != (modrinth.ExportOptions{RestrictDomains: true, Server: true}) {
+		t.Fatalf("the pack was exported with %+v, want the server pack", f.exported)
+	}
+
+	press(t, s, "s")
+	if out := s.view(); !strings.Contains(out, "Test Pack-1.2.0.mrpack") || !strings.Contains(out, "(•) .mrpack") {
+		t.Errorf("s didn't go back to the .mrpack:\n%s", out)
 	}
 }
 

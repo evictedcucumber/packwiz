@@ -139,6 +139,7 @@ var screenStates = map[string]map[string][]string{
 	"Export": {
 		"before exporting":      nil,
 		"a file being chosen":   {"o", "a", "b"},
+		"the server pack":       {"s"},
 		"a question":            {"d", "enter"},
 		"what was exported":     {"enter"},
 		"the end of the report": {"enter", "G"},

@@ -64,8 +64,9 @@ type modsBackend interface {
 	// setDependency marks a mod as a dependency of others, or as a main mod, as "packwiz mark-dependency" and
 	// "packwiz unmark-dependency" do.
 	setDependency(path string, dependency bool) error
-	// saveList writes the markdown list of the mods, as "packwiz list --save" does, and says where it wrote it.
-	saveList() (string, error)
+	// saveList writes the markdown list of the mods, as "packwiz list --save" does, or of the server's mods if server is
+	// true, as "packwiz list --save --side server" does, and says where it wrote it.
+	saveList(server bool) (string, error)
 	// refresh brings the index up to date with the files on disk, as "packwiz refresh" does (see configBackend).
 	refresh() (notices []string, err error)
 	updatesBackend
@@ -159,7 +160,7 @@ func (packBackend) setDependency(path string, dependency bool) error {
 	return changeMod(path, func(m *core.Mod) { m.AddedAsDependency = dependency })
 }
 
-func (packBackend) saveList() (string, error) {
+func (packBackend) saveList(server bool) (string, error) {
 	pack, err := core.LoadPack()
 	if err != nil {
 		return "", err
@@ -172,8 +173,12 @@ func (packBackend) saveList() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	save := cmd.SaveModList
+	if server {
+		save = cmd.SaveServerModList
+	}
 	cmd.SortMods(mods)
-	path, err := cmd.SaveModList(pack, index, mods)
+	path, err := save(pack, index, mods)
 	if err != nil {
 		return "", fmt.Errorf("failed to write the list: %w", err)
 	}
