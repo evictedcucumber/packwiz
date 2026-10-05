@@ -21,6 +21,10 @@ type ExportOptions struct {
 	// Server is whether to export the server pack (see exportServerPack), a zip of what a server needs with the mods in
 	// it, rather than a .mrpack. RestrictDomains means nothing for it, as every file is in it.
 	Server bool
+	// Dev is whether to export a pack for development: every mod is in it for both the client and the server, whatever
+	// side it is on, so one instance can run everything. It is a .mrpack, with -dev in its default name. Server and Dev
+	// can't be asked for together.
+	Dev bool
 	// RestrictDomains is whether only files that are on the domains Modrinth allows are left for the launcher to download:
 	// any other is stored in the pack itself, which is bigger and is yours to have the right to distribute
 	RestrictDomains bool
@@ -120,6 +124,9 @@ func Export(options ExportOptions, progress func(done, total int)) (*ExportResul
 
 // exportWith writes the server pack of a pack if options say so, and its .mrpack if not.
 func exportWith(pack core.Pack, index *core.Index, mods []*core.Mod, options ExportOptions, hooks exportHooks) (*ExportResult, error) {
+	if options.Server && options.Dev {
+		return nil, errors.New("a server pack and a dev pack can't be exported together")
+	}
 	if options.Server {
 		return exportServerPack(pack, index, mods, options, hooks)
 	}
@@ -132,6 +139,12 @@ func exportPack(pack core.Pack, index *core.Index, mods []*core.Mod, options Exp
 	fileName := options.Output
 	if fileName == "" {
 		fileName = pack.GetPackName() + ".mrpack"
+		if options.Dev {
+			fileName = pack.GetPackName() + "-dev.mrpack"
+		}
+	}
+	if options.Dev {
+		mods = onBothSides(mods)
 	}
 	expFile, err := os.Create(fileName)
 	if err != nil {
@@ -303,4 +316,16 @@ func exportPack(pack core.Pack, index *core.Index, mods []*core.Mod, options Exp
 		result.Promotions = append(result.Promotions, ExportPromotion{Mod: p.mod.Name, NeededBy: p.neededBy.Name})
 	}
 	return result, nil
+}
+
+// onBothSides is mods as copies that are all on both sides, as a dev export has them. Everything else about a mod,
+// including that it is optional, is as it was.
+func onBothSides(mods []*core.Mod) []*core.Mod {
+	all := make([]*core.Mod, len(mods))
+	for i, mod := range mods {
+		c := *mod
+		c.Side = core.UniversalSide
+		all[i] = &c
+	}
+	return all
 }

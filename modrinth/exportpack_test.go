@@ -306,3 +306,29 @@ func TestExportOfAPackWithoutAReadmeOrLicenseIsNotAnError(t *testing.T) {
 		}
 	}
 }
+
+func TestDevExportPutsEveryModOnBothSidesWhateverItsSide(t *testing.T) {
+	client, server := validMod("clientonly"), validMod("serveronly")
+	client.side, server.side = core.ClientSide, core.ServerSide
+	exportablePack(t, client, server)
+	output := t.TempDir() + "/pack-dev.mrpack"
+
+	if _, err := Export(ExportOptions{Output: output, RestrictDomains: true, Dev: true}, nil); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+	_, manifest := readMrpack(t, output)
+	if len(manifest.Files) != 2 {
+		t.Fatalf("got %d files, want 2", len(manifest.Files))
+	}
+	for _, f := range manifest.Files {
+		if f.Env.Client != "required" || f.Env.Server != "required" {
+			t.Errorf("%s is %s on the client and %s on the server, want required on both", f.Path, f.Env.Client, f.Env.Server)
+		}
+	}
+}
+
+func TestDevExportCannotBeAServerPack(t *testing.T) {
+	if _, err := exportWith(core.Pack{}, &core.Index{}, nil, ExportOptions{Dev: true, Server: true}, exportHooks{}); err == nil {
+		t.Error("a dev server pack was exported")
+	}
+}

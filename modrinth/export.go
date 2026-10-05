@@ -80,6 +80,7 @@ out of date.`,
 			Output:          viper.GetString("modrinth.export.output"),
 			RestrictDomains: viper.GetBool("modrinth.export.restrictDomains"),
 			Server:          viper.GetBool("modrinth.export.server"),
+			Dev:             viper.GetBool("modrinth.export.dev"),
 		}, exportHooks{disclaimer: cmdshared.PrintDisclaimer, manual: cmdshared.ListManualDownloads})
 		if err != nil {
 			ui.Error.Println(err)
@@ -130,5 +131,8 @@ func init() {
 	exportCmd.Flags().Bool("server", false, "Export the server pack, a zip with the server's mods and the files in "+core.ServerConfigDir+"/, instead of a .mrpack")
 	_ = viper.BindPFlag("modrinth.export.restrictDomains", exportCmd.Flags().Lookup("restrictDomains"))
 	_ = viper.BindPFlag("modrinth.export.output", exportCmd.Flags().Lookup("output"))
+	exportCmd.Flags().Bool("dev", false, "Export a .mrpack with every mod on both the client and the server, whatever its side, for development")
+	exportCmd.MarkFlagsMutuallyExclusive("server", "dev")
+	_ = viper.BindPFlag("modrinth.export.dev", exportCmd.Flags().Lookup("dev"))
 	_ = viper.BindPFlag("modrinth.export.server", exportCmd.Flags().Lookup("server"))
 }
