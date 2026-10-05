@@ -236,7 +236,7 @@ func exportPack(pack core.Pack, index *core.Index, mods []*core.Mod, options Exp
 			} else if dl.Mod.Side == core.ServerSide {
 				folder = "server-overrides"
 			}
-			if cmdshared.AddToZip(dl, exp, folder, index) {
+			if cmdshared.AddToZip(dl, cmdshared.ZipArchive{Writer: exp}, folder, index) {
 				exported = append(exported, bundledFile(dl, folder, index))
 			}
 		}

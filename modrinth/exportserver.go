@@ -104,27 +104,9 @@ func checkServerChangelog(index *core.Index, serverFiles map[string]string) {
 	}
 }
 
-// exportServerPack writes the server pack of a pack, given its index and mods: a zip of the files a server needs, laid
-// out as they are on the server, with the mods that run there downloaded into it. Then the files the index lists that
-// aren't mods, the pack's README, licence and changelog, and last the files in its serverconfig folder, each of which
-// replaces whatever else would be at its path. What it would print it says through notice, and what it makes it returns.
+// exportServerPack writes the server pack of a pack as a zip (see writeServerPack). What it would print it says through
+// notice, and what it makes it returns.
 func exportServerPack(pack core.Pack, index *core.Index, mods []*core.Mod, options ExportOptions, hooks exportHooks) (result *ExportResult, err error) {
-	serverFiles, err := serverConfigFiles(index)
-	if err != nil {
-		return nil, err
-	}
-	replaced := func(p string) bool {
-		_, ok := serverFiles[p]
-		return ok
-	}
-
-	var serverMods []*core.Mod
-	for _, mod := range mods {
-		if onServer(mod) {
-			serverMods = append(serverMods, mod)
-		}
-	}
-
 	fileName := options.Output
 	if fileName == "" {
 		fileName = ServerPackName(pack)
@@ -143,6 +125,41 @@ func exportServerPack(pack core.Pack, index *core.Index, mods []*core.Mod, optio
 		}
 	}()
 
+	files, err := writeServerPack(pack, index, mods, cmdshared.ZipArchive{Writer: exp}, hooks)
+	if err != nil {
+		return nil, err
+	}
+	if err = exp.Close(); err != nil {
+		return nil, errors.New("Error writing export file: " + err.Error())
+	}
+	if err = expFile.Close(); err != nil {
+		return nil, errors.New("Error writing export file: " + err.Error())
+	}
+	return &ExportResult{Path: fileName, Server: true, Files: files}, nil
+}
+
+// writeServerPack puts the server pack of a pack, given its index and mods, in an archive: the files a server needs, laid
+// out as they are on the server, with the mods that run there downloaded into it. Then the files the index lists that
+// aren't mods, the pack's README, licence and changelog, and last the files in its serverconfig folder, each of which
+// replaces whatever else would be at its path. What it would print it says through notice, and it returns the mods that
+// went in.
+func writeServerPack(pack core.Pack, index *core.Index, mods []*core.Mod, exp cmdshared.Archive, hooks exportHooks) ([]ExportFile, error) {
+	serverFiles, err := serverConfigFiles(index)
+	if err != nil {
+		return nil, err
+	}
+	replaced := func(p string) bool {
+		_, ok := serverFiles[p]
+		return ok
+	}
+
+	var serverMods []*core.Mod
+	for _, mod := range mods {
+		if onServer(mod) {
+			serverMods = append(serverMods, mod)
+		}
+	}
+
 	session, err := core.CreateDownloadSession(serverMods, []string{"length-bytes"})
 	if err != nil {
 		return nil, fmt.Errorf("Error retrieving external files: %v", err)
@@ -153,7 +170,7 @@ func exportServerPack(pack core.Pack, index *core.Index, mods []*core.Mod, optio
 		return nil, fmt.Errorf("%d of the files have to be downloaded by hand, which can't be done here: run 'packwiz modrinth export --server' to see which", len(manual))
 	}
 
-	var exported []exportedFile
+	var files []ExportFile
 	done := 0
 	for dl := range session.StartDownloads() {
 		done++
@@ -171,7 +188,7 @@ func exportServerPack(pack core.Pack, index *core.Index, mods []*core.Mod, optio
 		if cmdshared.AddToZip(dl, exp, "", index) {
 			client, server := exportEnv(dl.Mod.Side, dl.Mod.Option != nil && dl.Mod.Option.Optional)
 			size, _ := strconv.ParseUint(dl.Hashes["length-bytes"], 10, 64)
-			exported = append(exported, exportedFile{name: dl.Mod.Name, path: p, client: client, server: server, size: size})
+			files = append(files, ExportFile{Name: dl.Mod.Name, Path: p, Client: client, Server: server, Size: size})
 		}
 	}
 
@@ -184,21 +201,9 @@ func exportServerPack(pack core.Pack, index *core.Index, mods []*core.Mod, optio
 	checkServerModList(pack, index, mods, serverFiles)
 	checkServerChangelog(index, serverFiles)
 	for _, p := range slices.Sorted(maps.Keys(serverFiles)) {
-		if err := cmdshared.AddFileToZip(exp, serverFiles[p], p); err != nil {
+		if err := cmdshared.AddFile(exp, serverFiles[p], p); err != nil {
 			notice.Errorf("%s", err.Error())
 		}
 	}
-
-	if err = exp.Close(); err != nil {
-		return nil, errors.New("Error writing export file: " + err.Error())
-	}
-	if err = expFile.Close(); err != nil {
-		return nil, errors.New("Error writing export file: " + err.Error())
-	}
-
-	result = &ExportResult{Path: fileName, Server: true}
-	for _, f := range exported {
-		result.Files = append(result.Files, ExportFile{Name: f.name, Path: f.path, Client: f.client, Server: f.server, Size: f.size})
-	}
-	return result, nil
+	return files, nil
 }

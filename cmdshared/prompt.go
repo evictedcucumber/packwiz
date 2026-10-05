@@ -27,7 +27,13 @@ func stdin() *bufio.Reader {
 	return stdinReader
 }
 
+// PromptYesNo asks a yes or no question, where no answer is yes.
 func PromptYesNo(prompt string) bool {
+	return PromptYesNoDefault(prompt, true)
+}
+
+// PromptYesNoDefault asks a yes or no question, where no answer is def, as is any answer that isn't the other one.
+func PromptYesNoDefault(prompt string, def bool) bool {
 	fmt.Print(ui.Prompt(prompt))
 	answer, err := stdin().ReadString('\n')
 	// The last answer of piped input needn't end in a newline (printf 'y'); only having no answer at all is a failure
@@ -37,8 +43,19 @@ func PromptYesNo(prompt string) bool {
 	}
 
 	ansNormal := strings.ToLower(strings.TrimSpace(answer))
-	if len(ansNormal) > 0 && ansNormal[0] == 'n' {
-		return false
+	if len(ansNormal) == 0 {
+		return def
 	}
-	return true
+	// Only the answer that isn't the default has to be given as such
+	if def {
+		return ansNormal[0] != 'n'
+	}
+	return ansNormal[0] == 'y'
+}
+
+// ReadLine reads a line of what is typed, without its line break, from the reader the prompts read from. At the end of
+// what there is to read, it returns io.EOF with whatever was left.
+func ReadLine() (string, error) {
+	line, err := stdin().ReadString('\n')
+	return strings.TrimRight(line, "\r\n"), err
 }

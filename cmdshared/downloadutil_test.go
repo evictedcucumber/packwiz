@@ -73,7 +73,7 @@ func TestAddToZipSuccess(t *testing.T) {
 	exp := zip.NewWriter(&buf)
 
 	dl := core.CompletedDownload{Mod: mod, File: tmpFile}
-	if ok := AddToZip(dl, exp, "overrides", &idx); !ok {
+	if ok := AddToZip(dl, ZipArchive{exp}, "overrides", &idx); !ok {
 		t.Fatal("AddToZip() = false, want true")
 	}
 	if err := exp.Close(); err != nil {
@@ -116,7 +116,7 @@ func TestAddToZipDownloadError(t *testing.T) {
 		Mod:   &core.Mod{Name: "Broken Mod"},
 		Error: errors.New("download failed"),
 	}
-	if ok := AddToZip(dl, exp, "overrides", &idx); ok {
+	if ok := AddToZip(dl, ZipArchive{exp}, "overrides", &idx); ok {
 		t.Error("AddToZip() = true, want false when dl.Error is set")
 	}
 }

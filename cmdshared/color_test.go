@@ -56,7 +56,7 @@ func TestAddToZipSaysWhatWentWrongInRed(t *testing.T) {
 		Error: errors.New("download failed"),
 	}
 
-	_, coloured := cmdtest.AssertColourOnlyAdds(t, func() { AddToZip(dl, exp, "overrides", &idx) })
+	_, coloured := cmdtest.AssertColourOnlyAdds(t, func() { AddToZip(dl, ZipArchive{exp}, "overrides", &idx) })
 
 	if want := ui.Error.Sprint("Download of Broken Mod (broken.jar) failed: download failed") + "\n"; coloured != want {
 		t.Errorf("output = %q, want %q", coloured, want)
@@ -78,7 +78,9 @@ func TestAddToZipSaysNothingWhenItAdds(t *testing.T) {
 	}
 
 	var added bool
-	out := cmdtest.CaptureStdout(t, func() { added = AddToZip(core.CompletedDownload{Mod: mod, File: file}, exp, "overrides", &idx) })
+	out := cmdtest.CaptureStdout(t, func() {
+		added = AddToZip(core.CompletedDownload{Mod: mod, File: file}, ZipArchive{exp}, "overrides", &idx)
+	})
 
 	if !added {
 		t.Error("AddToZip() = false, want true")
