@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -160,6 +161,12 @@ func reuseExistingFile(cacheHandle *CacheIndexHandle, hashesToObtain []string, m
 	// Already stored; try using it!
 	file, err := cacheHandle.Open()
 	if err == nil {
+		// The cache is trusted without rehashing, so a file that was left empty or cut short (an interrupted write,
+		// a cache folder that was tampered with) would be exported as it is; its size is the cheap thing to check
+		if err = checkCachedSize(file, cacheHandle.Hashes); err != nil {
+			_ = file.Close()
+			return CompletedDownload{}, fmt.Errorf("cached file %s is damaged: %w", cacheHandle.Path(), err)
+		}
 		remainingHashes := cacheHandle.GetRemainingHashes(hashesToObtain)
 		var warnings []error
 		if len(remainingHashes) > 0 {
@@ -804,4 +811,19 @@ func CreateDownloadSession(mods []*Mod, hashesToObtain []string) (DownloadSessio
 	}
 
 	return &downloadSession, nil
+}
+
+// checkCachedSize fails if the file is empty, or isn't as long as the hashes say it should be
+func checkCachedSize(file *os.File, hashes map[string]string) error {
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() == 0 {
+		return errors.New("it is empty")
+	}
+	if want, ok := hashes["length-bytes"]; ok && want != strconv.FormatInt(info.Size(), 10) {
+		return fmt.Errorf("it is %d bytes, not %s", info.Size(), want)
+	}
+	return nil
 }
