@@ -25,6 +25,12 @@ type ExportOptions struct {
 	// side it is on, so one instance can run everything. It is a .mrpack, with -dev in its default name. Server and Dev
 	// can't be asked for together.
 	Dev bool
+	// Bisect is whether to export the pack for Bisect Hosting (see exportBisectPack): a server pack with the NeoForge
+	// server installed in it and a jar to start it, which Bisect can run as it is. It can't be asked for with Server or
+	// Dev.
+	Bisect bool
+	// Java is the java to install the server with, for Bisect, if it isn't installed yet: "" for the one on the PATH
+	Java string
 	// RestrictDomains is whether only files that are on the domains Modrinth allows are left for the launcher to download:
 	// any other is stored in the pack itself, which is bigger and is yours to have the right to distribute
 	RestrictDomains bool
@@ -54,6 +60,11 @@ type ExportResult struct {
 	Path string
 	// Server is whether it is the server pack, whose files are all in it, at their paths, rather than a .mrpack
 	Server bool
+	// Bisect is whether it is the pack for Bisect Hosting, which is a server pack (Server is set too) that has the
+	// server installed in it. Files are still the pack's own, not the installed server's.
+	Bisect bool
+	// Instructions, for a Bisect pack, is what to do with it on Bisect Hosting, as a line of plain text
+	Instructions string
 	// Files are what went into it, in the order of their paths
 	Files []ExportFile
 	// Promotions are the mods that are only for the server, that a mod on the client needs: 'packwiz validate' says more
@@ -122,10 +133,17 @@ func Export(options ExportOptions, progress func(done, total int)) (*ExportResul
 	return result, nil
 }
 
-// exportWith writes the server pack of a pack if options say so, and its .mrpack if not.
+// exportWith writes the server pack of a pack if options say so, the pack for Bisect Hosting if they say that, and its
+// .mrpack if not.
 func exportWith(pack core.Pack, index *core.Index, mods []*core.Mod, options ExportOptions, hooks exportHooks) (*ExportResult, error) {
 	if options.Server && options.Dev {
 		return nil, errors.New("a server pack and a dev pack can't be exported together")
+	}
+	if options.Bisect && (options.Server || options.Dev) {
+		return nil, errors.New("a Bisect Hosting pack can't be exported together with a server pack or a dev pack")
+	}
+	if options.Bisect {
+		return exportBisectPack(pack, index, mods, options, hooks)
 	}
 	if options.Server {
 		return exportServerPack(pack, index, mods, options, hooks)

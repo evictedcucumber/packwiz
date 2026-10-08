@@ -912,6 +912,7 @@ func TestTheServerPacksFilesAreNotInTheIndex(t *testing.T) {
 	mustWriteFile(t, filepath.Join(dir, ServerConfigDir, "server.properties"), "motd=hi")
 	mustWriteFile(t, filepath.Join(dir, ServerConfigDir, "config", "config.txt"), "server config")
 	mustWriteFile(t, filepath.Join(dir, "Test-1.0.0"+ServerPackSuffix), "a zip")
+	mustWriteFile(t, filepath.Join(dir, "Test-1.0.0"+BisectPackSuffix), "a zip")
 
 	oldPackFile := viper.GetString("pack-file")
 	viper.Set("pack-file", packFile)

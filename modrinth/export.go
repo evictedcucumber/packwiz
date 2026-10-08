@@ -32,7 +32,16 @@ replaces whatever else would be at its path, so a config file can differ on the 
 so it is never installed on a client. The server pack's MODS.md is ` + core.ServerModListFile + `, the list of the server's
 mods that "packwiz list --save --side server" writes, and its CHANGELOG.md is serverconfig/CHANGELOG.md, the
 changelog of the server that "packwiz changelog --save" and every release write; exporting says if either is missing or
-out of date.`,
+out of date.
+
+With --bisect, export a server pack that Bisect Hosting can run as it is (named after the pack, ending
+"` + core.BisectPackSuffix + `", unless --output says otherwise): the server pack above, with the NeoForge server installed in it
+(its libraries and run scripts) and NeoForge's Server Starter Jar as server.jar, all at the top of the zip. On Bisect,
+install "Custom JAR" on the server, upload the zip and Unarchive it in the server's root folder, and set the Java version
+on the Home tab to the one the pack's Minecraft needs (17 for 1.18 to 1.20.4, 21 for 1.20.5 to 1.21.x, 25 from 26.1);
+exporting says which. The first time, the server is installed by running NeoForge's installer with java (--java says which
+java; it isn't needed again), and it and the jar are kept in packwiz's cache. A file in serverconfig/ replaces an installed
+file of the same path.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.Muted.Println("Loading modpack...")
@@ -81,6 +90,8 @@ out of date.`,
 			RestrictDomains: viper.GetBool("modrinth.export.restrictDomains"),
 			Server:          viper.GetBool("modrinth.export.server"),
 			Dev:             viper.GetBool("modrinth.export.dev"),
+			Bisect:          viper.GetBool("modrinth.export.bisect"),
+			Java:            viper.GetString("modrinth.export.java"),
 		}, exportHooks{disclaimer: cmdshared.PrintDisclaimer, manual: cmdshared.ListManualDownloads})
 		if err != nil {
 			ui.Error.Println(err)
@@ -93,6 +104,11 @@ out of date.`,
 			ui.Warning.Printf("Warning: %s is only exported for the server, but %s needs it on the client; 'packwiz validate' says more\n", ui.Bold.Sprint(p.Mod), ui.Bold.Sprint(p.NeededBy))
 		}
 
+		if result.Bisect {
+			ui.Success.Println("Bisect Hosting server pack exported to " + ui.Bold.Sprint(result.Path))
+			ui.Info.Println(result.Instructions)
+			return
+		}
 		if result.Server {
 			ui.Success.Println("Server pack exported to " + ui.Bold.Sprint(result.Path))
 			return
@@ -132,7 +148,11 @@ func init() {
 	_ = viper.BindPFlag("modrinth.export.restrictDomains", exportCmd.Flags().Lookup("restrictDomains"))
 	_ = viper.BindPFlag("modrinth.export.output", exportCmd.Flags().Lookup("output"))
 	exportCmd.Flags().Bool("dev", false, "Export a .mrpack with every mod on both the client and the server, whatever its side, for development")
-	exportCmd.MarkFlagsMutuallyExclusive("server", "dev")
+	exportCmd.Flags().Bool("bisect", false, "Export a server pack for Bisect Hosting: the server pack with the NeoForge server installed in it and a jar to start it")
+	exportCmd.Flags().String("java", "java", "The java to install the NeoForge server with, for --bisect, the first time")
+	exportCmd.MarkFlagsMutuallyExclusive("server", "dev", "bisect")
+	_ = viper.BindPFlag("modrinth.export.bisect", exportCmd.Flags().Lookup("bisect"))
+	_ = viper.BindPFlag("modrinth.export.java", exportCmd.Flags().Lookup("java"))
 	_ = viper.BindPFlag("modrinth.export.dev", exportCmd.Flags().Lookup("dev"))
 	_ = viper.BindPFlag("modrinth.export.server", exportCmd.Flags().Lookup("server"))
 }

@@ -164,6 +164,10 @@ const ServerModListFile = ServerConfigDir + "/" + ModListFile
 // pack's name. The index leaves such files out (see ignoreDefaults), as it does .mrpack files.
 const ServerPackSuffix = "-server.zip"
 
+// BisectPackSuffix ends the name of the zip that "packwiz modrinth export --bisect" writes unless told another, after the
+// pack's name. The index leaves such files out (see ignoreDefaults), as it does server packs.
+const BisectPackSuffix = "-bisect.zip"
+
 // IgnoreFile is the file in the pack's folder that lists what the index leaves out, in addition to ignoreDefaults. It is
 // itself left out of the index.
 const IgnoreFile = ".packwizignore"
@@ -179,9 +183,10 @@ var ignoreDefaults = []string{
 	// Exclude macOS metadata
 	".DS_Store",
 
-	// Exclude exported Modrinth packs, and server packs
+	// Exclude exported Modrinth packs, and server packs (and those for Bisect Hosting)
 	"*.mrpack",
 	"*" + ServerPackSuffix,
+	"*" + BisectPackSuffix,
 
 	// Exclude the files that are only for the server pack (see ServerConfigDir)
 	ServerConfigDir + "/",

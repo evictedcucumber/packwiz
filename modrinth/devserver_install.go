@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/evictedcucumber/packwiz/core"
-	"github.com/evictedcucumber/packwiz/internal/ui"
+	"github.com/evictedcucumber/packwiz/internal/notice"
 )
 
 // neoForgeMaven is where NeoForge's installers are downloaded from
@@ -57,16 +57,30 @@ const installedMarker = ".packwiz-installed"
 // installLog is where the installer's output goes, in the cached server's folder
 const installLog = "installer.log"
 
+// serverCache is the folder in packwiz's cache that the server of a mod loader is installed in, and whether it has been
+// installed in full yet, which is to say whether cachedServer needs java.
+func serverCache(server loaderServer) (dir string, installed bool, err error) {
+	cache, err := core.GetPackwizCache()
+	if err != nil {
+		return "", false, err
+	}
+	dir = filepath.Join(cache, cacheFolder, server.name)
+	_, statErr := os.Stat(filepath.Join(dir, installedMarker))
+	return dir, statErr == nil, nil
+}
+
+// cacheFolder is the folder in packwiz's cache that servers, and the jar that starts them, are kept in
+const cacheFolder = "dev-server"
+
 // cachedServer is the folder in packwiz's cache that the server of a mod loader is installed in, and so the folder each
 // dev server copies it from. It is installed the first time it is needed, which runs its installer with java, and it is
 // only ever used once its installer has finished.
 func cachedServer(server loaderServer, java string) (string, error) {
-	cache, err := core.GetPackwizCache()
+	dir, installed, err := serverCache(server)
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(cache, "dev-server", server.name)
-	if _, err := os.Stat(filepath.Join(dir, installedMarker)); err == nil {
+	if installed {
 		return dir, nil
 	}
 
@@ -77,7 +91,7 @@ func cachedServer(server loaderServer, java string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	ui.Muted.Printf("Installing the %s server (only the first time)...\n", server.name)
+	notice.Mutedf("Installing the %s server (only the first time)...", server.name)
 	installer := filepath.Join(dir, "installer.jar")
 	if err := download(server.installer, installer); err != nil {
 		return "", fmt.Errorf("failed to download the installer of %s: %w", server.name, err)

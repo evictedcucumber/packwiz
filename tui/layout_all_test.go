@@ -50,6 +50,7 @@ func newFullApp(t *testing.T, width, height int) *app {
 	export.result.Files[0].Name = "A mod with a long name that goes past the edge of the terminal"
 	export.result.Promotions[0].Mod = longText
 	export.result.Notices = []string{longText}
+	export.instructions = longText
 
 	release := newFakeRelease()
 	release.data.pending = append(release.data.pending, longText, longText)
@@ -140,6 +141,9 @@ var screenStates = map[string]map[string][]string{
 		"before exporting":      nil,
 		"a file being chosen":   {"o", "a", "b"},
 		"the server pack":       {"s"},
+		"the Bisect pack":       {"b"},
+		"the Bisect result":     {"b", "enter"},
+		"the Bisect result end": {"b", "enter", "G"},
 		"a question":            {"d", "enter"},
 		"what was exported":     {"enter"},
 		"the end of the report": {"enter", "G"},

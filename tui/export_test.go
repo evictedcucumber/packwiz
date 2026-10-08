@@ -21,23 +21,33 @@ type fakeExport struct {
 	nameErr error
 	result  *modrinth.ExportResult
 	err     error
+	// instructions are what a Bisect export says to do with the pack
+	instructions string
 	// exported are the options it was asked to export with
 	exported []modrinth.ExportOptions
 }
 
-func (f *fakeExport) defaultExportName() (string, string, error) {
-	return f.name, strings.TrimSuffix(f.name, ".mrpack") + "-server.zip", f.nameErr
+func (f *fakeExport) defaultExportName() (exportNames, error) {
+	base := strings.TrimSuffix(f.name, ".mrpack")
+	return exportNames{f.name, base + "-server.zip", base + "-bisect.zip"}, f.nameErr
 }
 
 func (f *fakeExport) exportPack(options modrinth.ExportOptions, progress func(done, total int)) (*modrinth.ExportResult, error) {
 	f.exported = append(f.exported, options)
 	progress(1, 1)
+	if options.Bisect && f.result != nil {
+		// A Bisect export is a server pack that says what to do with it
+		r := *f.result
+		r.Server, r.Bisect, r.Instructions = true, true, f.instructions
+		return &r, f.err
+	}
 	return f.result, f.err
 }
 
 func newFakeExport() *fakeExport {
 	return &fakeExport{
-		name: "Test Pack-1.2.0.mrpack",
+		name:         "Test Pack-1.2.0.mrpack",
+		instructions: "Upload Test Pack-1.2.0-bisect.zip to your Bisect Hosting server and set its start command to java -jar server.jar",
 		result: &modrinth.ExportResult{
 			Path: "Test Pack-1.2.0.mrpack",
 			Files: []modrinth.ExportFile{
@@ -133,6 +143,52 @@ func TestExportExportsTheServerPackWhenItIsChosen(t *testing.T) {
 	press(t, s, "s")
 	if out := s.view(); !strings.Contains(out, "Test Pack-1.2.0.mrpack") || !strings.Contains(out, "(•) .mrpack") {
 		t.Errorf("s didn't go back to the .mrpack:\n%s", out)
+	}
+}
+
+func TestExportExportsTheBisectPackWhenItIsChosen(t *testing.T) {
+	f := newFakeExport()
+	s := exportOn(t, f)
+	press(t, s, "b")
+	out := strings.Join(body(t, s), "\n")
+	for _, want := range []string{"Test Pack-1.2.0-bisect.zip", "(•) Bisect Hosting", "every file is in the server pack"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the screen doesn't say %q:\n%s", want, out)
+		}
+	}
+	press(t, s, "enter")
+
+	if len(f.exported) != 1 || f.exported[0] != (modrinth.ExportOptions{RestrictDomains: true, Bisect: true}) {
+		t.Fatalf("the pack was exported with %+v, want the Bisect pack and not the server pack", f.exported)
+	}
+	out = strings.Join(body(t, s), "\n")
+	if !strings.Contains(out, "Upload Test Pack-1.2.0-bisect.zip to your Bisect Hosting server") {
+		t.Errorf("the screen doesn't give the instructions:\n%s", out)
+	}
+}
+
+func TestExportDefaultFileFollowsTheMode(t *testing.T) {
+	s := exportOn(t, newFakeExport())
+	for _, step := range []struct{ key, want string }{
+		{"s", "Test Pack-1.2.0-server.zip"},
+		{"b", "Test Pack-1.2.0-bisect.zip"},
+		{"s", "Test Pack-1.2.0-server.zip"},
+		{"s", "Test Pack-1.2.0.mrpack"},
+		{"b", "Test Pack-1.2.0-bisect.zip"},
+		{"b", "Test Pack-1.2.0.mrpack"},
+	} {
+		press(t, s, step.key)
+		if got := s.file(); got != step.want {
+			t.Fatalf("after %s the file is %q, want %q", step.key, got, step.want)
+		}
+	}
+}
+
+func TestExportDoesNotShowInstructionsForOtherPacks(t *testing.T) {
+	s := exportOn(t, newFakeExport())
+	press(t, s, "s", "enter")
+	if out := strings.Join(body(t, s), "\n"); strings.Contains(out, "Bisect Hosting server") {
+		t.Errorf("the screen gives Bisect instructions for the server pack:\n%s", out)
 	}
 }
 

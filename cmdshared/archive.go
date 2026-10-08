@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -20,6 +21,18 @@ type ZipArchive struct {
 
 func (z ZipArchive) Add(name string, content io.Reader) error {
 	file, err := z.Create(name)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(file, content)
+	return err
+}
+
+// AddMode is Add with the file's permissions given, such as 0o755 for a script that is to be run once it is unzipped.
+func (z ZipArchive) AddMode(name string, content io.Reader, mode fs.FileMode) error {
+	header := &zip.FileHeader{Name: name, Method: zip.Deflate}
+	header.SetMode(mode)
+	file, err := z.CreateHeader(header)
 	if err != nil {
 		return err
 	}

@@ -92,6 +92,10 @@ func runDevServer(java string, keep, acceptEULA bool) (err error) {
 	if java, err = exec.LookPath(java); err != nil {
 		return fmt.Errorf("java is needed to run the server: %w", err)
 	}
+	// The installer is run in the cache and the server in a folder of its own, so a relative path would be looked for there
+	if java, err = filepath.Abs(java); err != nil {
+		return err
+	}
 	install, err := cachedServer(server, java)
 	if err != nil {
 		return err

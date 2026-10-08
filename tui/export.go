@@ -20,14 +20,24 @@ var (
 	keyExportFile   = key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "choose the file"))
 	keyExportDomain = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "allowed domains only"))
 	keyExportServer = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "server pack"))
+	keyExportBisect = key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "Bisect Hosting pack"))
 )
 
-var exportKeys = []key.Binding{keyExport, keyExportFile, keyExportServer, keyExportDomain, keyUp, keyTop}
+var exportKeys = []key.Binding{keyExport, keyExportFile, keyExportServer, keyExportBisect, keyExportDomain, keyUp, keyTop}
+
+// exportMode is what the pack is exported as.
+type exportMode int
+
+const (
+	modeMrpack exportMode = iota
+	modeServer
+	modeBisect
+)
 
 // exportInfoMsg is what the pack, and its server pack, would be exported to.
 type exportInfoMsg struct {
-	name, serverName string
-	err              error
+	names exportNames
+	err   error
 }
 
 // exportedMsg is the pack having been exported, or having failed to be.
@@ -41,14 +51,14 @@ type exportScreen struct {
 	page
 	backend exportBackend
 
-	// defaultName is the file the pack goes to unless told another, serverName the file its server pack goes to, and
-	// output is the file that was asked for, if one was
-	defaultName, serverName string
-	output                  string
+	// names are the files each kind of export goes to unless told another, and output is the file that was asked for, if
+	// one was
+	names  exportNames
+	output string
 	// restrict is whether files that aren't on the domains Modrinth allows are stored in the pack itself, as it is by default
 	restrict bool
-	// server is whether it is the server pack that is exported, rather than the .mrpack
-	server bool
+	// mode is whether it is the .mrpack, the server pack or the Bisect Hosting pack that is exported
+	mode exportMode
 
 	result *modrinth.ExportResult
 	doc    report
@@ -71,8 +81,8 @@ func (s *exportScreen) about() string {
 func (s *exportScreen) activate() tea.Cmd {
 	backend := s.backend
 	return exclusive(func() tea.Msg {
-		name, serverName, err := backend.defaultExportName()
-		return exportInfoMsg{name, serverName, err}
+		names, err := backend.defaultExportName()
+		return exportInfoMsg{names, err}
 	})
 }
 
@@ -93,10 +103,13 @@ func (s *exportScreen) file() string {
 
 // defaultFile is where the pack is exported to unless told another: the .mrpack or the server pack, whichever it is.
 func (s *exportScreen) defaultFile() string {
-	if s.server {
-		return s.serverName
+	switch s.mode {
+	case modeServer:
+		return s.names.server
+	case modeBisect:
+		return s.names.bisect
 	}
-	return s.defaultName
+	return s.names.mrpack
 }
 
 func (s *exportScreen) update(msg tea.Msg) (screen, tea.Cmd) {
@@ -112,7 +125,7 @@ func (s *exportScreen) update(msg tea.Msg) (screen, tea.Cmd) {
 			s.status = errorStatus(msg.err)
 			return s, nil
 		}
-		s.defaultName, s.serverName = msg.name, msg.serverName
+		s.names = msg.names
 	case exportedMsg:
 		s.exported(msg)
 	case tea.KeyPressMsg:
@@ -135,18 +148,15 @@ func (s *exportScreen) updateKey(msg tea.KeyPressMsg) (screen, tea.Cmd) {
 	}
 	switch {
 	case key.Matches(msg, keyExportDomain):
-		if s.server {
+		if s.mode != modeMrpack {
 			s.status = infoStatus("Every file is in the server pack, wherever it comes from")
 			return s, nil
 		}
 		s.restrict = !s.restrict
 	case key.Matches(msg, keyExportServer):
-		s.server = !s.server
-		if s.server {
-			s.status = infoStatus("Exporting the server pack")
-		} else {
-			s.status = infoStatus("Exporting the .mrpack")
-		}
+		s.chooseMode(modeServer)
+	case key.Matches(msg, keyExportBisect):
+		s.chooseMode(modeBisect)
 	case key.Matches(msg, keyExportFile):
 		s.choosing = true
 		s.open(newPromptBox("Export to which file?", s.output, nil,
@@ -155,6 +165,22 @@ func (s *exportScreen) updateKey(msg tea.KeyPressMsg) (screen, tea.Cmd) {
 		return s.askOrExport()
 	}
 	return s, nil
+}
+
+// chooseMode exports as mode, or as the .mrpack if that is what it already was.
+func (s *exportScreen) chooseMode(mode exportMode) {
+	if s.mode == mode {
+		mode = modeMrpack
+	}
+	s.mode = mode
+	switch mode {
+	case modeServer:
+		s.status = infoStatus("Exporting the server pack")
+	case modeBisect:
+		s.status = infoStatus("Exporting the Bisect Hosting pack")
+	default:
+		s.status = infoStatus("Exporting the .mrpack")
+	}
 }
 
 // askOrExport exports the pack, after asking if that would overwrite a file that is there.
@@ -166,7 +192,7 @@ func (s *exportScreen) askOrExport() (screen, tea.Cmd) {
 		s.status = warningStatus("The name of the file isn't known yet")
 		return s, nil
 	}
-	options := modrinth.ExportOptions{Output: s.output, RestrictDomains: s.restrict, Server: s.server}
+	options := modrinth.ExportOptions{Output: s.output, RestrictDomains: s.restrict, Server: s.mode == modeServer, Bisect: s.mode == modeBisect}
 	if _, err := os.Stat(s.file()); err == nil {
 		s.pending = &options
 		s.open(newConfirmBox("Overwrite "+s.file()+"?", ui.Muted.Sprint("It is there already, and exporting replaces it.")))
@@ -247,14 +273,30 @@ func exportReport(r *modrinth.ExportResult) func(width int) []string {
 func (s *exportScreen) settingsHeight() int { return 5 }
 
 func (s *exportScreen) view() string {
-	kind := "( ) server pack  (•) .mrpack  " + ui.Muted.Sprint("for a launcher to install from Modrinth")
-	domains := "[x] " + ui.Muted.Sprint("only files on the domains Modrinth allows are left for the launcher to download; the rest are stored in the pack")
-	if !s.restrict {
-		domains = "[ ] " + ui.Muted.Sprint("every file is left for the launcher to download, wherever it comes from")
+	radio := func(mode exportMode, label string) string {
+		if s.mode == mode {
+			return "(•) " + label
+		}
+		return "( ) " + label
 	}
-	if s.server {
-		kind = "(•) server pack  ( ) .mrpack  " + ui.Muted.Sprint("a zip of the server's mods and files, with "+core.ServerConfigDir+"/")
+	kind := radio(modeMrpack, ".mrpack") + "  " + radio(modeServer, "server pack") + "  " + radio(modeBisect, "Bisect Hosting") + "  "
+	var domains, summary string
+	switch s.mode {
+	case modeServer:
+		kind += ui.Muted.Sprint("a zip of the server's mods and files, with " + core.ServerConfigDir + "/")
 		domains = ui.Muted.Sprint("every file is in the server pack")
+		summary = " · a pack for a server"
+	case modeBisect:
+		kind += ui.Muted.Sprint("a server pack with the server installed, for Bisect Hosting to run")
+		domains = ui.Muted.Sprint("every file is in the server pack")
+		summary = " · a pack for Bisect Hosting"
+	default:
+		kind += ui.Muted.Sprint("for a launcher to install from Modrinth")
+		domains = "[x] " + ui.Muted.Sprint("only files on the domains Modrinth allows are left for the launcher to download; the rest are stored in the pack")
+		if !s.restrict {
+			domains = "[ ] " + ui.Muted.Sprint("every file is left for the launcher to download, wherever it comes from")
+		}
+		summary = " · a pack for Modrinth"
 	}
 	lines := []string{
 		field("File", s.file()),
@@ -266,13 +308,15 @@ func (s *exportScreen) view() string {
 	switch {
 	case s.result != nil:
 		lines = append(lines, ui.Success.Sprint("Exported to "+s.result.Path))
-		lines = append(lines, s.doc.window(s.width, room)...)
+		if s.result.Bisect && s.result.Instructions != "" {
+			for _, line := range wrap(s.result.Instructions, s.width, "  ") {
+				lines = append(lines, ui.Info.Sprint(line))
+				room--
+			}
+		}
+		lines = append(lines, s.doc.window(s.width, max(room, 0))...)
 	default:
 		lines = append(lines, messageBody("Press enter to export the pack.")...)
-	}
-	summary := " · a pack for Modrinth"
-	if s.server {
-		summary = " · a pack for a server"
 	}
 	return s.render(ui.Bold.Sprint("Export")+ui.Muted.Sprint(summary), lines, "")
 }
